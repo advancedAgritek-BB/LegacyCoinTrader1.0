@@ -14,6 +14,7 @@ def _optional_import(name: str):
         return None
 
 
+# Core strategies
 bounce_scalper = _optional_import("bounce_scalper")
 dca_bot = _optional_import("dca_bot")
 breakout_bot = _optional_import("breakout_bot")
@@ -24,6 +25,18 @@ micro_scalp_bot = _optional_import("micro_scalp_bot")
 sniper_bot = _optional_import("sniper_bot")
 trend_bot = _optional_import("trend_bot")
 
+# New strategies from strategy copy folder
+cross_chain_arb_bot = _optional_import("cross_chain_arb_bot")
+dip_hunter = _optional_import("dip_hunter")
+flash_crash_bot = _optional_import("flash_crash_bot")
+hft_engine = _optional_import("hft_engine")
+lstm_bot = _optional_import("lstm_bot")
+maker_spread = _optional_import("maker_spread")
+momentum_bot = _optional_import("momentum_bot")
+range_arb_bot = _optional_import("range_arb_bot")
+stat_arb_bot = _optional_import("stat_arb_bot")
+meme_wave_bot = _optional_import("meme_wave_bot")
+
 # Export Solana sniper strategy module under a unified name
 sniper_solana = importlib.import_module("crypto_bot.strategies.sniper_solana")
 solana_scalping = importlib.import_module("crypto_bot.solana.scalping")
@@ -31,6 +44,7 @@ solana_scalping = importlib.import_module("crypto_bot.solana.scalping")
 __all__ = [
     name
     for name in [
+        # Core strategies
         "bounce_scalper",
         "breakout_bot",
         "dex_scalper",
@@ -42,6 +56,17 @@ __all__ = [
         "trend_bot",
         "sniper_solana",
         "solana_scalping",
+        # New strategies
+        "cross_chain_arb_bot",
+        "dip_hunter",
+        "flash_crash_bot",
+        "hft_engine",
+        "lstm_bot",
+        "maker_spread",
+        "momentum_bot",
+        "range_arb_bot",
+        "stat_arb_bot",
+        "meme_wave_bot",
     ]
     if globals().get(name) is not None
 ]

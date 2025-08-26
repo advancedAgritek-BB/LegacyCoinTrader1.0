@@ -330,15 +330,24 @@ strategy_router:
     - breakout_bot
     mean-reverting:
     - mean_bot
+    - dip_hunter
+    - stat_arb_bot
     scalp:
     - micro_scalp
     sideways:
     - grid
+    - maker_spread
+    - range_arb_bot
     trending:
     - trend
+    - momentum_bot
+    - lstm_bot
     volatile:
     - sniper_bot
     - sniper_solana
+    - flash_crash_bot
+    - meme_wave_bot
+    - hft_engine
   scalp_timeframe: 1m
   sideways_timeframe: 1h
   trending_timeframe: 1h
@@ -411,3 +420,82 @@ voting_strategies:
 wallet_address: your_wallet
 ws_failures_before_disable: 3
 ws_ping_interval: 10
+
+# New strategy configurations
+cross_chain_arb_bot:
+  spread_threshold: 0.02
+  pair: ""
+  atr_normalization: true
+
+dip_hunter:
+  rsi_window: 14
+  rsi_oversold: 30.0
+  dip_pct: 0.03
+  dip_bars: 3
+  vol_window: 20
+  vol_mult: 1.5
+  adx_window: 14
+  adx_threshold: 25.0
+  bb_window: 20
+  ema_trend: 200
+  ml_weight: 0.5
+  atr_normalization: true
+  ema_slow: 20
+  cooldown_enabled: false
+
+flash_crash_bot:
+  drop_pct: 0.1
+  volume_mult: 5.0
+  vol_window: 20
+  ema_window: 200
+  atr_normalization: true
+
+lstm_bot:
+  sequence_length: 50
+  threshold_pct: 0.0
+
+momentum_bot:
+  donchian_window: 20
+  volume_window: 20
+  volume_z_min: 0.5
+  rsi_threshold: 55
+  macd_min: 0.0
+  fast_length: 12
+  slow_length: 26
+  atr_normalization: true
+
+range_arb_bot:
+  atr_window: 14
+  kr_window: 20
+  z_threshold: 1.5
+  vol_z_threshold: 1.0
+  volume_mult: 1.5
+  atr_normalization: true
+
+stat_arb_bot:
+  zscore_threshold: 2.0
+  lookback: 20
+  atr_normalization: true
+
+meme_wave_bot:
+  volume_threshold: 1.0
+  sentiment_threshold: 0.0
+  twitter_query: ""
+  atr_window: 14
+  volume_window: 20
+  jump_mult: 3.0
+  volume_mult: 3.0
+  vol_spike_thr: null
+
+maker_spread:
+  size_usd: 1000.0
+  tick_size: 0.01
+  max_spread_bp: 10.0
+  edge_margin_bp: 0.0
+  queue_timeout_ms: 5000
+  max_live_quotes: 2
+
+hft_engine:
+  telemetry:
+    batch_summary_secs: 60
+  dry_run: true

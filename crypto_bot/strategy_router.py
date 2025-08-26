@@ -26,6 +26,7 @@ from crypto_bot.utils.cache_helpers import cache_by_id
 from crypto_bot.selector import bandit
 
 from crypto_bot.strategy import (
+    # Core strategies
     trend_bot,
     grid_bot,
     sniper_bot,
@@ -35,6 +36,17 @@ from crypto_bot.strategy import (
     breakout_bot,
     micro_scalp_bot,
     bounce_scalper,
+    # New strategies
+    cross_chain_arb_bot,
+    dip_hunter,
+    flash_crash_bot,
+    hft_engine,
+    lstm_bot,
+    maker_spread,
+    momentum_bot,
+    range_arb_bot,
+    stat_arb_bot,
+    meme_wave_bot,
 )
 
 logger = setup_logger(__name__, LOG_DIR / "bot.log")
