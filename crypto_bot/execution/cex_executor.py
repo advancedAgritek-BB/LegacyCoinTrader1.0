@@ -37,7 +37,15 @@ def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
     compatibility when WebSocket trading is desired without ccxt.pro.
     """
 
-    exchange_name = config.get("exchange", "coinbase")
+    supported_exchanges = ("coinbase", "kraken")
+
+    exchange_cfg = config.get("exchange", "coinbase")
+    if isinstance(exchange_cfg, dict):
+        exchange_name = exchange_cfg.get("name") or exchange_cfg.get("id") or ""
+    else:
+        exchange_name = str(exchange_cfg)
+    exchange_name = exchange_name.lower()
+
     use_ws = config.get("use_websocket", False)
 
     ws_client: Optional[KrakenWSClient] = None
@@ -76,7 +84,11 @@ def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
             }
         )
     else:
-        raise ValueError(f"Unsupported exchange: {exchange_name}")
+        raise ValueError(
+            "Unsupported exchange: {}. Supported exchanges: {}".format(
+                exchange_name or "unknown", ", ".join(supported_exchanges)
+            )
+        )
 
     exchange.options["ws_scan"] = config.get("use_websocket", False)
 

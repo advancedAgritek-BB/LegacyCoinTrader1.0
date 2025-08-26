@@ -241,6 +241,18 @@ def test_get_exchange_websocket_missing_creds(monkeypatch):
     assert ws is None
 
 
+def test_get_exchange_reports_supported(monkeypatch):
+    config = {"exchange": {"name": "foo"}}
+
+    with pytest.raises(ValueError) as exc:
+        cex_executor.get_exchange(config)
+
+    msg = str(exc.value)
+    assert "Unsupported exchange: foo" in msg
+    assert "coinbase" in msg and "kraken" in msg
+    assert "{" not in msg
+
+
 class SlippageExchange:
     def fetch_ticker(self, symbol):
         return {"bid": 100, "ask": 110}
