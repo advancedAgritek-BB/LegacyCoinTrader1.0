@@ -851,13 +851,25 @@ async def execute_signals(ctx: BotContext) -> None:
 
         probs = candidate.get("probabilities", {})
         reg_prob = float(probs.get(candidate.get("regime"), 0.0))
-        size = ctx.risk_manager.position_size(
+        
+        # Get LunarCrush sentiment boost if available
+        sentiment_boost = 1.0
+        try:
+            from crypto_bot.sentiment_filter import get_lunarcrush_sentiment_boost
+            sentiment_boost = await get_lunarcrush_sentiment_boost(sym, candidate["direction"])
+        except Exception as exc:
+            logger.debug(f"Failed to get sentiment boost for {sym}: {exc}")
+        
+        base_size = ctx.risk_manager.position_size(
             reg_prob,
             ctx.balance,
             df,
             atr=candidate.get("atr"),
             price=price,
         )
+        
+        # Apply sentiment boost
+        size = base_size * sentiment_boost
         if size <= 0:
             logger.info("Calculated size %.4f for %s - skipping", size, sym)
             continue
@@ -949,6 +961,7 @@ async def execute_signals(ctx: BotContext) -> None:
             "size": amount,
             "trailing_stop": 0.0,
             "highest_price": price,
+            "lowest_price": price,  # Track lowest price for short positions
         }
         try:
             log_position(
@@ -984,18 +997,23 @@ async def handle_exits(ctx: BotContext) -> None:
             1 if pos["side"] == "buy" else -1
         )
         if pnl_pct >= ctx.config.get("exit_strategy", {}).get("min_gain_to_trail", 0):
-            if current_price > pos.get("highest_price", pos["entry_price"]):
-                pos["highest_price"] = current_price
-            pos["trailing_stop"] = calculate_trailing_stop(
-                pd.Series([pos.get("highest_price", current_price)]),
-                ctx.config.get("exit_strategy", {}).get("trailing_stop_pct", 0.1),
-            )
+            if pos["side"] == "buy":  # Long position
+                if current_price > pos.get("highest_price", pos["entry_price"]):
+                    pos["highest_price"] = current_price
+                # Calculate trailing stop from the actual highest price since entry
+                pos["trailing_stop"] = pos["highest_price"] * (1 - ctx.config.get("exit_strategy", {}).get("trailing_stop_pct", 0.02))
+            else:  # Short position
+                if current_price < pos.get("lowest_price", pos["entry_price"]):
+                    pos["lowest_price"] = current_price
+                # Calculate trailing stop from the actual lowest price since entry
+                pos["trailing_stop"] = pos["lowest_price"] * (1 + ctx.config.get("exit_strategy", {}).get("trailing_stop_pct", 0.02))
         exit_signal, new_stop = should_exit(
             df,
             current_price,
             pos.get("trailing_stop", 0.0),
             ctx.config,
             ctx.risk_manager,
+            pos["side"],  # Pass position side
         )
         pos["trailing_stop"] = new_stop
         if exit_signal:
