@@ -1014,6 +1014,7 @@ async def handle_exits(ctx: BotContext) -> None:
             ctx.config,
             ctx.risk_manager,
             pos["side"],  # Pass position side
+            pos["entry_price"],  # Pass entry price for take profit
         )
         pos["trailing_stop"] = new_stop
         if exit_signal:
