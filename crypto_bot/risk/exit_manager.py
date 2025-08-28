@@ -108,6 +108,8 @@ def should_exit(
     trailing_stop: float,
     config: dict,
     risk_manager=None,
+    position_side: str = "buy",  # Add position side parameter
+    entry_price: float = None,  # Add entry price for take profit calculations
 ) -> Tuple[bool, float]:
     """Determine whether to exit a position and update trailing stop.
 
@@ -121,6 +123,12 @@ def should_exit(
         Current trailing stop value.
     config : dict
         Strategy configuration.
+    risk_manager : object, optional
+        Risk manager instance for stop order handling.
+    position_side : str
+        Position side: "buy" for long, "sell" for short.
+    entry_price : float, optional
+        Entry price for take profit calculations.
 
     Returns
     -------
@@ -129,12 +137,47 @@ def should_exit(
     """
     exit_signal = False
     new_stop = trailing_stop
-    if current_price < trailing_stop:
-        if not momentum_healthy(df):
+    
+    # Check take profit first (if configured)
+    if entry_price is not None:
+        exit_cfg = config.get('exit_strategy', {})
+        take_profit_pct = exit_cfg.get('take_profit_pct', 0.0)
+        
+        if take_profit_pct > 0:
+            if position_side == "buy":  # Long position
+                take_profit_price = entry_price * (1 + take_profit_pct)
+                if current_price >= take_profit_price:
+                    logger.info(
+                        "Take profit hit at %.4f (target: %.4f) for long position",
+                        current_price,
+                        take_profit_price,
+                    )
+                    return True, new_stop
+            else:  # Short position
+                take_profit_price = entry_price * (1 - take_profit_pct)
+                if current_price <= take_profit_price:
+                    logger.info(
+                        "Take profit hit at %.4f (target: %.4f) for short position",
+                        current_price,
+                        take_profit_price,
+                    )
+                    return True, new_stop
+    
+    # Check if price hit trailing stop based on position side
+    if position_side == "buy":  # Long position
+        stop_hit = current_price < trailing_stop
+    else:  # Short position
+        stop_hit = current_price > trailing_stop
+    
+    if stop_hit and trailing_stop > 0:
+        # Make momentum check less restrictive - only block exit if momentum is very strong
+        momentum_strength = _assess_momentum_strength(df)
+        if momentum_strength < 0.7:  # Allow exit unless momentum is very strong
             logger.info(
-                "Price %.4f hit trailing stop %.4f",
+                "Price %.4f hit trailing stop %.4f for %s position",
                 current_price,
                 trailing_stop,
+                "long" if position_side == "buy" else "short",
             )
             exit_signal = True
             if risk_manager and getattr(risk_manager, "stop_order", None):
@@ -163,18 +206,36 @@ def should_exit(
         if trailing_stop > 0:
             exit_cfg = config.get('exit_strategy', {})
             if 'trailing_stop_factor' in exit_cfg:
-                trailed = calculate_atr_trailing_stop(
-                    df,
-                    exit_cfg['trailing_stop_factor'],
-                )
+                if position_side == "buy":
+                    trailed = calculate_atr_trailing_stop(
+                        df,
+                        exit_cfg['trailing_stop_factor'],
+                    )
+                else:  # Short position
+                    trailed = calculate_atr_trailing_stop_short(
+                        df,
+                        exit_cfg['trailing_stop_factor'],
+                    )
             else:
-                trailed = calculate_trailing_stop(
-                    df['close'],
-                    exit_cfg['trailing_stop_pct'],
-                )
-            if trailed > trailing_stop:
+                if position_side == "buy":
+                    trailed = calculate_trailing_stop(
+                        df['close'],
+                        exit_cfg['trailing_stop_pct'],
+                    )
+                else:  # Short position
+                    trailed = calculate_trailing_stop_short(
+                        df['close'],
+                        exit_cfg['trailing_stop_pct'],
+                    )
+            
+            # Update stop only if it's better (higher for long, lower for short)
+            if position_side == "buy" and trailed > trailing_stop:
                 new_stop = trailed
                 logger.info("Trailing stop moved to %.4f", new_stop)
+            elif position_side == "sell" and trailed < trailing_stop:
+                new_stop = trailed
+                logger.info("Trailing stop moved to %.4f", new_stop)
+    
     return exit_signal, new_stop
 
 
