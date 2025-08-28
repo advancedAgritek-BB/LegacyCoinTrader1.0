@@ -8,8 +8,8 @@ from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils import stats
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
-from crypto_bot.cooldown_manager import cooldown, in_cooldown
-from crypto_bot.utils.ml_utils import init_ml_or_warn
+from crypto_bot.cooldown_manager import in_cooldown, mark_cooldown
+from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 
 NAME = "dip_hunter"
 logger = setup_logger(__name__, LOG_DIR / "bot.log")
@@ -20,7 +20,6 @@ score_logger = setup_logger(
 
 ML_AVAILABLE = init_ml_or_warn()
 if ML_AVAILABLE:
-    from coinTrader_Trainer.ml_trainer import load_model
     MODEL = load_model("dip_hunter")
 else:  # pragma: no cover - fallback
     MODEL = None
@@ -120,63 +119,62 @@ def generate_signal(
     dip_size = recent_returns.sum()
     is_dip = dip_size <= -dip_pct
 
-    with cooldown(symbol, "buy") as cd:
-        if cooldown_enabled and symbol and not cd.allowed:
-            score_logger.info(
-                "Signal for %s:%s -> %.3f, %s",
-                symbol or "unknown",
-                timeframe or "N/A",
-                0.0,
-                "none",
-            )
-            return 0.0, "none"
-
-        oversold = latest["rsi"] < rsi_oversold and latest["bb_pct"] < 0
-        vol_spike = (
-            latest["volume"] > latest["vol_ma"] * vol_mult if latest["vol_ma"] > 0 else False
+    if cooldown_enabled and symbol and in_cooldown(symbol, "buy"):
+        score_logger.info(
+            "Signal for %s:%s -> %.3f, %s",
+            symbol or "unknown",
+            timeframe or "N/A",
+            0.0,
+            "none",
         )
+        return 0.0, "none"
 
-        range_bound = latest["adx"] < adx_threshold
-        if higher_df is not None and not higher_df.empty:
-            h_lookback = max(ema_trend, 1)
-            h_recent = higher_df.iloc[-(h_lookback + 1) :]
-            ema_h = ta.trend.ema_indicator(h_recent["close"], window=ema_trend)
-            ema_h = cache_series("ema_trend_h", higher_df, ema_h, h_lookback)
-            in_trend = higher_df["close"].iloc[-1] > ema_h.iloc[-1]
-        else:
-            # Default to a neutral stance when higher timeframe data is unavailable
-            in_trend = True
+    oversold = latest["rsi"] < rsi_oversold and latest["bb_pct"] < 0
+    vol_spike = (
+        latest["volume"] > latest["vol_ma"] * vol_mult if latest["vol_ma"] > 0 else False
+    )
 
-        favorable_regime = range_bound or in_trend
+    range_bound = latest["adx"] < adx_threshold
+    if higher_df is not None and not higher_df.empty:
+        h_lookback = max(ema_trend, 1)
+        h_recent = higher_df.iloc[-(h_lookback + 1) :]
+        ema_h = ta.trend.ema_indicator(h_recent["close"], window=ema_trend)
+        ema_h = cache_series("ema_trend_h", higher_df, ema_h, h_lookback)
+        in_trend = higher_df["close"].iloc[-1] > ema_h.iloc[-1]
+    else:
+        # Default to a neutral stance when higher timeframe data is unavailable
+        in_trend = True
 
-        if is_dip and oversold and vol_spike and favorable_regime:
-            dip_score = min(abs(dip_size) / dip_pct, 1.0)
-            oversold_score = min((rsi_oversold - latest["rsi"]) / rsi_oversold, 1.0)
-            vol_z = stats.zscore(recent["volume"], vol_window).iloc[-1]
-            vol_score = min(max(vol_z / 2, 0), 1.0)
-            score = dip_score * 0.4 + oversold_score * 0.3 + vol_score * 0.3
+    favorable_regime = range_bound or in_trend
 
-            if MODEL:
-                try:  # pragma: no cover - best effort
-                    ml_score = MODEL.predict(df)
-                    score = score * (1 - ml_weight) + ml_score * ml_weight
-                except Exception:
-                    pass
+    if is_dip and oversold and vol_spike and favorable_regime:
+        dip_score = min(abs(dip_size) / dip_pct, 1.0)
+        oversold_score = min((rsi_oversold - latest["rsi"]) / rsi_oversold, 1.0)
+        vol_z = stats.zscore(recent["volume"], vol_window).iloc[-1]
+        vol_score = min(max(vol_z / 2, 0), 1.0)
+        score = dip_score * 0.4 + oversold_score * 0.3 + vol_score * 0.3
 
-            if atr_normalization:
-                score = normalize_score_by_volatility(df, score)
+        if MODEL:
+            try:  # pragma: no cover - best effort
+                ml_score = MODEL.predict(df)
+                score = score * (1 - ml_weight) + ml_score * ml_weight
+            except Exception:
+                pass
 
-            score = max(0.0, min(score, 1.0))
-            score_logger.info(
-                "Signal for %s:%s -> %.3f, %s",
-                symbol or "unknown",
-                timeframe or "N/A",
-                score,
-                "long",
-            )
-            if cooldown_enabled and symbol:
-                cd.mark()
-            return score, "long"
+        if atr_normalization:
+            score = normalize_score_by_volatility(df, score)
+
+        score = max(0.0, min(score, 1.0))
+        score_logger.info(
+            "Signal for %s:%s -> %.3f, %s",
+            symbol or "unknown",
+            timeframe or "N/A",
+            score,
+            "long",
+        )
+        if cooldown_enabled and symbol:
+            mark_cooldown(symbol, "buy")
+        return score, "long"
 
     return 0.0, "none"
 

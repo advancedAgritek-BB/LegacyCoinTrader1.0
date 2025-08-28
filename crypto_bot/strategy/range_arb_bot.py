@@ -16,14 +16,13 @@ from scipy.optimize import fmin_l_bfgs_b
 from crypto_bot.utils.stats import last_window_zscore
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.volatility import normalize_score_by_volatility
-from crypto_bot.utils.ml_utils import init_ml_or_warn
+from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 
 logger = logging.getLogger(__name__)
 
 ML_AVAILABLE = init_ml_or_warn()
 NAME = "range_arb_bot"
 if ML_AVAILABLE:
-    from coinTrader_Trainer.ml_trainer import load_model
     MODEL = load_model("range_arb_bot")
 else:  # pragma: no cover - fallback
     MODEL = None

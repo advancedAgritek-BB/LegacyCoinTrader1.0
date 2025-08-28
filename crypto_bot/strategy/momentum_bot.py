@@ -5,7 +5,7 @@ import pandas as pd
 import ta
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.volatility import normalize_score_by_volatility
-from crypto_bot.utils.ml_utils import init_ml_or_warn
+from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,6 @@ NAME = "momentum_bot"
 ML_AVAILABLE = init_ml_or_warn()
 MODEL: Optional[object]
 if ML_AVAILABLE:
-    from coinTrader_Trainer.ml_trainer import load_model
     MODEL = load_model("momentum_bot")
 else:  # pragma: no cover - fallback
     MODEL = None

@@ -35,29 +35,6 @@ def calculate_trailing_stop(
     return stop
 
 
-def calculate_trailing_stop_short(
-    price_series: pd.Series, trail_pct: float = 0.1
-) -> float:
-    """Return a trailing stop from the low of ``price_series`` for short positions.
-
-    Parameters
-    ----------
-    price_series : pd.Series
-        Series of closing prices.
-    trail_pct : float, optional
-        Percentage to trail above the minimum price.
-
-    Returns
-    -------
-    float
-        Calculated trailing stop value above the low.
-    """
-    lowest = price_series.min()
-    stop = lowest * (1 + trail_pct)
-    logger.info("Calculated short trailing stop %.4f from low %.4f", stop, lowest)
-    return stop
-
-
 def calculate_atr_trailing_stop(df: pd.DataFrame, atr_factor: float = 2.0) -> float:
     """Return an ATR based trailing stop.
 
@@ -83,36 +60,6 @@ def calculate_atr_trailing_stop(df: pd.DataFrame, atr_factor: float = 2.0) -> fl
         "Calculated ATR trailing stop %.4f using high %.4f and ATR %.4f",
         stop,
         highest,
-        atr,
-    )
-    return stop
-
-
-def calculate_atr_trailing_stop_short(df: pd.DataFrame, atr_factor: float = 2.0) -> float:
-    """Return an ATR based trailing stop for short positions.
-
-    The stop is calculated as ``lowest_price_since_entry + ATR * atr_factor``.
-    ``df`` should contain the OHLC data from trade entry to the current bar.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Data containing ``high``, ``low`` and ``close`` columns.
-    atr_factor : float, optional
-        Multiplier applied to the ATR value.
-
-    Returns
-    -------
-    float
-        Calculated trailing stop using ATR for short positions.
-    """
-    lowest = df["close"].min()
-    atr = calc_atr(df)
-    stop = lowest + atr * atr_factor
-    logger.info(
-        "Calculated ATR short trailing stop %.4f using low %.4f and ATR %.4f",
-        stop,
-        lowest,
         atr,
     )
     return stop
@@ -251,3 +198,92 @@ def get_partial_exit_percent(pnl_pct: float) -> int:
     if pnl_pct > 25:
         return 20
     return 0
+
+
+def calculate_trailing_stop_short(
+    price_series: pd.Series, trail_pct: float = 0.1
+) -> float:
+    """Return a trailing stop from the low of ``price_series`` for short positions.
+
+    Parameters
+    ----------
+    price_series : pd.Series
+        Series of closing prices.
+    trail_pct : float, optional
+        Percentage to trail above the minimum price.
+
+    Returns
+    -------
+    float
+        Calculated trailing stop value above the low.
+    """
+    lowest = price_series.min()
+    stop = lowest * (1 + trail_pct)
+    logger.info("Calculated short trailing stop %.4f from low %.4f", stop, lowest)
+    return stop
+
+
+def calculate_atr_trailing_stop_short(df: pd.DataFrame, atr_factor: float = 2.0) -> float:
+    """Return an ATR based trailing stop for short positions.
+
+    The stop is calculated as ``lowest_price_since_entry + ATR * atr_factor``.
+    ``df`` should contain the OHLC data from trade entry to the current bar.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Data containing ``high``, ``low`` and ``close`` columns.
+    atr_factor : float, optional
+        Multiplier applied to the ATR value.
+
+    Returns
+    -------
+    float
+        Calculated trailing stop using ATR for short positions.
+    """
+    lowest = df["close"].min()
+    atr = calc_atr(df)
+    stop = lowest + atr * atr_factor
+    logger.info(
+        "Calculated ATR short trailing stop %.4f using low %.4f and ATR %.4f",
+        stop,
+        lowest,
+        atr,
+    )
+    return stop
+
+
+def _assess_momentum_strength(df: pd.DataFrame) -> float:
+    """Assess momentum strength on a scale of 0-1, less restrictive than momentum_healthy."""
+    try:
+        df = df.copy()
+        df['rsi'] = ta.momentum.rsi(df['close'], window=14)
+        df['macd'] = ta.trend.macd(df['close'])
+        df['macd_signal'] = ta.trend.macd_signal(df['close'])
+        
+        latest = df.iloc[-1]
+        
+        # Check if indicators have valid values
+        if (pd.isna(latest.get('rsi')) or 
+            pd.isna(latest.get('macd')) or 
+            pd.isna(latest.get('macd_signal'))):
+            return 0.5  # Neutral if data unavailable
+        
+        # Calculate momentum score components
+        rsi_score = min(1.0, max(0.0, (latest['rsi'] - 30) / 40))  # 30-70 range
+        macd_score = 1.0 if latest['macd'] > latest['macd_signal'] else 0.0
+        
+        # Volume trend (less strict)
+        vol_avg = df['volume'].rolling(3).mean()
+        if vol_avg.dropna().shape[0] >= 2:
+            vol_score = 1.0 if vol_avg.iloc[-1] > vol_avg.iloc[-2] else 0.5
+        else:
+            vol_score = 0.5
+        
+        # Weighted average
+        momentum_strength = (rsi_score * 0.4 + macd_score * 0.4 + vol_score * 0.2)
+        
+        return momentum_strength
+        
+    except Exception:
+        return 0.5  # Neutral on error

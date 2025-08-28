@@ -7,10 +7,7 @@ import pandas as pd
 import ta
 
 from crypto_bot.execution.solana_mempool import SolanaMempoolMonitor
-from crypto_bot.sentiment_filter import (
-    fetch_twitter_sentiment,
-    fetch_twitter_sentiment_async,
-)
+from crypto_bot.sentiment_filter import fetch_twitter_sentiment
 from crypto_bot.solana.exit import monitor_price
 from crypto_bot.solana_trading import sniper_trade
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
@@ -96,9 +93,9 @@ async def generate_signal(
     ).average_true_range()
 
     try:
-        sentiment = await fetch_twitter_sentiment_async(query) / 100.0
-    except Exception:
         sentiment = fetch_twitter_sentiment(query) / 100.0
+    except Exception:
+        sentiment = 0.5  # Default neutral sentiment
     logger.info("Meme-wave sentiment: %.2f for query '%s'", sentiment, query)
 
     if avg_vol and recent_vol >= avg_vol * vol_threshold and sentiment >= sentiment_thr:
@@ -141,7 +138,7 @@ async def generate_signal(
             q = query
             if not q:
                 q = config.get("symbol") if isinstance(config, dict) else None
-            sentiment = await fetch_twitter_sentiment_async(q or "") / 100.0
+            sentiment = fetch_twitter_sentiment(q or "") / 100.0
             if sentiment < float(sentiment_thr):
                 sentiment_ok = False
         except Exception:

@@ -4,12 +4,11 @@ import logging
 import pandas as pd
 
 logger = logging.getLogger(__name__)
-from crypto_bot.utils.ml_utils import init_ml_or_warn
+from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 NAME = "lstm_bot"
 
 ML_AVAILABLE = init_ml_or_warn()
 if ML_AVAILABLE:
-    from coinTrader_Trainer.ml_trainer import load_model
     MODEL = load_model("lstm_bot")
 else:  # pragma: no cover - fallback
     MODEL = None
