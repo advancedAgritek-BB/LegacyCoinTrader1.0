@@ -153,6 +153,11 @@ class BotController:
         self.state["reload"] = True
         return "Config reload scheduled"
 
+    async def close_all_positions(self) -> str:
+        """Signal the trading bot to liquidate all open positions."""
+        self.state["liquidate_all"] = True
+        return "Liquidation requested"
+
 
 def _reply_or_edit(update: Update, text: str, reply_markup: Any | None = None) -> None:
     """Reply to message or edit callback text."""

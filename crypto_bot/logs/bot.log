@@ -1669,3 +1669,29 @@
 2025-08-26 15:53:08,452 - WARNING - Incomplete OHLCV for BAT/USD: got 21 of 22
 2025-08-26 15:53:21,421 - WARNING - Incomplete OHLCV for ETH/AUD: got 15 of 16
 2025-08-26 15:53:30,811 - WARNING - Incomplete OHLCV for PROMPT/EUR: got 1 of 2
+2025-08-28 14:55:18,615 - INFO - Calculated trailing stop 114.0000 from high 120.0000
+2025-08-28 14:55:18,615 - INFO - Calculated short trailing stop 105.0000 from low 100.0000
+2025-08-28 14:55:18,620 - INFO - Calculated ATR trailing stop nan using high 120.0000 and ATR nan
+2025-08-28 14:55:18,623 - INFO - Calculated ATR short trailing stop nan using low 100.0000 and ATR nan
+2025-08-28 14:55:18,623 - INFO - Take profit hit at 113.0000 (target: 110.0000) for long position
+2025-08-28 14:55:18,625 - INFO - Price 110.0000 hit trailing stop 114.0000 for long position
+2025-08-28 14:55:18,625 - INFO - Take profit hit at 105.0000 (target: 108.0000) for short position
+2025-08-28 14:57:38,163 - INFO - Calculated trailing stop 114.0000 from high 120.0000
+2025-08-28 14:57:38,163 - INFO - Calculated short trailing stop 105.0000 from low 100.0000
+2025-08-28 14:57:38,168 - WARNING - Cached ATR failed, using fallback calculation
+2025-08-28 14:57:38,169 - WARNING - Fallback ATR also failed, using percentage-based stop
+2025-08-28 14:57:38,171 - WARNING - Cached ATR failed, using fallback calculation
+2025-08-28 14:57:38,171 - WARNING - Fallback ATR also failed, using percentage-based stop
+2025-08-28 14:57:38,172 - INFO - Take profit hit at 113.0000 (target: 110.0000) for long position
+2025-08-28 14:57:38,173 - INFO - Price 110.0000 hit trailing stop 114.0000 for long position
+2025-08-28 14:57:38,173 - INFO - Take profit hit at 105.0000 (target: 108.0000) for short position
+2025-08-28 15:20:34,886 - INFO - Paper trade force closed: buy 0.1 BTC/USDT @ $50000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:20:34,887 - INFO - Paper trade force closed: sell 1.0 ETH/USDT @ $3000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:21:33,599 - INFO - Paper trade force closed: buy 0.1 BTC/USDT @ $50000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:21:33,600 - INFO - Paper trade force closed: sell 1.0 ETH/USDT @ $3000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:22:17,256 - INFO - Paper trade force closed: buy 0.1 BTC/USDT @ $50000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:22:17,257 - INFO - Paper trade force closed: sell 1.0 ETH/USDT @ $3000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:24:45,299 - INFO - Paper trade force closed: buy 0.1 BTC/USDT @ $50000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:24:45,299 - INFO - Paper trade force closed: sell 1.0 ETH/USDT @ $3000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:25:10,980 - INFO - Paper trade force closed: buy 0.1 BTC/USDT @ $50000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:25:10,981 - INFO - Paper trade force closed: sell 1.0 ETH/USDT @ $3000.000000, PnL: $0.00, balance: $10000.00

@@ -259,6 +259,46 @@ async def fetch_balance(exchange, paper_wallet, config):
     return paper_wallet.balance if paper_wallet else 0.0
 
 
+def sync_paper_wallet_balance(ctx):
+    """Ensure paper wallet balance is synchronized with context."""
+    if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
+        if abs(ctx.balance - ctx.paper_wallet.balance) > 0.01:  # Allow small floating point differences
+            logger.warning(f"Balance mismatch detected: ctx.balance=${ctx.balance:.2f}, paper_wallet.balance=${ctx.paper_wallet.balance:.2f}")
+            ctx.balance = ctx.paper_wallet.balance
+            logger.info(f"Balance synchronized: ${ctx.balance:.2f}")
+        return ctx.paper_wallet.balance
+    return ctx.balance
+
+
+def get_paper_wallet_status(ctx):
+    """Get comprehensive status of paper wallet for monitoring."""
+    if not ctx.config.get("execution_mode") == "dry_run" or not ctx.paper_wallet:
+        return None
+    
+    summary = ctx.paper_wallet.get_position_summary()
+    status = {
+        "balance": f"${summary['balance']:.2f}",
+        "initial_balance": f"${summary['initial_balance']:.2f}",
+        "realized_pnl": f"${summary['realized_pnl']:.2f}",
+        "total_trades": summary['total_trades'],
+        "winning_trades": summary['winning_trades'],
+        "win_rate": f"{summary['win_rate']:.1f}%",
+        "open_positions": summary['open_positions'],
+        "positions": {}
+    }
+    
+    for pid, pos in summary['positions'].items():
+        status['positions'][pid] = {
+            "symbol": pos.get("symbol", "Unknown"),
+            "side": pos["side"],
+            "size": pos["size"],
+            "entry_price": f"${pos['entry_price']:.6f}",
+            "reserved": f"${pos.get('reserved', 0.0):.2f}"
+        }
+    
+    return status
+
+
 async def fetch_and_log_balance(exchange, paper_wallet, config):
     """Return the latest wallet balance and log it."""
     latest_balance = await fetch_balance(exchange, paper_wallet, config)
@@ -947,8 +987,16 @@ async def execute_signals(ctx: BotContext) -> None:
         )
 
         if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
-            ctx.paper_wallet.open(sym, side, amount, price)
-            ctx.balance = ctx.paper_wallet.balance
+            try:
+                ctx.paper_wallet.open(sym, side, amount, price)
+                ctx.balance = ctx.paper_wallet.balance
+                logger.info(f"Paper trade opened: {side} {amount} {sym} @ ${price:.6f}, balance: ${ctx.balance:.2f}")
+            except Exception as e:
+                logger.error(f"Failed to open paper trade: {e}")
+                continue
+        
+        # Ensure balance is synchronized
+        sync_paper_wallet_balance(ctx)
         ctx.risk_manager.allocate_capital(strategy, size)
         ctx.positions[sym] = {
             "side": side,
@@ -1031,10 +1079,15 @@ async def handle_exits(ctx: BotContext) -> None:
             )
             if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
                 try:
-                    ctx.paper_wallet.close(sym, pos["size"], current_price)
+                    pnl = ctx.paper_wallet.close(sym, pos["size"], current_price)
                     ctx.balance = ctx.paper_wallet.balance
-                except Exception:
-                    pass
+                    logger.info(f"Paper trade closed: {pos['side']} {pos['size']} {sym} @ ${current_price:.6f}, PnL: ${pnl:.2f}, balance: ${ctx.balance:.2f}")
+                except Exception as e:
+                    logger.error(f"Failed to close paper trade: {e}")
+                    # Continue with position closure even if paper wallet fails
+            
+            # Ensure balance is synchronized
+            sync_paper_wallet_balance(ctx)
             ctx.risk_manager.deallocate_capital(
                 pos.get("strategy", ""), pos["size"] * pos["entry_price"]
             )
@@ -1076,10 +1129,12 @@ async def force_exit_all(ctx: BotContext) -> None:
 
         if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
             try:
-                ctx.paper_wallet.close(sym, pos["size"], exit_price)
+                pnl = ctx.paper_wallet.close(sym, pos["size"], exit_price)
                 ctx.balance = ctx.paper_wallet.balance
-            except Exception:
-                pass
+                logger.info(f"Paper trade force closed: {pos['side']} {pos['size']} {sym} @ ${exit_price:.6f}, PnL: ${pnl:.2f}, balance: ${ctx.balance:.2f}")
+            except Exception as e:
+                logger.error(f"Failed to force close paper trade: {e}")
+                # Continue with position closure even if paper wallet fails
 
         ctx.risk_manager.deallocate_capital(
             pos.get("strategy", ""), pos["size"] * pos["entry_price"]
@@ -1129,10 +1184,12 @@ async def _monitor_micro_scalp_exit(ctx: BotContext, sym: str) -> None:
 
     if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
         try:
-            ctx.paper_wallet.close(sym, pos["size"], exit_price)
+            pnl = ctx.paper_wallet.close(sym, pos["size"], exit_price)
             ctx.balance = ctx.paper_wallet.balance
-        except Exception:
-            pass
+            logger.info(f"Paper trade micro-scalp closed: {pos['side']} {pos['size']} {sym} @ ${exit_price:.6f}, PnL: ${pnl:.2f}, balance: ${ctx.balance:.2f}")
+        except Exception as e:
+            logger.error(f"Failed to close paper trade micro-scalp: {e}")
+            # Continue with position closure even if paper wallet fails
 
     ctx.risk_manager.deallocate_capital(
         pos.get("strategy", ""), pos["size"] * pos["entry_price"]
@@ -1606,6 +1663,10 @@ async def _main_impl() -> TelegramNotifier:
                 last_ts = last_candle_ts.get(sym, 0)
                 if time.time() - last_ts >= tf_sec:
                     open_syms.append(sym)
+            
+            # Ensure paper wallet balance is synchronized
+            if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
+                sync_paper_wallet_balance(ctx)
             if open_syms:
                 tf_cache = ctx.df_cache.get(tf, {})
                 tf_cache = await update_ohlcv_cache(
@@ -1726,7 +1787,7 @@ async def _main_impl() -> TelegramNotifier:
         try:
             await control_task
         except asyncio.CancelledError:
-            pass
+                pass
         for task in list(WS_PING_TASKS):
             task.cancel()
         for task in list(WS_PING_TASKS):
