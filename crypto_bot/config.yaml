@@ -78,6 +78,7 @@ exit_strategy:
   scale_out: true
   trailing_stop_factor: 1.2
   trailing_stop_pct: 0.02
+  take_profit_pct: 0.05  # 5% take profit
 exits:
   default_sl_pct: 0.015
   default_tp_pct: 0.07
