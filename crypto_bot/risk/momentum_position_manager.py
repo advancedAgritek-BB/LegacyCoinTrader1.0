@@ -20,7 +20,7 @@ from risk.exit_manager import (
     get_momentum_based_partial_exit,
     should_delay_exit_for_momentum
 )
-from utils.logger import LOG_DIR, setup_logger
+from crypto_bot.utils.logger import LOG_DIR, setup_logger
 
 logger = setup_logger(__name__, LOG_DIR / "bot.log")
 

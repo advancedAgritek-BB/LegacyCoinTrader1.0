@@ -6,8 +6,8 @@ import ta
 import numpy as np
 from dataclasses import dataclass
 
-from utils.logger import LOG_DIR, setup_logger
-from volatility_filter import calc_atr
+from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from crypto_bot.volatility_filter import calc_atr
 from pathlib import Path
 
 
@@ -522,7 +522,7 @@ def should_exit(
                     pnl = (current_price - entry) * (
                         1 if direction == "buy" else -1
                     )
-                    from utils.pnl_logger import log_pnl
+                    from crypto_bot.utils.pnl_logger import log_pnl
 
                     log_pnl(
                         strategy,
