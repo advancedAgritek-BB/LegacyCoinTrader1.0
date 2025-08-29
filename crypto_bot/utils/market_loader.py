@@ -515,12 +515,21 @@ async def fetch_ohlcv_async(
                         except Exception:
                             pass
                     if len(data) < expected:
-                        logger.warning(
-                            "Incomplete OHLCV for %s: got %d of %d",
-                            symbol,
-                            len(data),
-                            expected,
-                        )
+                        # Only warn if we got significantly less data (less than 50% of expected)
+                        if len(data) < expected * 0.5:
+                            logger.warning(
+                                "Incomplete OHLCV for %s: got %d of %d (significant data gap)",
+                                symbol,
+                                len(data),
+                                expected,
+                            )
+                        else:
+                            logger.debug(
+                                "Incomplete OHLCV for %s: got %d of %d (minor data gap)",
+                                symbol,
+                                len(data),
+                                expected,
+                            )
                     return data
                 params_f = inspect.signature(exchange.fetch_ohlcv).parameters
                 kwargs_f = {"symbol": symbol, "timeframe": timeframe, "limit": limit}

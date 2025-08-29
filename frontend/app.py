@@ -280,7 +280,22 @@ def trades_data():
     return jsonify([])
 
 
+@app.route('/api/bot-status')
+def api_bot_status():
+    """Return current bot status as JSON."""
+    return jsonify({
+        'running': is_running(),
+        'mode': load_execution_mode(),
+        'uptime': get_uptime(),
+        'last_trade': utils.get_last_trade(TRADE_FILE),
+        'regime': utils.get_current_regime(LOG_FILE),
+        'last_reason': utils.get_last_decision_reason(LOG_FILE),
+    })
+
+
 if __name__ == '__main__':
     watch_thread = threading.Thread(target=watch_bot, daemon=True)
     watch_thread.start()
-    app.run(debug=True)
+    # Configure Flask to be accessible from any host (for containerized deployments)
+    # and set the default port to 5000
+    app.run(host='0.0.0.0', port=5000, debug=False)

@@ -1,18 +1,647 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
+
 {% block content %}
-<h1 class="mb-4">Logs</h1>
-<pre class="bg-dark text-light p-3" style="height:400px; overflow:auto;"><code id="log-area" class="language-plaintext"></code></pre>
-<div class="row justify-content-center">
-  <div class="col-md-10">
-    <div class="card">
-      <div class="card-header">Logs</div>
-      <div class="card-body">
-        <pre id="log-area" class="bg-dark text-light p-3" style="height:400px; overflow:auto;"></pre>
+<div class="logs-page fade-in">
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="card-title">
+            <i class="fas fa-terminal"></i>
+            Live Logs
+          </h5>
+        </div>
+        <div class="card-body">
+          <div class="logs-controls mb-3">
+            <div class="row">
+              <div class="col-md-6">
+                <div class="input-group">
+                  <span class="input-group-text">
+                    <i class="fas fa-search"></i>
+                  </span>
+                  <input type="text" class="form-control" id="logSearch" placeholder="Search logs...">
+                </div>
+              </div>
+              <div class="col-md-6 text-end">
+                <div class="btn-group" role="group">
+                  <button class="btn btn-outline-primary" onclick="refreshLogs()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                  </button>
+                  <button class="btn btn-outline-secondary" onclick="clearLogs()">
+                    <i class="fas fa-trash"></i> Clear
+                  </button>
+                  <button class="btn btn-outline-success" onclick="downloadLogs()">
+                    <i class="fas fa-download"></i> Download
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="logs-container">
+            <div class="logs-header">
+              <div class="logs-info">
+                <span class="log-count" id="logCount">0 logs</span>
+                <span class="log-status" id="logStatus">
+                  <i class="fas fa-circle text-success"></i> Live
+                </span>
+              </div>
+              <div class="logs-actions">
+                <button class="btn btn-sm btn-outline-primary" id="autoScrollBtn" onclick="toggleAutoScroll()">
+                  <i class="fas fa-arrow-down"></i> Auto-scroll
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="scrollToTop()">
+                  <i class="fas fa-arrow-up"></i> Top
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="scrollToBottom()">
+                  <i class="fas fa-arrow-down"></i> Bottom
+                </button>
+              </div>
+            </div>
+            
+            <div class="logs-viewer" id="logsViewer">
+              <div class="logs-content" id="logsContent">
+                <!-- Logs will be loaded here -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Log Filters -->
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="card-title">
+            <i class="fas fa-filter"></i>
+            Log Filters
+          </h5>
+        </div>
+        <div class="card-body">
+          <div class="filter-controls">
+            <div class="row">
+              <div class="col-md-3">
+                <label class="form-label">Log Level</label>
+                <select class="form-control" id="logLevelFilter">
+                  <option value="all">All Levels</option>
+                  <option value="DEBUG">DEBUG</option>
+                  <option value="INFO">INFO</option>
+                  <option value="WARNING">WARNING</option>
+                  <option value="ERROR">ERROR</option>
+                  <option value="CRITICAL">CRITICAL</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Source</label>
+                <select class="form-control" id="logSourceFilter">
+                  <option value="all">All Sources</option>
+                  <option value="bot">Trading Bot</option>
+                  <option value="execution">Execution Engine</option>
+                  <option value="strategy">Strategy</option>
+                  <option value="risk">Risk Manager</option>
+                  <option value="ml">ML Model</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Time Range</label>
+                <select class="form-control" id="timeRangeFilter">
+                  <option value="all">All Time</option>
+                  <option value="1h">Last Hour</option>
+                  <option value="6h">Last 6 Hours</option>
+                  <option value="24h">Last 24 Hours</option>
+                  <option value="7d">Last 7 Days</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Auto-refresh</label>
+                <select class="form-control" id="autoRefreshInterval">
+                  <option value="0">Off</option>
+                  <option value="5000">5 seconds</option>
+                  <option value="10000">10 seconds</option>
+                  <option value="30000">30 seconds</option>
+                  <option value="60000">1 minute</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Log Statistics -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="card-title">
+            <i class="fas fa-chart-bar"></i>
+            Log Statistics
+          </h5>
+        </div>
+        <div class="card-body">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-icon">
+                <i class="fas fa-info-circle text-info"></i>
+              </div>
+              <div class="stat-content">
+                <div class="stat-value" id="infoCount">0</div>
+                <div class="stat-label">INFO</div>
+              </div>
+            </div>
+            
+            <div class="stat-card">
+              <div class="stat-icon">
+                <i class="fas fa-exclamation-triangle text-warning"></i>
+              </div>
+              <div class="stat-content">
+                <div class="stat-value" id="warningCount">0</div>
+                <div class="stat-label">WARNINGS</div>
+              </div>
+            </div>
+            
+            <div class="stat-card">
+              <div class="stat-icon">
+                <i class="fas fa-exclamation-circle text-danger"></i>
+              </div>
+              <div class="stat-content">
+                <div class="stat-value" id="errorCount">0</div>
+                <div class="stat-label">ERRORS</div>
+              </div>
+            </div>
+            
+            <div class="stat-card">
+              <div class="stat-icon">
+                <i class="fas fa-bug text-secondary"></i>
+              </div>
+              <div class="stat-content">
+                <div class="stat-value" id="debugCount">0</div>
+                <div class="stat-label">DEBUG</div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 </div>
 {% endblock %}
+
 {% block scripts %}
-<script type="module" src="{{ url_for('static', filename='logs.js') }}"></script>
+<script>
+let logsData = [];
+let autoScroll = true;
+let autoRefreshTimer = null;
+let filteredLogs = [];
+
+// Initialize the logs page
+document.addEventListener('DOMContentLoaded', function() {
+  loadLogs();
+  setupFilters();
+  setupAutoRefresh();
+});
+
+// Load logs data
+function loadLogs() {
+  fetch('/logs_tail')
+    .then(response => response.text())
+    .then(data => {
+      logsData = parseLogs(data);
+      filteredLogs = [...logsData];
+      displayLogs(filteredLogs);
+      updateStats(filteredLogs);
+    })
+    .catch(error => {
+      console.error('Error loading logs:', error);
+      window.LegacyCoinTrader.showToast('Error loading logs', 'error');
+    });
+}
+
+// Parse log data into structured format
+function parseLogs(logText) {
+  if (!logText) return [];
+  
+  const lines = logText.split('\n').filter(line => line.trim());
+  const logs = [];
+  
+  lines.forEach((line, index) => {
+    const log = parseLogLine(line);
+    if (log) {
+      logs.push(log);
+    }
+  });
+  
+  return logs;
+}
+
+// Parse individual log line
+function parseLogLine(line) {
+  // Basic log parsing - you can enhance this based on your log format
+  const timestampMatch = line.match(/(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/);
+  const levelMatch = line.match(/(DEBUG|INFO|WARNING|ERROR|CRITICAL)/i);
+  const sourceMatch = line.match(/(bot|execution|strategy|risk|ml)/i);
+  
+  if (timestampMatch) {
+    return {
+      id: Date.now() + Math.random(),
+      timestamp: timestampMatch[1],
+      level: levelMatch ? levelMatch[1].toUpperCase() : 'INFO',
+      source: sourceMatch ? sourceMatch[1].toLowerCase() : 'bot',
+      message: line,
+      raw: line
+    };
+  }
+  
+  return null;
+}
+
+// Display logs in the viewer
+function displayLogs(logs) {
+  const container = document.getElementById('logsContent');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  if (logs.length === 0) {
+    container.innerHTML = `
+      <div class="no-logs">
+        <i class="fas fa-info-circle"></i>
+        <span>No logs found</span>
+      </div>
+    `;
+    return;
+  }
+  
+  logs.forEach(log => {
+    const logElement = createLogElement(log);
+    container.appendChild(logElement);
+  });
+  
+  // Auto-scroll to bottom if enabled
+  if (autoScroll) {
+    scrollToBottom();
+  }
+  
+  // Update log count
+  document.getElementById('logCount').textContent = `${logs.length} logs`;
+}
+
+// Create individual log element
+function createLogElement(log) {
+  const logDiv = document.createElement('div');
+  logDiv.className = `log-entry log-${log.level.toLowerCase()}`;
+  
+  const levelClass = getLevelClass(log.level);
+  const sourceClass = getSourceClass(log.source);
+  
+  logDiv.innerHTML = `
+    <div class="log-header">
+      <span class="log-timestamp">${log.timestamp}</span>
+      <span class="log-level badge ${levelClass}">${log.level}</span>
+      <span class="log-source badge ${sourceClass}">${log.source}</span>
+    </div>
+    <div class="log-message">${escapeHtml(log.message)}</div>
+  `;
+  
+  return logDiv;
+}
+
+// Get CSS class for log level
+function getLevelClass(level) {
+  const classes = {
+    'DEBUG': 'badge-secondary',
+    'INFO': 'badge-info',
+    'WARNING': 'badge-warning',
+    'ERROR': 'badge-danger',
+    'CRITICAL': 'badge-danger'
+  };
+  return classes[level] || 'badge-secondary';
+}
+
+// Get CSS class for log source
+function getSourceClass(source) {
+  const classes = {
+    'bot': 'badge-primary',
+    'execution': 'badge-success',
+    'strategy': 'badge-info',
+    'risk': 'badge-warning',
+    'ml': 'badge-secondary'
+  };
+  return classes[source] || 'badge-secondary';
+}
+
+// Update statistics
+function updateStats(logs) {
+  const stats = {
+    INFO: 0,
+    WARNING: 0,
+    ERROR: 0,
+    DEBUG: 0
+  };
+  
+  logs.forEach(log => {
+    if (stats.hasOwnProperty(log.level)) {
+      stats[log.level]++;
+    }
+  });
+  
+  document.getElementById('infoCount').textContent = stats.INFO;
+  document.getElementById('warningCount').textContent = stats.WARNING;
+  document.getElementById('errorCount').textContent = stats.ERROR;
+  document.getElementById('debugCount').textContent = stats.DEBUG;
+}
+
+// Setup filter controls
+function setupFilters() {
+  document.getElementById('logLevelFilter').addEventListener('change', applyFilters);
+  document.getElementById('logSourceFilter').addEventListener('change', applyFilters);
+  document.getElementById('timeRangeFilter').addEventListener('change', applyFilters);
+  document.getElementById('logSearch').addEventListener('input', applyFilters);
+}
+
+// Apply filters to logs
+function applyFilters() {
+  const levelFilter = document.getElementById('logLevelFilter').value;
+  const sourceFilter = document.getElementById('logSourceFilter').value;
+  const timeFilter = document.getElementById('timeRangeFilter').value;
+  const searchFilter = document.getElementById('logSearch').value.toLowerCase();
+  
+  filteredLogs = logsData.filter(log => {
+    // Level filter
+    if (levelFilter !== 'all' && log.level !== levelFilter) return false;
+    
+    // Source filter
+    if (sourceFilter !== 'all' && log.source !== sourceFilter) return false;
+    
+    // Time filter
+    if (timeFilter !== 'all') {
+      const logTime = new Date(log.timestamp);
+      const now = new Date();
+      const diffHours = (now - logTime) / (1000 * 60 * 60);
+      
+      if (timeFilter === '1h' && diffHours > 1) return false;
+      if (timeFilter === '6h' && diffHours > 6) return false;
+      if (timeFilter === '24h' && diffHours > 24) return false;
+      if (timeFilter === '7d' && diffHours > 168) return false;
+    }
+    
+    // Search filter
+    if (searchFilter && !log.message.toLowerCase().includes(searchFilter)) return false;
+    
+    return true;
+  });
+  
+  displayLogs(filteredLogs);
+}
+
+// Setup auto-refresh
+function setupAutoRefresh() {
+  document.getElementById('autoRefreshInterval').addEventListener('change', function() {
+    const interval = parseInt(this.value);
+    if (autoRefreshTimer) {
+      clearInterval(autoRefreshTimer);
+      autoRefreshTimer = null;
+    }
+    
+    if (interval > 0) {
+      autoRefreshTimer = setInterval(loadLogs, interval);
+    }
+  });
+}
+
+// Toggle auto-scroll
+function toggleAutoScroll() {
+  autoScroll = !autoScroll;
+  const btn = document.getElementById('autoScrollBtn');
+  
+  if (autoScroll) {
+    btn.classList.remove('btn-outline-primary');
+    btn.classList.add('btn-primary');
+    btn.innerHTML = '<i class="fas fa-arrow-down"></i> Auto-scroll ON';
+  } else {
+    btn.classList.remove('btn-primary');
+    btn.classList.add('btn-outline-primary');
+    btn.innerHTML = '<i class="fas fa-arrow-down"></i> Auto-scroll OFF';
+  }
+}
+
+// Scroll functions
+function scrollToTop() {
+  const viewer = document.getElementById('logsViewer');
+  viewer.scrollTop = 0;
+}
+
+function scrollToBottom() {
+  const viewer = document.getElementById('logsViewer');
+  viewer.scrollTop = viewer.scrollHeight;
+}
+
+// Control functions
+function refreshLogs() {
+  loadLogs();
+  window.LegacyCoinTrader.showToast('Logs refreshed', 'success');
+}
+
+function clearLogs() {
+  if (confirm('Are you sure you want to clear the logs display?')) {
+    document.getElementById('logsContent').innerHTML = '';
+    document.getElementById('logCount').textContent = '0 logs';
+    window.LegacyCoinTrader.showToast('Logs cleared', 'success');
+  }
+}
+
+function downloadLogs() {
+  if (filteredLogs.length === 0) {
+    window.LegacyCoinTrader.showToast('No logs to download', 'warning');
+    return;
+  }
+  
+  const content = filteredLogs.map(log => log.raw).join('\n');
+  const blob = new Blob([content], { type: 'text/plain' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `logs_${new Date().toISOString().split('T')[0]}.txt`;
+  a.click();
+  window.URL.revokeObjectURL(url);
+  
+  window.LegacyCoinTrader.showToast('Logs downloaded successfully', 'success');
+}
+
+// Utility function to escape HTML
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+</script>
+
+<style>
+.logs-controls {
+  background: var(--bg-secondary);
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+.logs-container {
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.logs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.logs-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.log-count {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.log-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.logs-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.logs-viewer {
+  height: 500px;
+  overflow-y: auto;
+  background: var(--bg-sidebar);
+}
+
+.logs-content {
+  padding: 1rem;
+}
+
+.log-entry {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding: 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.log-entry:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--primary-color);
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.log-timestamp {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-family: 'Courier New', monospace;
+}
+
+.log-message {
+  color: var(--text-secondary);
+  font-family: 'Courier New', monospace;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.no-logs {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 2rem;
+}
+
+.no-logs i {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  display: block;
+}
+
+.filter-controls {
+  background: var(--bg-secondary);
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+}
+
+.stat-icon {
+  font-size: 2rem;
+}
+
+.stat-content {
+  flex: 1;
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.stat-label {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Log level specific styling */
+.log-entry.log-error {
+  border-left: 4px solid var(--danger-color);
+}
+
+.log-entry.log-warning {
+  border-left: 4px solid var(--warning-color);
+}
+
+.log-entry.log-info {
+  border-left: 4px solid var(--info-color);
+}
+
+.log-entry.log-debug {
+  border-left: 4px solid var(--text-muted);
+}
+</style>
 {% endblock %}

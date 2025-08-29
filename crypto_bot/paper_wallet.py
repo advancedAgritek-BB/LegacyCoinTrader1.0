@@ -232,18 +232,27 @@ class PaperWallet:
             amount = available_amount
 
         # Calculate PnL
+        entry_price = pos.get("entry_price", 0)
+        if entry_price <= 0:
+            logger.warning(f"Invalid entry price for position {identifier}: {entry_price}")
+            entry_price = price  # Use current price as fallback
+
         if pos["side"] == "buy":
-            pnl = (price - pos["entry_price"]) * amount
+            pnl = (price - entry_price) * amount
             # Add the sale proceeds to balance
             self.balance += amount * price
-            logger.info(f"Closed BUY position: {amount} @ ${price:.6f}, PnL: ${pnl:.2f}, balance: ${self.balance:.2f}")
+            logger.info(f"Closed BUY position: {amount} @ ${price:.6f} (entry: ${entry_price:.6f}), PnL: ${pnl:.2f}, balance: ${self.balance:.2f}")
         else:  # sell/short
-            pnl = (pos["entry_price"] - price) * amount
+            pnl = (entry_price - price) * amount
             # Release reserved funds and add profit
-            release_amount = pos["entry_price"] * amount
+            release_amount = entry_price * amount
             self.balance += release_amount + pnl
             pos["reserved"] -= release_amount
-            logger.info(f"Closed SELL position: {amount} @ ${price:.6f}, PnL: ${pnl:.2f}, balance: ${self.balance:.2f}")
+            logger.info(f"Closed SELL position: {amount} @ ${price:.6f} (entry: ${entry_price:.6f}), PnL: ${pnl:.2f}, balance: ${self.balance:.2f}")
+
+        # Log additional details for debugging
+        if abs(pnl) < 0.01:  # Very small PnL
+            logger.debug(f"Small PnL detected for {identifier}: entry=${entry_price:.6f}, exit=${price:.6f}, amount={amount}, calculated_pnl=${pnl:.6f}")
 
         # Update position size
         pos[key] -= amount

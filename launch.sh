@@ -15,8 +15,24 @@ fi
 source venv/bin/activate
 
 # Check if .env file exists
-if [[ ! -f ".env" ]]; then
-    echo "❌ .env file not found. Please run './startup.sh setup' first."
+ENV_FOUND=false
+for env_path in ".env" "crypto_bot/.env"; do
+    if [[ -f "$env_path" ]]; then
+        echo "✅ Found .env file at: $env_path"
+        # Check if it contains real API keys (not template values)
+        if grep -q "your_kraken_api_key_here\|your_telegram_token_here\|your_helius_key_here" "$env_path"; then
+            echo "❌ .env file contains template values. Please edit with real API keys."
+            exit 1
+        else
+            echo "✅ .env file contains real API keys"
+            ENV_FOUND=true
+            break
+        fi
+    fi
+done
+
+if [[ "$ENV_FOUND" == "false" ]]; then
+    echo "❌ No valid .env file found. Please run './startup.sh setup' first."
     exit 1
 fi
 

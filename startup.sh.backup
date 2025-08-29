@@ -231,6 +231,7 @@ EOF
         print_status "You can now edit the .env file and run this script again."
         print_status "Note: The application expects .env files in either the root directory or crypto_bot/ directory."
         exit 1
+    fi
 }
 
 # Function to run tests

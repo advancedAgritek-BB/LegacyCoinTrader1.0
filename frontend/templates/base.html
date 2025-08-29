@@ -2,37 +2,120 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{{ title or 'CoinTrader' }}</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.0/dist/lux/bootstrap.min.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/github.min.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.0/dist/flatly/bootstrap.min.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title or 'LegacyCoinTrader' }}</title>
+  
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  
+  <!-- Font Awesome for icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Chart.js for charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <!-- Custom CSS -->
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
-<body>
-<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-  <div class="container-fluid">
-    <a class="navbar-brand" href="{{ url_for('index') }}">CoinTrader</a>
-    <div class="collapse navbar-collapse">
-      <ul class="navbar-nav me-auto">
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('index') }}">Home</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('logs_page') }}">Logs</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('stats') }}">Stats</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('trades_page') }}">Trades</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('scans') }}">Scans</a></li>
+<body class="dark-theme">
+  <!-- Sidebar Navigation -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <i class="fas fa-chart-line"></i>
+        <span>LegacyCoinTrader</span>
+      </div>
+    </div>
+    
+    <nav class="sidebar-nav">
+      <ul class="nav-list">
+        <li class="nav-item">
+          <a href="{{ url_for('index') }}" class="nav-link">
+            <i class="fas fa-home"></i>
+            <span>Dashboard</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a href="{{ url_for('trades_page') }}" class="nav-link">
+            <i class="fas fa-exchange-alt"></i>
+            <span>Trades</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a href="{{ url_for('logs_page') }}" class="nav-link">
+            <i class="fas fa-terminal"></i>
+            <span>Logs</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a href="{{ url_for('stats') }}" class="nav-link">
+            <i class="fas fa-chart-bar"></i>
+            <span>Analytics</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a href="{{ url_for('scans') }}" class="nav-link">
+            <i class="fas fa-search"></i>
+            <span>Scans</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a href="{{ url_for('model_page') }}" class="nav-link">
+            <i class="fas fa-brain"></i>
+            <span>AI Model</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a href="{{ url_for('cli') }}" class="nav-link">
+            <i class="fas fa-code"></i>
+            <span>CLI</span>
+          </a>
+        </li>
       </ul>
-      <ul class="navbar-nav ms-auto">
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('cli') }}">CLI</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('model_page') }}">Model</a></li>
-      </ul>
+    </nav>
+    
+    <div class="sidebar-footer">
+      <div class="bot-status">
+        <div class="status-indicator {{ 'online' if running else 'offline' }}"></div>
+        <span>Bot {{ 'Online' if running else 'Offline' }}</span>
+      </div>
     </div>
   </div>
-</nav>
-<div class="container py-4">
-  {% block content %}{% endblock %}
-</div>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/highlight.min.js"></script>
-{% block scripts %}{% endblock %}
+
+  <!-- Main Content -->
+  <div class="main-content">
+    <!-- Top Header -->
+    <header class="top-header">
+      <div class="header-left">
+        <button class="sidebar-toggle" id="sidebarToggle">
+          <i class="fas fa-bars"></i>
+        </button>
+        <h1 class="page-title">{{ title or 'Dashboard' }}</h1>
+      </div>
+      
+      <div class="header-right">
+        <div class="header-stats">
+          <div class="stat-item">
+            <i class="fas fa-clock"></i>
+            <span>{{ uptime or 'N/A' }}</span>
+          </div>
+          <div class="stat-item">
+            <i class="fas fa-cog"></i>
+            <span>{{ mode or 'dry_run' }}</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Page Content -->
+    <main class="page-content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>
