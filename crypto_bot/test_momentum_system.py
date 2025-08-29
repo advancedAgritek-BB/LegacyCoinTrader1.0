@@ -11,8 +11,8 @@ import sys
 import os
 
 try:
-    from risk.momentum_position_manager import MomentumPositionManager
-    from risk.exit_manager import (
+    from crypto_bot.risk.momentum_position_manager import MomentumPositionManager
+    from crypto_bot.risk.exit_manager import (
         detect_momentum_continuation,
         calculate_momentum_scaled_take_profit,
         MomentumExitConfig

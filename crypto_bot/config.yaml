@@ -83,7 +83,7 @@ exchange_market_types:
 exec:
   allow_market_orders: true
   order_retry_interval: 0.5
-execution_mode: live
+execution_mode: dry_run
 exit_strategy:
   adaptive_trailing:
     base_trailing_pct: 0.008

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import pandas as pd
 import numpy as np
 
-from risk.exit_manager import (
+from crypto_bot.risk.exit_manager import (
     MomentumExitConfig, 
     detect_momentum_continuation,
     calculate_momentum_scaled_take_profit,
