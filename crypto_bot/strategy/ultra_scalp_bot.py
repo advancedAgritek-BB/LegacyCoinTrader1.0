@@ -2,7 +2,7 @@
 Ultra-Aggressive Scalping Strategy for Maximum Profit in Shortest Time
 
 This strategy is designed for extremely fast profit-taking with minimal risk exposure.
-It uses ultra-fast timeframes (15s) and very tight stop losses for rapid execution.
+It uses ultra-fast timeframes (1m) and very tight stop losses for rapid execution.
 """
 
 from typing import Optional, Tuple, Dict, Any
@@ -20,7 +20,7 @@ class UltraScalpConfig:
     """Configuration for ultra-aggressive scalping."""
     
     # Core settings
-    timeframe: str = "15s"
+    timeframe: str = "1m"
     min_score: float = 0.04
     max_concurrent: int = 30
     
@@ -283,13 +283,13 @@ def get_strategy_info() -> Dict[str, Any]:
     return {
         "name": "ultra_scalp_bot",
         "description": "Ultra-aggressive scalping strategy for maximum profit in shortest time",
-        "timeframe": "15s",
+        "timeframe": "1m",
         "risk_level": "high",
         "profit_potential": "very_high",
         "speed": "ultra_fast",
         "suitable_for": ["experienced_traders", "high_frequency", "aggressive_profits"],
         "key_features": [
-            "15-second timeframes",
+            "1-minute timeframes",
             "Very tight stop losses (0.5%)",
             "Fast profit taking (2%)",
             "High concurrent positions (30)",

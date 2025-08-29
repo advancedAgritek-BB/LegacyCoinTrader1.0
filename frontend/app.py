@@ -34,14 +34,51 @@ CONFIG_FILE = Path('crypto_bot/config.yaml')
 REGIME_FILE = LOG_DIR / 'regime_history.txt'
 
 
+def stop_conflicting_bots() -> None:
+    """Stop any other bot processes that might be running to prevent conflicts."""
+    try:
+        import psutil
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            if proc.info['cmdline'] and 'crypto_bot.main' in ' '.join(proc.info['cmdline']):
+                if proc.info['pid'] != os.getpid():  # Don't kill ourselves
+                    print(f"Stopping conflicting bot process (PID {proc.info['pid']})")
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=5)
+                    except psutil.TimeoutExpired:
+                        proc.kill()
+        time.sleep(2)  # Give processes time to terminate
+    except ImportError:
+        pass
+
+
+def check_existing_bot() -> bool:
+    """Check if there's already a bot process running to prevent conflicts."""
+    try:
+        import psutil
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            if proc.info['cmdline'] and 'crypto_bot.main' in ' '.join(proc.info['cmdline']):
+                return True
+        return False
+    except ImportError:
+        # psutil not available, use basic check
+        return False
+
+
 def watch_bot() -> None:
     """Monitor the trading bot and restart it if the process exits."""
     global bot_proc, bot_start_time
     while True:
         time.sleep(5)
         if bot_proc is not None and bot_proc.poll() is not None:
-            bot_proc = subprocess.Popen(['python', '-m', 'crypto_bot.main'])
-            bot_start_time = time.time()
+            # Check if there's already another bot process running to avoid conflicts
+            if not check_existing_bot():
+                print("Bot process exited, restarting...")
+                bot_proc = subprocess.Popen(['python', '-m', 'crypto_bot.main'])
+                bot_start_time = time.time()
+            else:
+                print("Another bot process detected, skipping restart to avoid conflicts")
+                bot_proc = None
 
 
 
@@ -58,6 +95,24 @@ def set_execution_mode(mode: str) -> None:
 def load_execution_mode() -> str:
     """Load execution mode from config file."""
     return utils.load_execution_mode(CONFIG_FILE)
+
+
+def get_paper_wallet_balance() -> float:
+    """Get paper wallet balance from config."""
+    paper_wallet_config = LOG_DIR / 'paper_wallet.yaml'
+    if paper_wallet_config.exists():
+        with open(paper_wallet_config) as f:
+            config = yaml.safe_load(f) or {}
+            return config.get('initial_balance', 10000.0)
+    return 10000.0  # Default balance
+
+
+def set_paper_wallet_balance(balance: float) -> None:
+    """Set paper wallet balance in config."""
+    paper_wallet_config = LOG_DIR / 'paper_wallet.yaml'
+    config = {'initial_balance': balance}
+    with open(paper_wallet_config, 'w') as f:
+        yaml.dump(config, f)
 
 
 def get_uptime() -> str:
@@ -87,6 +142,9 @@ def index():
         with open(LOG_DIR / 'weights.json') as f:
             allocation = json.load(f)
     
+    # Get paper wallet balance for dry run mode
+    paper_wallet_balance = get_paper_wallet_balance() if mode == 'dry_run' else None
+    
     return render_template(
         'index.html',
         running=is_running(),
@@ -98,6 +156,7 @@ def index():
         pnl=perf.get('total_pnl', 0.0),
         performance=perf,
         allocation=allocation,
+        paper_wallet_balance=paper_wallet_balance,
     )
 
 
@@ -108,7 +167,7 @@ def start():
     global bot_proc, bot_start_time
     mode = request.form.get('mode', 'dry_run')
     set_execution_mode(mode)
-    if not is_running():
+    if not is_running() and not check_existing_bot():
         # Launch the asyncio-based trading bot
         bot_proc = subprocess.Popen(['python', '-m', 'crypto_bot.main'])
         bot_start_time = time.time()
@@ -124,10 +183,12 @@ def start_bot():
     )
     set_execution_mode(mode)
     status = 'running'
-    if not is_running():
+    if not is_running() and not check_existing_bot():
         bot_proc = subprocess.Popen(['python', '-m', 'crypto_bot.main'])
         bot_start_time = time.time()
         status = 'started'
+    elif check_existing_bot():
+        status = 'conflict'
     return jsonify({
         'status': status,
         'running': True,
@@ -372,6 +433,13 @@ def api_strategy_performance():
         return jsonify({'error': str(e)})
 
 
+@app.route('/stop_conflicts', methods=['POST'])
+def stop_conflicts():
+    """Stop any conflicting bot processes."""
+    stop_conflicting_bots()
+    return jsonify({'status': 'conflicts_stopped'})
+
+
 @app.route('/api/dashboard-metrics')
 def api_dashboard_metrics():
     """Return comprehensive dashboard metrics as JSON."""
@@ -426,6 +494,61 @@ def api_dashboard_metrics():
                 'regime': utils.get_current_regime(LOG_FILE),
                 'last_reason': utils.get_last_decision_reason(LOG_FILE)
             }
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
+@app.route('/api/paper-wallet-balance', methods=['GET', 'POST'])
+def api_paper_wallet_balance():
+    """Get or set paper wallet balance."""
+    if request.method == 'POST':
+        try:
+            data = request.get_json()
+            balance = float(data.get('balance', 10000.0))
+            set_paper_wallet_balance(balance)
+            return jsonify({'success': True, 'balance': balance})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)})
+    else:
+        balance = get_paper_wallet_balance()
+        return jsonify({'balance': balance})
+
+
+@app.route('/api/live-updates')
+def api_live_updates():
+    """Return live updates for real-time dashboard."""
+    try:
+        # Get current bot status
+        bot_status = {
+            'running': is_running(),
+            'mode': load_execution_mode(),
+            'uptime': get_uptime(),
+            'regime': utils.get_current_regime(LOG_FILE),
+            'last_reason': utils.get_current_regime(LOG_FILE)
+        }
+        
+        # Get latest performance data
+        df = log_reader._read_trades(TRADE_FILE)
+        perf = utils.compute_performance(df)
+        
+        # Get latest asset scores
+        asset_scores = {}
+        if SCAN_FILE.exists():
+            with open(SCAN_FILE) as f:
+                asset_scores = json.load(f)
+        
+        # Get paper wallet balance if in dry run mode
+        paper_wallet_balance = None
+        if bot_status['mode'] == 'dry_run':
+            paper_wallet_balance = get_paper_wallet_balance()
+        
+        return jsonify({
+            'timestamp': time.time(),
+            'bot_status': bot_status,
+            'performance': perf,
+            'asset_scores': asset_scores,
+            'paper_wallet_balance': paper_wallet_balance
         })
     except Exception as e:
         return jsonify({'error': str(e)})

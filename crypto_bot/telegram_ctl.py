@@ -9,7 +9,8 @@ from typing import Any, Dict, Sequence
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from . import console_monitor, log_reader
+# Remove circular imports that cause import chain failures
+# from . import console_monitor, log_reader
 from .utils.logger import LOG_DIR, setup_logger
 from .utils.open_trades import get_open_trades
 from .utils.telegram import TelegramNotifier

@@ -211,6 +211,152 @@ function updateMetrics() {
     });
 }
 
+// Update dashboard metrics
+function updateDashboardMetrics() {
+    fetch('/api/dashboard-metrics')
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                console.error('Error updating dashboard metrics:', data.error);
+                return;
+            }
+            
+            // Update performance metrics
+            if (data.performance) {
+                updatePerformanceMetrics(data.performance);
+            }
+            
+            // Update allocation display
+            if (data.allocation) {
+                updateAllocationDisplay(data.allocation);
+            }
+            
+            // Update recent trades
+            if (data.recent_trades) {
+                updateRecentTrades(data.recent_trades);
+            }
+        })
+        .catch(error => console.error('Error updating dashboard metrics:', error));
+}
+
+// Update live signals
+function updateLiveSignals() {
+    fetch('/api/live-signals')
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                console.error('Error updating live signals:', data.error);
+                return;
+            }
+            
+            // Update asset scores if available
+            if (data && Object.keys(data).length > 0) {
+                updateAssetScores(data);
+            }
+        })
+        .catch(error => console.error('Error updating live signals:', error));
+}
+
+// Update performance metrics
+function updatePerformanceMetrics(performance) {
+    // Update P&L
+    const totalPnl = document.getElementById('totalPnl');
+    if (totalPnl && performance.total_pnl !== undefined) {
+        totalPnl.textContent = formatCurrency(performance.total_pnl);
+    }
+    
+    // Update total trades
+    const totalTrades = document.getElementById('totalTrades');
+    if (totalTrades && performance.total_trades !== undefined) {
+        totalTrades.textContent = performance.total_trades;
+    }
+    
+    // Update win rate
+    const winRate = document.getElementById('winRate');
+    if (winRate && performance.win_rate !== undefined) {
+        winRate.textContent = formatPercentage(performance.win_rate * 100);
+    }
+}
+
+// Update allocation display
+function updateAllocationDisplay(allocation) {
+    // This would update the strategy allocation visualization
+    // Implementation depends on your specific UI structure
+    console.log('Allocation updated:', allocation);
+}
+
+// Update recent trades
+function updateRecentTrades(recentTrades) {
+    // This would update the recent trades display
+    // Implementation depends on your specific UI structure
+    console.log('Recent trades updated:', recentTrades);
+}
+
+// Update asset scores
+function updateAssetScores(assetScores) {
+    // This would update the asset scores display
+    // Implementation depends on your specific UI structure
+    console.log('Asset scores updated:', assetScores);
+}
+
+// Bot control functions
+function startBot() {
+    fetch('/start_bot', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            mode: 'dry_run'
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'started') {
+            showToast('Bot started successfully!', 'success');
+            setTimeout(() => window.location.reload(), 1000);
+        } else if (data.status === 'conflict') {
+            showToast('Bot conflict detected. Use "Stop Conflicts" button first.', 'warning');
+        } else {
+            showToast('Bot is already running', 'info');
+        }
+    })
+    .catch(error => {
+        console.error('Error starting bot:', error);
+        showToast('Error starting bot', 'error');
+    });
+}
+
+function stopBot() {
+    fetch('/stop', {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        showToast('Bot stopped successfully!', 'success');
+        setTimeout(() => window.location.reload(), 1000);
+    })
+    .catch(error => {
+        console.error('Error stopping bot:', error);
+        showToast('Error stopping bot', 'error');
+    });
+}
+
+function stopConflicts() {
+    fetch('/stop_conflicts', {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        showToast('Conflicting processes stopped', 'success');
+        setTimeout(() => window.location.reload(), 1000);
+    })
+    .catch(error => {
+        console.error('Error stopping conflicts:', error);
+        showToast('Error stopping conflicts', 'error');
+    });
+}
+
 // Utility functions
 function formatCurrency(amount, currency = 'USD') {
     return new Intl.NumberFormat('en-US', {

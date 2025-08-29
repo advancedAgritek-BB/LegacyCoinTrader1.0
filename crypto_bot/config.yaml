@@ -84,6 +84,15 @@ exec:
   allow_market_orders: true
   order_retry_interval: 0.5
 execution_mode: dry_run
+
+# Paper Wallet Configuration for Dry Run Mode
+paper_wallet:
+  enabled: true
+  initial_balance: 10000.0
+  max_open_trades: 10
+  allow_short: true
+  config_file: "crypto_bot/paper_wallet_config.yaml"
+
 exit_strategy:
   adaptive_trailing:
     base_trailing_pct: 0.008
@@ -224,11 +233,11 @@ momentum_exploiter:
   threshold: 0.01
 ohlcv_quality:
   fallback_to_rest: true
+  max_retry_attempts: 2
   min_data_ratio: 0.5
   min_required_candles: 20
-  retry_incomplete: true
-  max_retry_attempts: 2
   rest_fallback_timeout: 25
+  retry_incomplete: true
 optimization:
   enabled: true
   interval_days: 0.5
@@ -323,7 +332,7 @@ risk:
 safety:
   max_error_count: 15
   restart_on_error: true
-scalp_timeframe: 30s
+scalp_timeframe: 1m
 scan_in_background: true
 scan_lookback_limit: 500
 scan_markets: true
@@ -417,10 +426,10 @@ strategy_router:
     - flash_crash_bot
     - meme_wave_bot
     - hft_engine
-  scalp_timeframe: 30s
+  scalp_timeframe: 1m
   sideways_timeframe: 45m
   trending_timeframe: 45m
-  volatile_timeframe: 30s
+  volatile_timeframe: 1m
 symbol_filter:
   change_pct_percentile: 3
   correlation_max_pairs: 250
@@ -443,32 +452,28 @@ telegram:
   chat_admins: 827777274
   chat_id: 827777274
   command_cooldown: 2
+  connect_timeout: 60.0
+  connection_pool_size: 8
   enabled: true
+  fail_silently: true
+  max_retries: 5
+  read_timeout: 60.0
+  retry_delay_seconds: 10
   status_updates: true
+  timeout_seconds: 60
   token: 8126215032:AAEhQZLiXpssauKf0ktQsq1XqXl94QriCdE
   trade_updates: true
-  # Add timeout and retry settings
-  timeout_seconds: 30
-  max_retries: 3
-  retry_delay_seconds: 5
-  # Disable if causing issues
-  fail_silently: true
-  # Connection settings
-  connection_pool_size: 8
-  connect_timeout: 30.0
-  read_timeout: 30.0
-  write_timeout: 30.0
+  write_timeout: 60.0
 telegram_ctl:
   enabled: true
   update_interval: 15
 testing_mode: false
 timeframe: 10m
 timeframes:
-- 15s
-- 30s
 - 1m
 - 5m
 - 10m
+- 15m
 - 1h
 - 4h
 top_n_symbols: 150
@@ -487,25 +492,9 @@ ultra_scalp_bot:
   min_score: 0.034262190740007054
   stop_loss_pct: 0.003361080934308343
   take_profit_pct: 0.026817922291809047
-  timeframe: 15s
+  timeframe: 1m
   volume_mult: 2.129581467112397
-# WebSocket configuration
 use_websocket: true
-ws_failures_before_disable: 3  # Reduced from 5
-ws_ohlcv_timeout: 15  # Reduced from 20
-ws_ping_interval: 5  # Reduced from 8
-ws_reconnect_delay: 10
-ws_max_retries: 3
-
-# OHLCV quality settings
-ohlcv_quality:
-  fallback_to_rest: true
-  min_data_ratio: 0.5  # Reduced from 0.6
-  min_required_candles: 20  # Reduced from 30
-  retry_incomplete: true
-  max_retry_attempts: 2
-  rest_fallback_timeout: 25  # Reduced from 30
-
 volatility_harvester:
   atr_threshold: 0.002
   enabled: true
@@ -513,3 +502,8 @@ volatility_harvester:
   stop_loss_pct: 0.01
   take_profit_pct: 0.04
   volume_spike: 2.0
+ws_failures_before_disable: 5
+ws_max_retries: 5
+ws_ohlcv_timeout: 30
+ws_ping_interval: 10
+ws_reconnect_delay: 15

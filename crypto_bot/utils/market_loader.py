@@ -1,6 +1,6 @@
 """Utilities for loading trading symbols and fetching OHLCV data."""
 
-from typing import Iterable, List, Dict, Any, Deque
+from typing import Iterable, List, Dict, Any, Deque, Optional, Union
 import asyncio
 import inspect
 import time
@@ -37,7 +37,7 @@ MAX_WS_LIMIT = 500
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
 UNSUPPORTED_SYMBOL = object()
 STATUS_UPDATES = True
-SEMA: asyncio.Semaphore | None = None
+SEMA: Optional[asyncio.Semaphore] = None
 
 # Mapping of common symbols to CoinGecko IDs for OHLC fallback
 COINGECKO_IDS = {
@@ -73,14 +73,14 @@ def _is_valid_base_token(token: str) -> bool:
 
 
 def configure(
-    ohlcv_timeout: int | float | None = None,
-    max_failures: int | None = None,
-    max_ws_limit: int | None = None,
-    status_updates: bool | None = None,
-    ws_ohlcv_timeout: int | float | None = None,
-    rest_ohlcv_timeout: int | float | None = None,
-    max_concurrent: int | None = None,
-    gecko_limit: int | None = None,
+    ohlcv_timeout: Optional[Union[int, float]] = None,
+    max_failures: Optional[int] = None,
+    max_ws_limit: Optional[int] = None,
+    status_updates: Optional[bool] = None,
+    ws_ohlcv_timeout: Optional[Union[int, float]] = None,
+    rest_ohlcv_timeout: Optional[Union[int, float]] = None,
+    max_concurrent: Optional[int] = None,
+    gecko_limit: Optional[int] = None,
 ) -> None:
     """Configure module-wide settings."""
     global OHLCV_TIMEOUT, MAX_OHLCV_FAILURES, MAX_WS_LIMIT, STATUS_UPDATES, SEMA, GECKO_SEMAPHORE

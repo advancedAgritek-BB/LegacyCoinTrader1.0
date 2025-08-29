@@ -5,12 +5,13 @@ import json
 import time
 import urllib.request
 import urllib.parse
+from typing import Union
 
 DEFAULT_KRAKEN_URL = "https://api.kraken.com"
 PATH = "/0/private/GetWebSocketsToken"
 
 
-def get_ws_token(api_key: str, private_key: str, otp: str | None = None, environment: str = DEFAULT_KRAKEN_URL) -> str:
+def get_ws_token(api_key: str, private_key: str, otp: Union[str, None] = None, environment: str = DEFAULT_KRAKEN_URL) -> str:
     """Return a WebSocket authentication token from Kraken."""
     nonce = str(int(time.time() * 1000))
     body = [("nonce", nonce)]

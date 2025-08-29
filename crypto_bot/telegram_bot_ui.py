@@ -6,29 +6,42 @@ import time
 import json
 import yaml
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional, Union
 
 
 import schedule
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import BadRequest
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    ContextTypes,
-    CallbackQueryHandler,
-    ConversationHandler,
-    MessageHandler,
-    filters,
-)
-from .telegram_ctl import _paginate
+try:  # pragma: no cover - optional dependency
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+    from telegram.ext import (
+        Application,
+        ApplicationBuilder,
+        CallbackQueryHandler,
+        CommandHandler,
+        ConversationHandler,
+        MessageHandler,
+        filters,
+    )
+except Exception:  # pragma: no cover - telegram not installed
+    InlineKeyboardButton = InlineKeyboardMarkup = Update = object  # type: ignore
+    Application = ApplicationBuilder = object  # type: ignore
+    CallbackQueryHandler = CommandHandler = ConversationHandler = MessageHandler = object  # type: ignore
+    filters = object  # type: ignore
+
+# Remove circular import - define _paginate function locally if needed
+def _paginate(items: List[str], page: int = 0, items_per_page: int = 10) -> tuple[List[str], int, int]:
+    """Paginate items into pages."""
+    start = page * items_per_page
+    end = start + items_per_page
+    total_pages = (len(items) + items_per_page - 1) // items_per_page
+    return items[start:end], page, total_pages
 
 from crypto_bot.portfolio_rotator import PortfolioRotator
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 from crypto_bot.utils.telegram import TelegramNotifier, is_admin
 
-from crypto_bot import log_reader, console_monitor
+# Remove duplicate imports that cause circular dependencies
+# from crypto_bot import log_reader, console_monitor
 from .telegram_ctl import BotController
 from crypto_bot.utils.open_trades import get_open_trades
 
@@ -200,7 +213,7 @@ class TelegramBotUI:
         if getattr(update, "callback_query", None):
             try:
                 await update.callback_query.message.edit_text(text, reply_markup=reply_markup)
-            except BadRequest as exc:
+            except Exception as exc:
                 if "Message is not modified" not in str(exc):
                     raise
         else:
@@ -243,7 +256,7 @@ class TelegramBotUI:
 
     # Command handlers -------------------------------------------------
     async def start_cmd(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+        self, update: Update, context: Any
     ) -> None:
         if not await self._check_cooldown(update, "start"):
             return
@@ -256,7 +269,7 @@ class TelegramBotUI:
         await self.menu_cmd(update, context)
 
     async def stop_cmd(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+        self, update: Update, context: Any
     ) -> None:
         if not await self._check_cooldown(update, "stop"):
             return
@@ -268,7 +281,7 @@ class TelegramBotUI:
         await self._reply(update, "Trading stopped", reply_markup=_back_to_menu_markup())
 
     async def status_cmd(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+        self, update: Update, context: Any
     ) -> None:
         if not await self._check_cooldown(update, "status"):
             return
@@ -276,7 +289,7 @@ class TelegramBotUI:
         await self._reply(update, text, reply_markup=_back_to_menu_markup())
 
 
-    async def log_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def log_cmd(self, update: Update, context: Any) -> None:
         if not await self._check_cooldown(update, "log"):
             return
         if not await self._check_admin(update):
@@ -289,7 +302,7 @@ class TelegramBotUI:
         await self._reply(update, text, reply_markup=_back_to_menu_markup())
 
     async def rotate_now_cmd(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+        self, update: Update, context: Any
     ) -> None:
         if not await self._check_cooldown(update, "rotate_now"):
             return
@@ -331,7 +344,7 @@ class TelegramBotUI:
             self.logger.error("Failed to send summary: %s", err)
 
     async def toggle_mode_cmd(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+        self, update: Update, context: Any
     ) -> None:
         if not await self._check_cooldown(update, "toggle_mode"):
             return
@@ -343,7 +356,7 @@ class TelegramBotUI:
         await self._reply(update, f"Mode set to {mode}", reply_markup=_back_to_menu_markup())
 
     async def reload_cmd(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+        self, update: Update, context: Any
     ) -> None:
         if not await self._check_cooldown(update, "reload"):
             return
@@ -353,7 +366,7 @@ class TelegramBotUI:
         await self._reply(update, "Config reload scheduled", reply_markup=_back_to_menu_markup())
 
     async def panic_sell_cmd(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+        self, update: Update, context: Any
     ) -> None:
         if not await self._check_cooldown(update, "panic_sell"):
             return
@@ -362,7 +375,7 @@ class TelegramBotUI:
         text = await self.controller.close_all_positions()
         await self._reply(update, text, reply_markup=_back_to_menu_markup())
 
-    async def menu_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def menu_cmd(self, update: Update, context: Any) -> None:
         if not await self._check_cooldown(update, "menu"):
             return
         if not await self._check_admin(update):
@@ -394,7 +407,7 @@ class TelegramBotUI:
         markup = InlineKeyboardMarkup(keyboard)
         await self._reply(update, "Select a command:", reply_markup=markup)
 
-    async def show_signals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def show_signals(self, update: Update, context: Any) -> None:
         if not await self._check_cooldown(update, "signals"):
             return
         if not await self._check_admin(update):
@@ -411,7 +424,7 @@ class TelegramBotUI:
             text = "No signals found"
         await self._reply(update, text, reply_markup=_back_to_menu_markup())
 
-    async def show_balance(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def show_balance(self, update: Update, context: Any) -> None:
         if not await self._check_cooldown(update, "balance"):
             return
         if not await self._check_admin(update):
@@ -470,7 +483,7 @@ class TelegramBotUI:
             text = "Balance fetch failed"
         await self._reply(update, text, reply_markup=_back_to_menu_markup())
 
-    async def show_trades(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def show_trades(self, update: Update, context: Any) -> None:
         if not await self._check_cooldown(update, "trades"):
             return
         if not await self._check_admin(update):
@@ -517,7 +530,7 @@ class TelegramBotUI:
                 
         await self._reply(update, text, reply_markup=_back_to_menu_markup())
 
-    async def show_config(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def show_config(self, update: Update, context: Any) -> None:
         if not await self._check_cooldown(update, "config"):
             return
         if not await self._check_admin(update):
@@ -539,21 +552,21 @@ class TelegramBotUI:
         markup = InlineKeyboardMarkup(keyboard)
         await self._reply(update, text, reply_markup=markup)
 
-    async def edit_trade_size(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    async def edit_trade_size(self, update: Update, context: Any) -> int:
         if not await self._check_admin(update):
             return ConversationHandler.END
         context.user_data["config_key"] = "trade_size_pct"
         await self._reply(update, "Enter trade size percentage (0-1):")
         return EDIT_VALUE
 
-    async def edit_max_trades(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    async def edit_max_trades(self, update: Update, context: Any) -> int:
         if not await self._check_admin(update):
             return ConversationHandler.END
         context.user_data["config_key"] = "max_open_trades"
         await self._reply(update, "Enter max open trades (integer):")
         return EDIT_VALUE
 
-    async def set_config_value(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    async def set_config_value(self, update: Update, context: Any) -> int:
         if not await self._check_admin(update):
             return ConversationHandler.END
         key = context.user_data.get("config_key")
@@ -586,7 +599,7 @@ class TelegramBotUI:
         await self.controller.reload_config()
         await self._reply(update, f"{key} updated to {val}")
         return ConversationHandler.END
-    async def show_pnl_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def show_pnl_stats(self, update: Update, context: Any) -> None:
         if not await self._check_cooldown(update, "pnl_stats"):
             return
         if not await self._check_admin(update):
@@ -603,7 +616,7 @@ class TelegramBotUI:
         await self._reply(update, text)
 
     async def show_trade_history(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+        self, update: Update, context: Any
     ) -> None:
         if not await self._check_cooldown(update, "trade_history"):
             return

@@ -7,8 +7,21 @@ import inspect
 import threading
 import os
 
-from telegram import Bot
-from telegram.request import Request
+try:
+    from telegram.ext import Bot
+    from telegram.request import Request
+except ImportError:
+    try:
+        from telegram import Bot
+        from telegram.request import Request
+    except ImportError:
+        try:
+            from telegram.ext import Bot
+            Request = None
+        except ImportError:
+            # Fallback for older versions
+            Bot = None
+            Request = None
 
 from .logger import LOG_DIR, setup_logger
 from pathlib import Path
@@ -50,12 +63,16 @@ def send_message(token: str, chat_id: str, text: str) -> Optional[str]:
     Returns ``None`` on success or an error string on failure.
     """
     try:
-        bot = Bot(token, request=Request(
-            connection_pool_size=8,
-            connect_timeout=30.0,
-            read_timeout=30.0,
-            write_timeout=30.0
-        ))
+        if Request is not None:
+            bot = Bot(token, request=Request(
+                connection_pool_size=8,
+                connect_timeout=30.0,
+                read_timeout=30.0,
+                write_timeout=30.0
+            ))
+        else:
+            # Fallback for older versions
+            bot = Bot(token)
 
         async def _send() -> None:
             try:

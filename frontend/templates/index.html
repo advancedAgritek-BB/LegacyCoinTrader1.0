@@ -20,6 +20,9 @@
               <i class="fas fa-play"></i> Start Bot
             </button>
           {% endif %}
+          <button class="btn btn-warning" onclick="stopConflicts()" title="Stop conflicting bot processes">
+            <i class="fas fa-exclamation-triangle"></i> Stop Conflicts
+          </button>
         </div>
       </div>
     </div>
@@ -91,6 +94,49 @@
       </div>
     </div>
   </div>
+
+  <!-- Paper Wallet Balance (Dry Run Mode Only) -->
+  {% if mode == 'dry_run' and paper_wallet_balance %}
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="card-title">
+            <i class="fas fa-wallet"></i>
+            Paper Wallet Status
+          </h5>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-4">
+              <div class="wallet-metric">
+                <div class="wallet-label">Initial Balance</div>
+                <div class="wallet-value paper-wallet-balance">${{ "{:,.2f}".format(paper_wallet_balance) }}</div>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="wallet-metric">
+                <div class="wallet-label">Current Balance</div>
+                <div class="wallet-value" id="currentWalletBalance">${{ "{:,.2f}".format(paper_wallet_balance) }}</div>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="wallet-metric">
+                <div class="wallet-label">P&L</div>
+                <div class="wallet-value" id="walletPnl">$0.00</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3">
+            <button class="btn btn-outline-primary btn-sm" onclick="updateWalletBalance()">
+              <i class="fas fa-edit"></i> Update Balance
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <!-- Charts Row -->
   <div class="row mb-4">
@@ -282,11 +328,23 @@
         <form id="botControlForm">
           <div class="mb-3">
             <label for="executionMode" class="form-label">Execution Mode</label>
-            <select class="form-control" id="executionMode" name="mode">
+            <select class="form-control" id="executionMode" name="mode" onchange="toggleWalletBalanceField()">
               <option value="dry_run" {{ 'selected' if mode == 'dry_run' else '' }}>Dry Run (Paper Trading)</option>
               <option value="live" {{ 'selected' if mode == 'live' else '' }}>Live Trading</option>
               <option value="backtest" {{ 'selected' if mode == 'backtest' else '' }}>Backtest Mode</option>
             </select>
+          </div>
+          
+          <!-- Wallet Balance Configuration (shown only for dry run) -->
+          <div class="mb-3" id="walletBalanceSection" style="display: none;">
+            <label for="walletBalance" class="form-label">Paper Wallet Balance (USD)</label>
+            <div class="input-group">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control" id="walletBalance" name="walletBalance" 
+                     value="{{ paper_wallet_balance or 10000 }}" min="100" step="100" 
+                     placeholder="Enter initial balance">
+            </div>
+            <div class="form-text">This will be your starting balance for paper trading</div>
           </div>
         </form>
       </div>
@@ -330,7 +388,38 @@ function stopBot() {
 
 function confirmBotAction() {
   const mode = document.getElementById('executionMode').value;
+  const walletBalance = document.getElementById('walletBalance').value;
   
+  // If dry run mode, save wallet balance first
+  if (mode === 'dry_run' && walletBalance) {
+    fetch('/api/paper-wallet-balance', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ balance: parseFloat(walletBalance) })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        // Now start the bot
+        startBotWithMode(mode);
+      } else {
+        window.LegacyCoinTrader.showToast('Error saving wallet balance', 'error');
+      }
+    })
+    .catch(error => {
+      window.LegacyCoinTrader.showToast('Error saving wallet balance', 'error');
+    });
+  } else {
+    // Start bot directly for non-dry-run modes
+    startBotWithMode(mode);
+  }
+  
+  bootstrap.Modal.getInstance(document.getElementById('botControlModal')).hide();
+}
+
+function startBotWithMode(mode) {
   fetch('/start_bot', {
     method: 'POST',
     headers: {
@@ -348,8 +437,150 @@ function confirmBotAction() {
   .catch(error => {
     window.LegacyCoinTrader.showToast('Error starting bot', 'error');
   });
+}
+
+function toggleWalletBalanceField() {
+  const dryRunOption = document.getElementById('executionMode').value === 'dry_run';
+  const walletBalanceSection = document.getElementById('walletBalanceSection');
+  if (dryRunOption) {
+    walletBalanceSection.style.display = 'block';
+  } else {
+    walletBalanceSection.style.display = 'none';
+  }
+}
+
+function updateWalletBalance() {
+  const newBalance = prompt('Enter new wallet balance (USD):', '10000');
+  if (newBalance && !isNaN(newBalance)) {
+    fetch('/api/paper-wallet-balance', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ balance: parseFloat(newBalance) })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        window.LegacyCoinTrader.showToast('Wallet balance updated successfully', 'success');
+        setTimeout(() => window.location.reload(), 1000);
+      } else {
+        window.LegacyCoinTrader.showToast('Error updating wallet balance', 'error');
+      }
+    })
+    .catch(error => {
+      window.LegacyCoinTrader.showToast('Error updating wallet balance', 'error');
+    });
+  }
+}
+
+// Initialize wallet balance field visibility on page load
+document.addEventListener('DOMContentLoaded', function() {
+  toggleWalletBalanceField();
   
-  bootstrap.Modal.getInstance(document.getElementById('botControlModal')).hide();
+  // Start real-time updates
+  startLiveUpdates();
+});
+
+// Real-time dashboard updates
+function startLiveUpdates() {
+  // Update dashboard every 5 seconds
+  setInterval(updateDashboard, 5000);
+  
+  // Update bot status every 3 seconds
+  setInterval(updateBotStatus, 3000);
+}
+
+function updateDashboard() {
+  fetch('/api/live-updates')
+    .then(response => response.json())
+    .then(data => {
+      if (data.error) {
+        console.error('Error updating dashboard:', data.error);
+        return;
+      }
+      
+      // Update performance metrics
+      if (data.performance) {
+        updatePerformanceMetrics(data.performance);
+      }
+      
+      // Update bot status
+      if (data.bot_status) {
+        updateBotStatusDisplay(data.bot_status);
+      }
+      
+      // Update paper wallet balance if available
+      if (data.paper_wallet_balance !== undefined) {
+        updatePaperWalletBalance(data.paper_wallet_balance);
+      }
+    })
+    .catch(error => console.error('Error fetching live updates:', error));
+}
+
+function updatePerformanceMetrics(performance) {
+  // Update P&L
+  const totalPnl = document.getElementById('totalPnl');
+  if (totalPnl && performance.total_pnl !== undefined) {
+    totalPnl.textContent = `$${performance.total_pnl.toFixed(2)}`;
+  }
+  
+  // Update total trades
+  const totalTrades = document.getElementById('totalTrades');
+  if (totalTrades && performance.total_trades !== undefined) {
+    totalTrades.textContent = performance.total_trades;
+  }
+  
+  // Update win rate
+  const winRate = document.getElementById('winRate');
+  if (winRate && performance.win_rate !== undefined) {
+    winRate.textContent = `${(performance.win_rate * 100).toFixed(1)}%`;
+  }
+}
+
+function updateBotStatusDisplay(botStatus) {
+  // Update uptime
+  const uptimeElement = document.getElementById('uptime');
+  if (uptimeElement && botStatus.uptime) {
+    uptimeElement.textContent = botStatus.uptime;
+  }
+  
+  // Update running status
+  const startBtn = document.querySelector('.btn-success');
+  const stopBtn = document.querySelector('.btn-danger');
+  
+  if (botStatus.running && startBtn) {
+    startBtn.style.display = 'none';
+  } else if (!botStatus.running && stopBtn) {
+    stopBtn.style.display = 'none';
+  }
+}
+
+function updatePaperWalletBalance(balance) {
+  // Update wallet balance display if it exists
+  const walletBalanceDisplay = document.querySelector('.paper-wallet-balance');
+  if (walletBalanceDisplay) {
+    walletBalanceDisplay.textContent = `$${balance.toFixed(2)}`;
+  }
+}
+
+function updateBotStatus() {
+  fetch('/api/bot-status')
+    .then(response => response.json())
+    .then(data => {
+      // Update any status indicators
+      const statusIndicator = document.querySelector('.status-indicator');
+      if (statusIndicator) {
+        if (data.running) {
+          statusIndicator.classList.add('online');
+          statusIndicator.classList.remove('offline');
+        } else {
+          statusIndicator.classList.remove('online');
+          statusIndicator.classList.add('offline');
+        }
+      }
+    })
+    .catch(error => console.error('Error updating bot status:', error));
 }
 
 // Add custom styles for the dashboard
@@ -526,6 +757,27 @@ document.addEventListener('DOMContentLoaded', function() {
     
     .action-item span {
       font-weight: 500;
+    }
+    
+    .wallet-metric {
+      text-align: center;
+      padding: 1rem;
+    }
+    
+    .wallet-label {
+      color: var(--text-secondary);
+      font-size: 0.875rem;
+      margin-bottom: 0.5rem;
+    }
+    
+    .wallet-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    
+    .paper-wallet-balance {
+      color: var(--success-color);
     }
   `;
   document.head.appendChild(style);
