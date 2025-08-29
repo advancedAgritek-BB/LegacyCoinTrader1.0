@@ -56,7 +56,7 @@ TELEGRAM_PID=$!
 echo ""
 echo "🎉 LegacyCoinTrader is now running!"
 echo "📊 Main bot PID: $MAIN_PID"
-echo "🌐 Web dashboard: http://localhost:5000"
+echo "🌐 Web dashboard: http://localhost:8000"
 echo "📱 Telegram bot PID: $TELEGRAM_PID"
 echo ""
 echo "Press Ctrl+C to stop all services"

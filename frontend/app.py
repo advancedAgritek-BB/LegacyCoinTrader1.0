@@ -6,6 +6,7 @@ process and provides REST API routes used by the UI and tests.
 
 from flask import Flask, render_template, redirect, url_for, request, jsonify
 from pathlib import Path
+import os
 
 from crypto_bot.utils.logger import LOG_DIR
 import subprocess
@@ -297,5 +298,6 @@ if __name__ == '__main__':
     watch_thread = threading.Thread(target=watch_bot, daemon=True)
     watch_thread.start()
     # Configure Flask to be accessible from any host (for containerized deployments)
-    # and set the default port to 5000
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    # and set the default port to 8000 (avoiding macOS ControlCenter on port 5000)
+    port = int(os.environ.get('FLASK_RUN_PORT', 8000))
+    app.run(host='0.0.0.0', port=port, debug=False)
