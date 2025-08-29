@@ -138,15 +138,15 @@
           </h5>
         </div>
         <div class="card-body">
-          {% if last_trade %}
+          {% if last_trade and last_trade.symbol %}
             <div class="recent-trade">
               <div class="trade-header">
-                <span class="trade-pair">{{ last_trade.symbol if last_trade.symbol else 'BTC/USD' }}</span>
-                <span class="trade-type badge badge-success">BUY</span>
+                <span class="trade-pair">{{ last_trade.symbol }}</span>
+                <span class="trade-type badge badge-{{ 'success' if last_trade.side == 'buy' else 'danger' }}">{{ last_trade.side.upper() }}</span>
               </div>
               <div class="trade-details">
-                <span class="trade-amount">{{ "${:,.2f}".format(last_trade.amount) if last_trade.amount else "$1,000.00" }}</span>
-                <span class="trade-time">{{ last_trade.timestamp if last_trade.timestamp else '2 hours ago' }}</span>
+                <span class="trade-amount">${{ "%.2f"|format(last_trade.amount * last_trade.price) }}</span>
+                <span class="trade-time">{{ last_trade.timestamp }}</span>
               </div>
             </div>
           {% else %}

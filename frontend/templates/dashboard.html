@@ -5,7 +5,7 @@
     <div class="card">
       <div class="card-header">Trade Dashboard</div>
       <div class="card-body">
-        <p class="mb-3"><strong>Total PnL:</strong> {{ pnl }}</p>
+        <p class="mb-3"><strong>Total PnL:</strong> ${{ "%.2f"|format(pnl) }}</p>
         <div class="row">
           <div class="col-md-6"><canvas id="perfChart"></canvas></div>
           <div class="col-md-6"><canvas id="allocChart"></canvas></div>
@@ -46,16 +46,52 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-const perfData = {{ performance|tojson }};
+const perfData = {{ performance.per_symbol|tojson if performance and performance.per_symbol else '{}' }};
 const allocData = {{ allocation|tojson }};
-new Chart(document.getElementById('perfChart'), {
-    type: 'bar',
-    data: {labels: Object.keys(perfData), datasets: [{label:'PnL', data:Object.values(perfData), backgroundColor:'rgba(54,162,235,0.6)'}]},
-});
-new Chart(document.getElementById('allocChart'), {
-    type: 'pie',
-    data: {labels: Object.keys(allocData), datasets: [{data:Object.values(allocData), backgroundColor:['#ff6384','#36a2eb','#ffcd56','#4bc0c0','#9966ff','#c9cbcf']}]},
-});
+
+// Performance chart
+if (Object.keys(perfData).length > 0) {
+    new Chart(document.getElementById('perfChart'), {
+        type: 'bar',
+        data: {
+            labels: Object.keys(perfData), 
+            datasets: [{
+                label: 'PnL', 
+                data: Object.values(perfData), 
+                backgroundColor: 'rgba(54,162,235,0.6)'
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+} else {
+    document.getElementById('perfChart').innerHTML = '<p class="text-muted text-center">No performance data available</p>';
+}
+
+// Allocation chart
+if (Object.keys(allocData).length > 0) {
+    new Chart(document.getElementById('allocChart'), {
+        type: 'pie',
+        data: {
+            labels: Object.keys(allocData), 
+            datasets: [{
+                data: Object.values(allocData), 
+                backgroundColor: ['#ff6384','#36a2eb','#ffcd56','#4bc0c0','#9966ff','#c9cbcf']
+            }]
+        },
+        options: {
+            responsive: true
+        }
+    });
+} else {
+    document.getElementById('allocChart').innerHTML = '<p class="text-muted text-center">No allocation data available</p>';
+}
 
 function color(val){
   const g = Math.floor(255 * val);
@@ -63,29 +99,47 @@ function color(val){
   return `rgb(${r},${g},0)`;
 }
 
-fetch('/api/live-signals').then(r=>r.json()).then(data=>{
-  const cont=document.getElementById('signalsHeatmap');
-  if(!Object.keys(data).length){cont.innerText='No data';return;}
-  let html='<table class="table table-bordered"><tbody><tr>';
-  for(const [sym,val] of Object.entries(data)){
-    html+=`<td style="background-color:${color(val)}">${sym}<br>${val.toFixed(2)}</td>`;
+// Live signals
+fetch('/api/live-signals')
+.then(r => r.json())
+.then(data => {
+  const cont = document.getElementById('signalsHeatmap');
+  if (!Object.keys(data).length) {
+    cont.innerText = 'No live signals available';
+    return;
   }
-  html+='</tr></tbody></table>';
-  cont.innerHTML=html;
+  let html = '<table class="table table-bordered"><tbody><tr>';
+  for (const [sym, val] of Object.entries(data)) {
+    html += `<td style="background-color:${color(val)}">${sym}<br>${val.toFixed(2)}</td>`;
+  }
+  html += '</tr></tbody></table>';
+  cont.innerHTML = html;
+})
+.catch(error => {
+  document.getElementById('signalsHeatmap').innerHTML = '<p class="text-muted">Error loading live signals</p>';
 });
 
-fetch('/api/strategy-performance').then(r=>r.json()).then(data=>{
-  const cont=document.getElementById('regimeBreakdown');
-  if(!Object.keys(data).length){cont.innerText='No data';return;}
-  let html='';
-  for(const [regime,strategies] of Object.entries(data)){
-    html+=`<h5>${regime}</h5><ul>`;
-    for(const [s,recs] of Object.entries(strategies)){
-      html+=`<li>${s}: ${recs.length} trades</li>`;
-    }
-    html+='</ul>';
+// Strategy performance
+fetch('/api/strategy-performance')
+.then(r => r.json())
+.then(data => {
+  const cont = document.getElementById('regimeBreakdown');
+  if (!Object.keys(data).length) {
+    cont.innerText = 'No strategy performance data available';
+    return;
   }
-  cont.innerHTML=html;
+  let html = '';
+  for (const [regime, strategies] of Object.entries(data)) {
+    html += `<h5>${regime}</h5><ul>`;
+    for (const [s, recs] of Object.entries(strategies)) {
+      html += `<li>${s}: ${recs.length} trades</li>`;
+    }
+    html += '</ul>';
+  }
+  cont.innerHTML = html;
+})
+.catch(error => {
+  document.getElementById('regimeBreakdown').innerHTML = '<p class="text-muted">Error loading strategy performance</p>';
 });
 </script>
 {% endblock %}

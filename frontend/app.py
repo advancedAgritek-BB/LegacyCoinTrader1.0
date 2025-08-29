@@ -70,6 +70,23 @@ def get_uptime() -> str:
 @app.route('/')
 def index():
     mode = load_execution_mode()
+    
+    # Get performance data
+    df = log_reader._read_trades(TRADE_FILE)
+    perf = utils.compute_performance(df)
+    
+    # Get allocation data
+    allocation = {}
+    if CONFIG_FILE.exists():
+        with open(CONFIG_FILE) as f:
+            cfg = yaml.safe_load(f) or {}
+            allocation = cfg.get('strategy_allocation', {})
+    
+    # Fallback to weights.json if no allocation in config
+    if not allocation and (LOG_DIR / 'weights.json').exists():
+        with open(LOG_DIR / 'weights.json') as f:
+            allocation = json.load(f)
+    
     return render_template(
         'index.html',
         running=is_running(),
@@ -78,6 +95,9 @@ def index():
         last_trade=utils.get_last_trade(TRADE_FILE),
         regime=utils.get_current_regime(LOG_FILE),
         last_reason=utils.get_last_decision_reason(LOG_FILE),
+        pnl=perf.get('total_pnl', 0.0),
+        performance=perf,
+        allocation=allocation,
     )
 
 
@@ -208,12 +228,22 @@ def dashboard():
         with open(CONFIG_FILE) as f:
             cfg = yaml.safe_load(f) or {}
             allocation = cfg.get('strategy_allocation', {})
+    
+    # Fallback to weights.json if no allocation in config
+    if not allocation and (LOG_DIR / 'weights.json').exists():
+        with open(LOG_DIR / 'weights.json') as f:
+            allocation = json.load(f)
+    
     regimes = []
     if REGIME_FILE.exists():
         regimes = REGIME_FILE.read_text().splitlines()[-20:]
+    
+    # Use the new performance structure
+    pnl = perf.get('total_pnl', 0.0)
+    
     return render_template(
         'dashboard.html',
-        pnl=summary.get('total_pnl', 0.0),
+        pnl=pnl,
         performance=perf,
         allocation=allocation,
         regimes=regimes,
@@ -294,10 +324,132 @@ def api_bot_status():
     })
 
 
+
+
+
+@app.route('/api/live-signals')
+def api_live_signals():
+    """Return live trading signals as JSON."""
+    try:
+        # Read asset scores for live signals
+        if SCAN_FILE.exists():
+            with open(SCAN_FILE) as f:
+                data = json.load(f)
+                # Return the most recent scores as live signals
+                if data and isinstance(data, dict):
+                    return jsonify(data)
+        return jsonify({})
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
+@app.route('/api/strategy-performance')
+def api_strategy_performance():
+    """Return strategy performance breakdown as JSON."""
+    try:
+        # Read strategy stats
+        if STATS_FILE.exists():
+            with open(STATS_FILE) as f:
+                data = json.load(f)
+                return jsonify(data)
+        
+        # Fallback: create basic structure from trades
+        if TRADE_FILE.exists():
+            df = log_reader._read_trades(TRADE_FILE)
+            if not df.empty:
+                # Group by strategy if available, otherwise use symbol
+                strategy_col = 'strategy' if 'strategy' in df.columns else 'symbol'
+                if strategy_col in df.columns:
+                    grouped = df.groupby(strategy_col).size().to_dict()
+                    return jsonify({
+                        'overall': {
+                            strategy: {'trades': count} for strategy, count in grouped.items()
+                        }
+                    })
+        
+        return jsonify({})
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
+@app.route('/api/dashboard-metrics')
+def api_dashboard_metrics():
+    """Return comprehensive dashboard metrics as JSON."""
+    try:
+        # Read trades and calculate performance
+        df = log_reader._read_trades(TRADE_FILE)
+        perf = utils.compute_performance(df)
+        
+        # Get allocation data
+        allocation = {}
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE) as f:
+                cfg = yaml.safe_load(f) or {}
+                allocation = cfg.get('strategy_allocation', {})
+        
+        # Fallback to weights.json if no allocation in config
+        if not allocation and (LOG_DIR / 'weights.json').exists():
+            with open(LOG_DIR / 'weights.json') as f:
+                allocation = json.load(f)
+        
+        # Get asset scores
+        asset_scores = {}
+        if SCAN_FILE.exists():
+            with open(SCAN_FILE) as f:
+                asset_scores = json.load(f)
+        
+        # Get recent trades
+        recent_trades = []
+        if TRADE_FILE.exists():
+            lines = TRADE_FILE.read_text().strip().split('\n')
+            for line in lines[-10:]:  # Last 10 trades
+                if line.strip():
+                    parts = line.split(',')
+                    if len(parts) >= 5:
+                        recent_trades.append({
+                            'symbol': parts[0],
+                            'side': parts[1],
+                            'amount': float(parts[2]),
+                            'price': float(parts[3]),
+                            'timestamp': parts[4]
+                        })
+        
+        return jsonify({
+            'performance': perf,
+            'allocation': allocation,
+            'asset_scores': asset_scores,
+            'recent_trades': recent_trades,
+            'bot_status': {
+                'running': is_running(),
+                'mode': load_execution_mode(),
+                'uptime': get_uptime(),
+                'regime': utils.get_current_regime(LOG_FILE),
+                'last_reason': utils.get_last_decision_reason(LOG_FILE)
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
 if __name__ == '__main__':
     watch_thread = threading.Thread(target=watch_bot, daemon=True)
     watch_thread.start()
+    
+    # Try to find an available port starting from 8000
+    import socket
+    
+    def find_free_port(start_port=8000, max_attempts=10):
+        for port in range(start_port, start_port + max_attempts):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('', port))
+                    return port
+            except OSError:
+                continue
+        return start_port  # fallback
+    
     # Configure Flask to be accessible from any host (for containerized deployments)
-    # and set the default port to 8000 (avoiding macOS ControlCenter on port 5000)
-    port = int(os.environ.get('FLASK_RUN_PORT', 8000))
+    # and find an available port starting from 8000 (avoiding macOS ControlCenter on port 5000)
+    port = int(os.environ.get('FLASK_RUN_PORT', find_free_port()))
+    print(f"Starting Flask app on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
