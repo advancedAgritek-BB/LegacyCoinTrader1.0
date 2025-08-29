@@ -8,11 +8,25 @@ from datetime import datetime
 from collections import deque, OrderedDict, defaultdict
 from dataclasses import dataclass, field
 import inspect
+import signal
 
 import aiohttp
 
 # Track WebSocket ping tasks
 WS_PING_TASKS: set[asyncio.Task] = set()
+
+# Global flag for graceful shutdown
+shutdown_requested = False
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully."""
+    global shutdown_requested
+    logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+    shutdown_requested = True
+
+# Set up signal handlers for graceful shutdown
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 try:
     import ccxt  # type: ignore
@@ -1923,6 +1937,11 @@ async def _main_impl() -> TelegramNotifier:
 
     try:
         while True:
+            # Check for shutdown signal
+            if shutdown_requested:
+                logger.info("Shutdown requested, breaking main loop...")
+                break
+                
             maybe_reload_config(state, config)
             reload_config(
                 config,
@@ -2091,6 +2110,20 @@ async def _main_impl() -> TelegramNotifier:
             await asyncio.sleep(delay * 60)
 
     finally:
+        # Close the WebSocket client if it exists
+        if ws_client and hasattr(ws_client, 'close_async'):
+            try:
+                await ws_client.close_async()
+                logger.info("WebSocket client closed successfully")
+            except Exception as exc:
+                logger.error("Error closing WebSocket client: %s", exc)
+        elif ws_client and hasattr(ws_client, 'close'):
+            try:
+                ws_client.close()
+                logger.info("WebSocket client closed successfully")
+            except Exception as exc:
+                logger.error("Error closing WebSocket client: %s", exc)
+        
         if hasattr(exchange, "close"):
             if asyncio.iscoroutinefunction(getattr(exchange, "close")):
                 with contextlib.suppress(Exception):

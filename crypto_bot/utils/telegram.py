@@ -8,6 +8,7 @@ import threading
 import os
 
 from telegram import Bot
+from telegram.request import Request
 
 from .logger import LOG_DIR, setup_logger
 from pathlib import Path
@@ -49,11 +50,24 @@ def send_message(token: str, chat_id: str, text: str) -> Optional[str]:
     Returns ``None`` on success or an error string on failure.
     """
     try:
-        bot = Bot(token)
+        bot = Bot(token, request=Request(
+            connection_pool_size=8,
+            connect_timeout=30.0,
+            read_timeout=30.0,
+            write_timeout=30.0
+        ))
 
         async def _send() -> None:
             try:
-                await bot.send_message(chat_id=chat_id, text=text)
+                await asyncio.wait_for(
+                    bot.send_message(chat_id=chat_id, text=text),
+                    timeout=30.0
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "Telegram message timeout for chat %s. Message may be too long or network is slow.",
+                    chat_id
+                )
             except Exception as exc:  # pragma: no cover - network
                 logger.error(
                     "Failed to send message: %s. Verify your Telegram token "

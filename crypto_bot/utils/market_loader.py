@@ -444,7 +444,7 @@ async def fetch_ohlcv_async(
                 pass
         if use_websocket and hasattr(exchange, "watch_ohlcv"):
             params = inspect.signature(exchange.watch_ohlcv).parameters
-            ws_limit = limit
+            ws_limit = max(1, limit)  # Ensure minimum limit of 1
             kwargs = {"symbol": symbol, "timeframe": timeframe, "limit": ws_limit}
             if since is not None and "since" in params:
                 kwargs["since"] = since
@@ -459,7 +459,20 @@ async def fetch_ohlcv_async(
                         ws_limit = max(1, min(ws_limit, int(expected) + 1))
                     kwargs["limit"] = ws_limit
                 except Exception:
-                    pass
+                    # Fallback to safe limit if calculation fails
+                    ws_limit = max(1, min(limit, 100))
+                    kwargs["limit"] = ws_limit
+            
+            # Final safety check to ensure limit is positive
+            if ws_limit <= 0:
+                logger.warning(
+                    "Invalid WebSocket limit %d for %s, falling back to REST",
+                    ws_limit, symbol
+                )
+                use_websocket = False
+                limit = min(limit, MAX_WS_LIMIT)
+            else:
+                kwargs["limit"] = ws_limit
             try:
                 data = await _call_with_retry(
                     exchange.watch_ohlcv, timeout=WS_OHLCV_TIMEOUT, **kwargs

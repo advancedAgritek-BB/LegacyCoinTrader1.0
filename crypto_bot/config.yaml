@@ -224,9 +224,11 @@ momentum_exploiter:
   threshold: 0.01
 ohlcv_quality:
   fallback_to_rest: true
-  min_data_ratio: 0.6
-  min_required_candles: 30
+  min_data_ratio: 0.5
+  min_required_candles: 20
   retry_incomplete: true
+  max_retry_attempts: 2
+  rest_fallback_timeout: 25
 optimization:
   enabled: true
   interval_days: 0.5
@@ -295,6 +297,29 @@ portfolio_rotation:
   top_assets: 15
 preferred_chain: solana
 rest_ohlcv_timeout: 30
+risk:
+  atr_long_window: 50
+  atr_period: 14
+  atr_short_window: 14
+  bull_fng: 101
+  bull_sentiment: 101
+  max_drawdown: 0.25
+  max_funding_rate: 1.0
+  max_pair_drawdown: 0.0
+  max_volatility_factor: 1.5
+  min_atr_pct: 0.0
+  min_expected_value: 0.0
+  min_fng: 0
+  min_sentiment: 0
+  min_volume: 0.0
+  pair_drawdown_lookback: 20
+  risk_pct: 0.01
+  stop_loss_atr_mult: 2.0
+  stop_loss_pct: 0.01
+  take_profit_atr_mult: 4.0
+  take_profit_pct: 0.02
+  trade_size_pct: 0.1
+  volume_threshold_ratio: 0.1
 safety:
   max_error_count: 15
   restart_on_error: true
@@ -422,6 +447,17 @@ telegram:
   status_updates: true
   token: 8126215032:AAEhQZLiXpssauKf0ktQsq1XqXl94QriCdE
   trade_updates: true
+  # Add timeout and retry settings
+  timeout_seconds: 30
+  max_retries: 3
+  retry_delay_seconds: 5
+  # Disable if causing issues
+  fail_silently: true
+  # Connection settings
+  connection_pool_size: 8
+  connect_timeout: 30.0
+  read_timeout: 30.0
+  write_timeout: 30.0
 telegram_ctl:
   enabled: true
   update_interval: 15
@@ -453,7 +489,23 @@ ultra_scalp_bot:
   take_profit_pct: 0.026817922291809047
   timeframe: 15s
   volume_mult: 2.129581467112397
+# WebSocket configuration
 use_websocket: true
+ws_failures_before_disable: 3  # Reduced from 5
+ws_ohlcv_timeout: 15  # Reduced from 20
+ws_ping_interval: 5  # Reduced from 8
+ws_reconnect_delay: 10
+ws_max_retries: 3
+
+# OHLCV quality settings
+ohlcv_quality:
+  fallback_to_rest: true
+  min_data_ratio: 0.5  # Reduced from 0.6
+  min_required_candles: 20  # Reduced from 30
+  retry_incomplete: true
+  max_retry_attempts: 2
+  rest_fallback_timeout: 25  # Reduced from 30
+
 volatility_harvester:
   atr_threshold: 0.002
   enabled: true
@@ -461,6 +513,3 @@ volatility_harvester:
   stop_loss_pct: 0.01
   take_profit_pct: 0.04
   volume_spike: 2.0
-ws_failures_before_disable: 5
-ws_ohlcv_timeout: 20
-ws_ping_interval: 8

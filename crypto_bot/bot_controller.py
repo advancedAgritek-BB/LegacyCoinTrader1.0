@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
-from crypto_bot.utils.logger import LOG_DIR
+from crypto_bot.utils.logger import LOG_DIR, setup_logger
 
 
 import yaml
@@ -51,6 +51,7 @@ class TradingBotController:
             "liquidate": False,
             "liquidate_all": False,
         }
+        self.logger = setup_logger(__name__, LOG_DIR / "bot_controller.log")
 
     # ------------------------------------------------------------------
     def _load_config(self) -> dict:
@@ -98,6 +99,34 @@ class TradingBotController:
             self.proc = None
         self.state["running"] = False
         return {"running": False, "status": "stopped"}
+
+    async def close(self) -> None:
+        """Close exchange and WebSocket client connections."""
+        if self.ws_client and hasattr(self.ws_client, 'close_async'):
+            try:
+                await self.ws_client.close_async()
+                self.logger.info("Bot controller WebSocket client closed successfully")
+            except Exception as exc:
+                self.logger.error("Error closing bot controller WebSocket client: %s", exc)
+        elif self.ws_client and hasattr(self.ws_client, 'close'):
+            try:
+                self.ws_client.close()
+                self.logger.info("Bot controller WebSocket client closed successfully")
+            except Exception as exc:
+                self.logger.error("Error closing bot controller WebSocket client: %s", exc)
+        
+        if self.exchange and hasattr(self.exchange, 'close'):
+            try:
+                if asyncio.iscoroutinefunction(getattr(self.exchange, 'close')):
+                    await self.exchange.close()
+                else:
+                    await asyncio.to_thread(self.exchange.close)
+                self.logger.info("Bot controller exchange closed successfully")
+            except Exception as exc:
+                self.logger.error("Error closing bot controller exchange: %s", exc)
+            finally:
+                self.exchange = None
+                self.ws_client = None
 
     async def get_status(self) -> Dict[str, object]:
         """Return current running state and enabled strategies."""

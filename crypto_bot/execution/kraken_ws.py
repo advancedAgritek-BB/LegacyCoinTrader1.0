@@ -13,6 +13,7 @@ except Exception:  # pragma: no cover - optional dependency
 from websocket import WebSocketApp
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 from pathlib import Path
+import asyncio
 
 
 logger = setup_logger(__name__, LOG_DIR / "execution.log")
@@ -1161,3 +1162,22 @@ class KrakenWSClient:
 
         self._public_subs = []
         self._private_subs = []
+
+    async def close_async(self) -> None:
+        """Async version of close that also closes the ccxt exchange instance."""
+        # Close WebSocket connections
+        self.close()
+        
+        # Close the ccxt exchange instance if it exists
+        if self.exchange and hasattr(self.exchange, 'close'):
+            try:
+                if asyncio.iscoroutinefunction(getattr(self.exchange, 'close')):
+                    await self.exchange.close()
+                else:
+                    # If it's not async, run it in a thread
+                    await asyncio.to_thread(self.exchange.close)
+                logger.info("Kraken exchange instance closed successfully")
+            except Exception as exc:
+                logger.error("Error closing Kraken exchange instance: %s", exc)
+            finally:
+                self.exchange = None
