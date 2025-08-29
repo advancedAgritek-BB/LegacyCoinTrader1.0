@@ -9,7 +9,7 @@ import csv
 import pandas as pd
 
 
-def get_open_trades(log_path: Path | str) -> List[Dict]:
+def get_open_trades(log_path: Union[Path, str]) -> List[Dict]:
     """Parse ``log_path`` and return any open positions.
 
     Results are dictionaries with ``symbol``, ``side`` (``"long"`` or ``"short"``),

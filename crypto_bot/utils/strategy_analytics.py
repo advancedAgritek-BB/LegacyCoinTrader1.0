@@ -122,8 +122,8 @@ def compute_strategy_stats(path: Path = STATS_FILE) -> Dict[str, Dict[str, float
                 f"Expected list of trade records for strategy '{strategy}', got {type(trades).__name__}"
             )
 
-        wins: list[float] = []
-        losses: list[float] = []
+        wins: List[float] = []
+        losses: List[float] = []
         for rec in trades:
             if not isinstance(rec, dict) or "pnl" not in rec:
                 raise ValueError(

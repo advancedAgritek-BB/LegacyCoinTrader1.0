@@ -22,8 +22,8 @@ from . import log_reader
 async def monitor_loop(
     exchange: object,
     paper_wallet: Optional[object] = None,
-    log_file: str | Path = LOG_DIR / "bot.log",
-    trade_file: str | Path = TRADE_FILE,
+    log_file: Union[str, Path] = LOG_DIR / "bot.log",
+    trade_file: Union[str, Path] = TRADE_FILE,
 ) -> None:
     """Periodically output balance, last log line and open trade stats.
 
@@ -89,7 +89,7 @@ async def monitor_loop(
 
 
 def display_trades(
-    exchange: Any | None = None, wallet: Any | None = None, trade_file: Path = TRADE_FILE
+    exchange: Optional[Any] = None, wallet: Optional[Any] = None, trade_file: Path = TRADE_FILE
 ) -> str:
     """Read trades from ``trade_file`` and print them as a table.
 
@@ -115,14 +115,14 @@ def display_trades(
     return console.export_text()
 
 
-async def trade_stats_lines(exchange: Any, trade_file: Path = TRADE_FILE) -> list[str]:
+async def trade_stats_lines(exchange: Any, trade_file: Path = TRADE_FILE) -> List[str]:
     """Return a list of lines summarizing PnL for each open trade."""
     open_trades = get_open_trades(trade_file)
     if not open_trades:
         return []
 
     symbols = {t["symbol"] for t in open_trades}
-    prices: dict[str, float] = {}
+    prices: Dict[str, float] = {}
     for sym in symbols:
         try:
             if asyncio.iscoroutinefunction(getattr(exchange, "fetch_ticker", None)):

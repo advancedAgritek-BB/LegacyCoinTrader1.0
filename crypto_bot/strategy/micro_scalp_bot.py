@@ -36,11 +36,11 @@ def _wick_ratios(row: pd.Series) -> Tuple[float, float]:
 def generate_signal(
     df: pd.DataFrame,
     config: Optional[dict] = None,
-    higher_df: pd.DataFrame | None = None,
+    higher_df: Optional[pd.DataFrame] = None,
     *,
     mempool_monitor: Optional[SolanaMempoolMonitor] = None,
     mempool_cfg: Optional[dict] = None,
-    tick_data: pd.DataFrame | None = None,
+    tick_data: Optional[pd.DataFrame] = None,
     book: Optional[dict] = None,
     ticks: Optional[pd.DataFrame] = None,
 ) -> Tuple[float, str]:

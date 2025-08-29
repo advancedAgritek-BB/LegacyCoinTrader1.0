@@ -19,7 +19,7 @@ RAYDIUM_URL = "https://api.raydium.io/pairs"
 PUMP_FUN_URL = "https://client-api.prod.pump.fun/v1/launches"
 
 
-async def search_geckoterminal_token(query: str) -> tuple[str, float] | None:
+async def search_geckoterminal_token(query: str) -> Optional[Tuple[str, float]]:
     """Return ``(mint, volume)`` from GeckoTerminal token search.
 
     The function queries ``/api/v2/search/tokens`` with ``query`` and
@@ -54,7 +54,7 @@ async def search_geckoterminal_token(query: str) -> tuple[str, float] | None:
     return mint, volume
 
 
-async def _fetch_json(url: str) -> list | dict | None:
+async def _fetch_json(url: str) -> Optional[Union[list, dict]]:
     """Return parsed JSON from ``url`` using ``aiohttp``."""
     try:
         async with aiohttp.ClientSession() as session:
@@ -79,7 +79,7 @@ async def _close_exchange(exchange) -> None:
             pass
 
 
-def _extract_tokens(data: list | dict) -> List[str]:
+def _extract_tokens(data: Union[list, dict]) -> List[str]:
     """Return token mints from ``data`` respecting ``_MIN_VOLUME_USD``."""
     items = data.get("data") if isinstance(data, dict) else data
     if isinstance(items, dict):
@@ -166,7 +166,7 @@ async def get_solana_new_tokens(config: dict) -> List[str]:
         return []
 
     results = await asyncio.gather(*tasks)
-    candidates: list[str] = []
+    candidates: List[str] = []
     seen_raw: set[str] = set()
     for res in results:
         for mint in res:
@@ -185,7 +185,7 @@ async def get_solana_new_tokens(config: dict) -> List[str]:
         *[search_geckoterminal_token(m) for m in candidates]
     )
 
-    final: list[tuple[str, float]] = []
+    final: list[Tuple[str, float]] = []
     seen: set[str] = set()
     for res in search_results:
         if not res:

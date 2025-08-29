@@ -150,10 +150,10 @@ class HFTEngine:
 
 def generate_signal(
     df: pd.DataFrame,
-    symbol: str | None = None,
-    timeframe: str | None = None,
+    symbol: Optional[str] = None,
+    timeframe: Optional[str] = None,
     **kwargs,
-) -> tuple[float, str]:
+) -> Tuple[float, str]:
     """HFT engine signal generator - placeholder for integration."""
     return 0.0, "none"
 

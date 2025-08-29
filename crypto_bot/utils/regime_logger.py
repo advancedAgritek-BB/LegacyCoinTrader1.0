@@ -30,7 +30,7 @@ def log_regime(symbol: str, regime: str, future_return: float) -> None:
     df.to_csv(LOG_FILE, mode="a", header=False, index=False)
 
 
-def summarize_accuracy(path: str | Path = LOG_FILE) -> Dict[str, float]:
+def summarize_accuracy(path: Union[str, Path] = LOG_FILE) -> Dict[str, float]:
     """Return mean future return grouped by regime."""
     file = Path(path)
     if not file.exists():

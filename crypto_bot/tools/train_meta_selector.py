@@ -16,7 +16,7 @@ MODEL_FILE = Path("crypto_bot/models/meta_selector_lgbm.pkl")
 K = 20  # number of trades for label window
 
 
-def _compute_features(trades: List[Dict[str, float]]) -> Dict[str, float] | None:
+def _compute_features(trades: List[Dict[str, float]]) -> Optional[Dict[str, float]]:
     if not trades:
         return None
     pnls = [float(t.get("pnl", 0.0)) for t in trades]

@@ -43,7 +43,7 @@ class GridConfig:
     dynamic_grid: bool = True
     use_ml_center: bool = False
     min_range_pct: float = 0.0005
-    arbitrage_pairs: list[tuple[str, str]] = field(default_factory=list)
+    arbitrage_pairs: list[Tuple[str, str]] = field(default_factory=list)
     arbitrage_threshold: float = 0.005
     trend_ema_fast: int = 50
     trend_ema_slow: int = 200
@@ -112,7 +112,7 @@ def volume_ok(series: pd.Series, window: int, mult: float, z_thresh: float) -> b
     return current > mean * mult or z >= z_thresh
 
 
-def recent_window(df: pd.DataFrame, cfg: Mapping[str, int] | None) -> pd.DataFrame:
+def recent_window(df: pd.DataFrame, cfg: Optional[Mapping[str, int]]) -> pd.DataFrame:
     """Return trailing slice for indicator calculations."""
     params = cfg or {}
     range_window = int(params.get("range_window", 20))
@@ -157,9 +157,9 @@ def is_in_trend(df: pd.DataFrame, fast: int, slow: int, side: str) -> bool:
 
 def generate_signal(
     df: pd.DataFrame,
-    num_levels: int | None = None,
+    num_levels: Optional[int] = None,
     config: ConfigType = None,
-    higher_df: pd.DataFrame | None = None,
+    higher_df: Optional[pd.DataFrame] = None,
 ) -> Tuple[float, str]:
     """Generate a grid based trading signal."""
     cfg = GridConfig.from_dict(_as_dict(config))

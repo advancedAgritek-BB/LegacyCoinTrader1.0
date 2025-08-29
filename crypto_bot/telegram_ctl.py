@@ -55,7 +55,7 @@ def start(
     admins: Sequence[TelegramNotifier],
     update_interval: float = 60.0,
     enabled: bool = True,
-) -> asyncio.Task | None:
+) -> Optional[asyncio.Task]:
     """Return background task sending periodic updates when ``enabled``."""
     if not enabled:
         return None
@@ -171,7 +171,7 @@ class BotController:
         return "Liquidation requested"
 
 
-def _reply_or_edit(update: Update, text: str, reply_markup: Any | None = None) -> None:
+def _reply_or_edit(update: Update, text: str, reply_markup: Optional[Any] = None) -> None:
     """Reply to message or edit callback text."""
     if getattr(update, "callback_query", None):
         asyncio.create_task(update.callback_query.answer())
@@ -249,7 +249,7 @@ async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 ITEMS_PER_PAGE = 20
 
 
-def _paginate(text: str, lines_per_page: int = ITEMS_PER_PAGE) -> list[str]:
+def _paginate(text: str, lines_per_page: int = ITEMS_PER_PAGE) -> List[str]:
     """Return ``text`` split into pages of ``lines_per_page`` lines."""
     lines = text.splitlines()
     return [
@@ -261,10 +261,10 @@ def _paginate(text: str, lines_per_page: int = ITEMS_PER_PAGE) -> list[str]:
 class TelegramCtl:
     """Minimal Telegram controller wrapper for tests."""
 
-    def __init__(self, controller: Any, admin_id: str | int) -> None:
+    def __init__(self, controller: Any, admin_id: Union[str, int]) -> None:
         self.controller = controller
         self.admin_id = str(admin_id)
-        self._heartbeat: asyncio.Task | None = None
+        self._heartbeat: Optional[asyncio.Task] = None
 
     # ------------------------------------------------------------------
     def _is_admin(self, update: Update) -> bool:
@@ -315,7 +315,7 @@ class TelegramCtl:
     async def panic_sell_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._call(update, "close_all_positions")
 
-    async def _send_pages(self, update: Update, pages: list[str]) -> None:
+    async def _send_pages(self, update: Update, pages: List[str]) -> None:
         for page in pages:
             await update.reply_text(page)
 

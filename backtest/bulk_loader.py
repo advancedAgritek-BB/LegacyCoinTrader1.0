@@ -27,7 +27,7 @@ __all__ = ["load_file", "load_dir"]
 COLUMNS = ["timestamp", "open", "high", "low", "close", "vwap", "volume", "count"]
 
 
-def load_file(path: str | Path) -> pd.DataFrame:
+def load_file(path: Union[str, Path]) -> pd.DataFrame:
     """Read a single Kraken CSV gzip file into a DataFrame.
 
     Parameters

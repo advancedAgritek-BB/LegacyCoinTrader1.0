@@ -39,10 +39,10 @@ class PoolWatcher:
 
     def __init__(
         self,
-        url: str | None = None,
-        interval: float | None = None,
-        websocket_url: str | None = None,
-        raydium_program_id: str | None = None,
+        url: Optional[str] = None,
+        interval: Optional[float] = None,
+        websocket_url: Optional[str] = None,
+        raydium_program_id: Optional[str] = None,
         max_failures: int = 3,
     ) -> None:
         if url is None or interval is None:

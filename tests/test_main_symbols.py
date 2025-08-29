@@ -121,7 +121,7 @@ def test_get_filtered_symbols_basic(monkeypatch):
 
 
 def test_get_filtered_symbols_invalid_usdc_token(monkeypatch):
-    calls: list[list[str]] = []
+    calls: list[List[str]] = []
 
     async def fake_filter_symbols(ex, syms, cfg):
         calls.append(syms)

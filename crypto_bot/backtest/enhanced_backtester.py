@@ -25,14 +25,22 @@ from joblib import Parallel, delayed
 import psutil
 
 # GPU acceleration imports
-try:
-    import cupy as cp
-    import cupyx.scipy as cp_scipy
-    GPU_AVAILABLE = True
-    logging.info("CuPy detected - GPU acceleration enabled")
-except ImportError:
-    GPU_AVAILABLE = False
-    logging.info("CuPy not available - using CPU only")
+import platform
+GPU_AVAILABLE = False
+
+# Only try to import GPU libraries on supported platforms
+if platform.system() == "Windows":
+    try:
+        import cupy as cp
+        import cupyx.scipy as cp_scipy
+        GPU_AVAILABLE = True
+        logging.info("CuPy detected - GPU acceleration enabled")
+    except ImportError:
+        GPU_AVAILABLE = False
+        logging.info("CuPy not available - using CPU only")
+else:
+    logging.info(f"Platform {platform.system()} detected - GPU acceleration not supported")
+    logging.info("Using CPU-only mode for enhanced backtesting")
 
 try:
     import numba
@@ -175,6 +183,11 @@ class GPUAcceleratedBacktester:
             
     def _setup_gpu(self):
         """Initialize GPU memory and settings."""
+        if not GPU_AVAILABLE:
+            logger.warning("CuPy not available - GPU setup skipped")
+            self.gpu_available = False
+            return
+            
         try:
             # Set memory limit
             mempool = cp.get_default_memory_pool()
@@ -190,7 +203,7 @@ class GPUAcceleratedBacktester:
             
     def _gpu_optimize_parameters(self, df: pd.DataFrame, param_ranges: Dict) -> Dict:
         """Use GPU acceleration for parameter optimization."""
-        if not self.gpu_available:
+        if not self.gpu_available or not GPU_AVAILABLE:
             return self._cpu_optimize_parameters(df, param_ranges)
             
         try:
@@ -235,10 +248,33 @@ class GPUAcceleratedBacktester:
         
     def _calculate_gpu_metrics(self, close, high, low, volume, sl, tp):
         """Calculate trading metrics on GPU."""
+        if not GPU_AVAILABLE:
+            logger.warning("CuPy not available - falling back to CPU metrics")
+            return self._calculate_cpu_metrics(close, high, low, volume, sl, tp)
+            
         # Simplified metric calculation - replace with actual strategy logic
         returns = cp.diff(close) / close[:-1]
         volatility = cp.std(returns)
         sharpe = cp.mean(returns) / (volatility + 1e-8)
+        
+        return float(sharpe)
+        
+    def _calculate_cpu_metrics(self, close, high, low, volume, sl, tp):
+        """Calculate trading metrics on CPU (fallback for GPU)."""
+        # Convert to numpy arrays if they're not already
+        if hasattr(close, 'get'):  # CuPy array
+            close = close.get()
+        if hasattr(high, 'get'):   # CuPy array
+            high = high.get()
+        if hasattr(low, 'get'):    # CuPy array
+            low = low.get()
+        if hasattr(volume, 'get'): # CuPy array
+            volume = volume.get()
+            
+        # Simplified metric calculation - replace with actual strategy logic
+        returns = np.diff(close) / close[:-1]
+        volatility = np.std(returns)
+        sharpe = np.mean(returns) / (volatility + 1e-8)
         
         return float(sharpe)
         

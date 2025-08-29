@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Optional, Dict, List
 
 from .logger import LOG_DIR, setup_logger
 
@@ -7,7 +8,7 @@ PAIR_FILE = Path(__file__).resolve().parents[2] / "cache" / "liquid_pairs.json"
 logger = setup_logger(__name__, LOG_DIR / "pair_cache.log")
 
 
-def load_liquid_map() -> dict[str, float] | None:
+def load_liquid_map() -> Optional[Dict[str, float]]:
     """Return cached mapping of pair -> timestamp if available."""
     if PAIR_FILE.exists():
         try:
@@ -30,7 +31,7 @@ def load_liquid_map() -> dict[str, float] | None:
     return None
 
 
-def load_liquid_pairs() -> list[str] | None:
+def load_liquid_pairs() -> Optional[List[str]]:
     """Return cached list of liquid trading pairs if available."""
     data = load_liquid_map()
     return list(data) if data else None

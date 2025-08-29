@@ -969,7 +969,7 @@ def test_refresh_tickers_single_fallback(monkeypatch):
         def __init__(self):
             self.has = {"fetchTickers": True, "fetchTicker": True}
             self.bulk_calls = 0
-            self.single_calls: list[str] = []
+            self.single_calls: List[str] = []
             self.markets = {"ETH/USD": {}, "BTC/USD": {}}
 
         async def fetch_tickers(self, symbols):
@@ -982,7 +982,7 @@ def test_refresh_tickers_single_fallback(monkeypatch):
             mapping = {"ETH/USD": "XETHZUSD", "BTC/USD": "XXBTZUSD"}
             return data[mapping[symbol]]
 
-    calls: list[list[str]] = []
+    calls: list[List[str]] = []
 
     async def raise_fetch_async(pairs):
         calls.append(list(pairs))
@@ -1010,7 +1010,7 @@ def test_refresh_tickers_public_api_fallback(monkeypatch):
             self.bulk_calls += 1
             raise RuntimeError("boom")
 
-    calls: list[list[str]] = []
+    calls: list[List[str]] = []
 
     async def fake_public(pairs):
         calls.append(list(pairs))
@@ -1030,7 +1030,7 @@ def test_refresh_tickers_batches(monkeypatch):
     class BatchExchange(DummyExchange):
         def __init__(self):
             self.has = {"fetchTickers": True}
-            self.calls: list[list[str]] = []
+            self.calls: list[List[str]] = []
             self.markets = {f"PAIR{i}/USD": {} for i in range(5)}
 
         async def fetch_tickers(self, symbols):
@@ -1047,7 +1047,7 @@ def test_refresh_tickers_batches(monkeypatch):
 
 
 def test_fetch_ticker_async_timeout(monkeypatch):
-    calls: list[int | None] = []
+    calls: List[Optional[int]] = []
 
     class FakeResp:
         def raise_for_status(self):
@@ -1152,7 +1152,7 @@ def test_ws_failures_disable_scan(monkeypatch):
     t = {"now": 0}
     monkeypatch.setattr(sp.time, "time", lambda: t["now"])
 
-    sleeps: list[float] = []
+    sleeps: List[float] = []
 
     async def fake_sleep(secs):
         sleeps.append(secs)

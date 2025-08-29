@@ -11,6 +11,6 @@ class OpenPositionGuard:
     def __init__(self, max_open_trades: int) -> None:
         self.max_open_trades = max(1, int(max_open_trades))
 
-    def can_open(self, positions: Mapping | Sequence) -> bool:
+    def can_open(self, positions: Union[Mapping, Sequence]) -> bool:
         """Return ``True`` if another trade may be opened."""
         return len(positions) < self.max_open_trades

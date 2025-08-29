@@ -23,9 +23,9 @@ class TradingBotController:
 
     def __init__(
         self,
-        config_path: str | Path = "crypto_bot/config.yaml",
-        trades_file: str | Path = LOG_DIR / "trades.csv",
-        log_file: str | Path = LOG_DIR / "bot.log",
+        config_path: Union[str, Path] = "crypto_bot/config.yaml",
+        trades_file: Union[str, Path] = LOG_DIR / "trades.csv",
+        log_file: Union[str, Path] = LOG_DIR / "bot.log",
     ) -> None:
         self.config_path = Path(config_path)
         self.trades_file = Path(trades_file)
@@ -33,7 +33,7 @@ class TradingBotController:
         self.config = self._load_config()
         self.rotator = PortfolioRotator()
         self.exchange, self.ws_client = get_exchange(self.config)
-        self.proc: asyncio.subprocess.Process | None = None
+        self.proc: Optional[asyncio.subprocess.Process] = None
         self.enabled: Dict[str, bool] = {
             "trend_bot": True,
             "grid_bot": True,

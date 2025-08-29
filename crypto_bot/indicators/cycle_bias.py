@@ -1,6 +1,7 @@
 """Market cycle bias derived from on-chain metrics."""
 
 from __future__ import annotations
+from typing import Optional
 
 import os
 import requests
@@ -76,7 +77,7 @@ def _fetch_value(url: str, mock_env: str, fallback_url: str = None) -> float:
     return 0.0
 
 
-def get_cycle_bias(config: dict | None = None) -> float:
+def get_cycle_bias(config: Optional[dict] = None) -> float:
     """Return bias multiplier (>1 bullish, <1 bearish)."""
     cfg = config or {}
     mvrv_url = cfg.get("mvrv_url") or os.getenv("MVRV_URL", DEFAULT_MVRV_URL)

@@ -1,7 +1,7 @@
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Union
 
 from .logger import LOG_DIR
 
@@ -36,7 +36,7 @@ def _calc_metrics(pnls: pd.Series) -> Dict[str, float]:
     }
 
 
-def get_metrics(regime: str | None = None, path: str | Path = LOG_FILE) -> Dict[str, Dict[str, Any]]:
+def get_metrics(regime: Optional[str] = None, path: Union[str, Path] = LOG_FILE) -> Dict[str, Dict[str, Any]]:
     """Return PnL metrics grouped by regime and strategy."""
     file = Path(path)
     if not file.exists():
@@ -53,7 +53,7 @@ def get_metrics(regime: str | None = None, path: str | Path = LOG_FILE) -> Dict[
     return metrics
 
 
-def compute_weights(regime: str, path: str | Path = LOG_FILE) -> Dict[str, float]:
+def compute_weights(regime: str, path: Union[str, Path] = LOG_FILE) -> Dict[str, float]:
     """Return normalized strategy weights for ``regime`` using Sharpe ratio."""
     data = get_metrics(regime, path)
     strategies = data.get(regime, {})
@@ -68,8 +68,8 @@ def compute_weights(regime: str, path: str | Path = LOG_FILE) -> Dict[str, float
 
 def get_recent_win_rate(
     window: int = 20,
-    path: str | Path = LOG_FILE,
-    strategy: str | None = None,
+    path: Union[str, Path] = LOG_FILE,
+    strategy: Optional[str] = None,
 ) -> float:
     """Return the fraction of profitable trades.
 

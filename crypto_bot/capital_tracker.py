@@ -1,9 +1,9 @@
 class CapitalTracker:
     """Track capital usage per strategy."""
 
-    def __init__(self, allocation: dict | None = None) -> None:
+    def __init__(self, allocation: Optional[dict] = None) -> None:
         self.allocation = allocation or {}
-        self._usage: dict[str, float] = {k: 0.0 for k in self.allocation}
+        self._usage: Dict[str, float] = {k: 0.0 for k in self.allocation}
 
     def can_allocate(self, strategy: str, amount: float, balance: float) -> bool:
         """Return True if ``amount`` can be allocated to ``strategy``."""

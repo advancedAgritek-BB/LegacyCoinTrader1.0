@@ -28,7 +28,7 @@ def set_execution_mode(mode: str, config_file: Path) -> None:
         yaml.safe_dump(config, f)
 
 
-def compute_performance(df: pd.DataFrame) -> dict[str, float]:
+def compute_performance(df: pd.DataFrame) -> Dict[str, float]:
     """Return performance metrics from the trades dataframe."""
     if df.empty:
         return {
@@ -42,8 +42,8 @@ def compute_performance(df: pd.DataFrame) -> dict[str, float]:
     total_trades = len(df)
     
     # Calculate PnL per symbol
-    perf: dict[str, float] = {}
-    open_pos: dict[str, list[tuple[float, float]]] = {}
+    perf: Dict[str, float] = {}
+    open_pos: dict[str, list[Tuple[float, float]]] = {}
 
     for _, row in df.iterrows():
         symbol = row["symbol"] if "symbol" in row else "Unknown"

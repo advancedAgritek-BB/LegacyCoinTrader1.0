@@ -14,12 +14,12 @@ class SignalFusionEngine:
     def __init__(
         self,
         strategies: Iterable[Tuple[Callable[[pd.DataFrame], Tuple[float, str]], float]],
-        weight_optimizer: OnlineWeightOptimizer | None = None,
+        weight_optimizer: Optional[OnlineWeightOptimizer] = None,
     ) -> None:
         self.strategies: List[Tuple[Callable[[pd.DataFrame], Tuple[float, str]], float]] = list(strategies)
         self.weight_optimizer = weight_optimizer
 
-    def fuse(self, df: pd.DataFrame, config: dict | None = None) -> Tuple[float, str]:
+    def fuse(self, df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[float, str]:
         if not self.strategies:
             return 0.0, "none"
 
@@ -71,7 +71,7 @@ class SignalFusionEngine:
 def fuse_signals(
     df: pd.DataFrame,
     strategies: Iterable[Tuple[Callable[[pd.DataFrame], Tuple[float, str]], float]],
-    config: dict | None = None,
+    config: Optional[dict] = None,
 ) -> Tuple[float, str]:
     """Convenience function to fuse signals from ``strategies``."""
     engine = SignalFusionEngine(strategies)

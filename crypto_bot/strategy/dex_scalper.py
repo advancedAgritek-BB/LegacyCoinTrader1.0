@@ -11,7 +11,7 @@ from crypto_bot.utils.gas_estimator import fetch_priority_fee_gwei
 ALLOWED_PAIRS = load_liquid_pairs() or []
 
 
-def fetch_priority_fee_gwei(endpoint: str | None = None) -> float:
+def fetch_priority_fee_gwei(endpoint: Optional[str] = None) -> float:
     """Return the median Ethereum priority fee in gwei.
 
     The ``MOCK_ETH_PRIORITY_FEE_GWEI`` environment variable overrides

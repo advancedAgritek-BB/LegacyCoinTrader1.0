@@ -1,6 +1,6 @@
 """Utilities for loading trading symbols and fetching OHLCV data."""
 
-from typing import Iterable, List, Dict, Any, Deque, Optional, Union
+from typing import Iterable, List, Dict, Any, Deque, Optional, Union, Tuple
 import asyncio
 import inspect
 import time
@@ -276,9 +276,9 @@ async def _call_with_retry(func, *args, timeout=None, **kwargs):
 
 async def load_kraken_symbols(
     exchange,
-    exclude: Iterable[str] | None = None,
-    config: Dict | None = None,
-) -> List[str] | None:
+    exclude: Optional[Iterable[str]] = None,
+    config: Optional[Dict] = None,
+) -> Optional[List[str]]:
     """Return a list of active trading pairs on Kraken.
 
     Parameters
@@ -374,10 +374,10 @@ async def fetch_ohlcv_async(
     symbol: str,
     timeframe: str = "1h",
     limit: int = 100,
-    since: int | None = None,
+    since: Optional[int] = None,
     use_websocket: bool = False,
     force_websocket_history: bool = False,
-) -> list | Exception:
+) -> Union[list, Exception]:
     """Return OHLCV data for ``symbol`` using async I/O."""
 
     if hasattr(exchange, "has") and not exchange.has.get("fetchOHLCV"):
@@ -843,7 +843,7 @@ async def fetch_dexscreener_ohlcv(
     symbol: str,
     timeframe: str = "1h",
     limit: int = 100,
-) -> list | None:
+) -> Optional[list]:
     """Deprecated: use :func:`fetch_geckoterminal_ohlcv` instead."""
 
     warnings.warn(
@@ -861,7 +861,7 @@ async def fetch_geckoterminal_ohlcv(
     *,
     min_24h_volume: float = 0.0,
     return_price: bool = False,
-) -> tuple[list, float] | tuple[list, float, float] | None:
+) -> Optional[Union[Tuple[List, float], Tuple[List, float, float]]]:
     """Return OHLCV data and 24h volume for ``symbol`` from GeckoTerminal.
 
     When ``return_price`` is ``True`` the pool price is returned instead of the
@@ -1001,7 +1001,7 @@ async def fetch_coingecko_ohlc(
     coin_id: str,
     timeframe: str = "1h",
     limit: int = 100,
-) -> list | None:
+) -> Optional[list]:
     """Return OHLC data from CoinGecko as [timestamp, open, high, low, close, 0]."""
 
     days = 1
@@ -1036,9 +1036,9 @@ async def fetch_dex_ohlcv(
     limit: int = 100,
     *,
     min_volume_usd: float = 0.0,
-    gecko_res: list | tuple | None = None,
+    gecko_res: Optional[Union[list, tuple]] = None,
     use_gecko: bool = True,
-) -> list | None:
+) -> Optional[list]:
     """Fetch DEX OHLCV with fallback to CoinGecko, Coinbase then Kraken."""
 
     res = gecko_res
@@ -1093,7 +1093,7 @@ async def fetch_order_book_async(
     exchange,
     symbol: str,
     depth: int = 2,
-) -> dict | Exception:
+) -> Union[dict, Exception]:
     """Return order book snapshot for ``symbol`` with top ``depth`` levels."""
 
     if hasattr(exchange, "has") and not exchange.has.get("fetchOrderBook"):
@@ -1119,17 +1119,17 @@ async def load_ohlcv_parallel(
     symbols: Iterable[str],
     timeframe: str = "1h",
     limit: int = 100,
-    since_map: Dict[str, int] | None = None,
+    since_map: Optional[Dict[str, int]] = None,
     use_websocket: bool = False,
     force_websocket_history: bool = False,
-    max_concurrent: int | None = None,
-    notifier: TelegramNotifier | None = None,
+    max_concurrent: Optional[int] = None,
+    notifier: Optional[TelegramNotifier] = None,
 ) -> Dict[str, list]:
     """Fetch OHLCV data for multiple symbols concurrently.
 
     Parameters
     ----------
-    notifier : TelegramNotifier | None, optional
+    notifier : Optional[TelegramNotifier], optional
         If provided, failures will be sent using this notifier.
     """
 
@@ -1291,15 +1291,15 @@ async def update_ohlcv_cache(
     limit: int = 100,
     use_websocket: bool = False,
     force_websocket_history: bool = False,
-    config: Dict | None = None,
-    max_concurrent: int | None = None,
-    notifier: TelegramNotifier | None = None,
+    config: Optional[Dict] = None,
+    max_concurrent: Optional[int] = None,
+    notifier: Optional[TelegramNotifier] = None,
 ) -> Dict[str, pd.DataFrame]:
     """Update cached OHLCV DataFrames with new candles.
 
     Parameters
     ----------
-    max_concurrent : int | None, optional
+    max_concurrent : Optional[int], optional
         Maximum number of concurrent OHLCV requests. ``None`` means no limit.
     """
 
@@ -1320,7 +1320,7 @@ async def update_ohlcv_cache(
 
     logger.info("Starting OHLCV update for timeframe %s", timeframe)
 
-    since_map: Dict[str, int | None] = {}
+    since_map: Dict[str, Optional[int]] = {}
     if snapshot_due:
         _last_snapshot_time = now
         limit = max(config.get("ohlcv_snapshot_limit", limit), 200)
@@ -1457,9 +1457,9 @@ async def update_multi_tf_ohlcv_cache(
     limit: int = 100,
     use_websocket: bool = False,
     force_websocket_history: bool = False,
-    max_concurrent: int | None = None,
-    notifier: TelegramNotifier | None = None,
-    priority_queue: Deque[str] | None = None,
+    max_concurrent: Optional[int] = None,
+    notifier: Optional[TelegramNotifier] = None,
+    priority_queue: Optional[Deque[str]] = None,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """Update OHLCV caches for multiple timeframes.
 
@@ -1498,8 +1498,8 @@ async def update_multi_tf_ohlcv_cache(
         logger.info("Starting update for timeframe %s", tf)
         tf_cache = cache.get(tf, {})
 
-        cex_symbols: list[str] = []
-        dex_symbols: list[str] = []
+        cex_symbols: List[str] = []
+        dex_symbols: List[str] = []
         for s in symbols:
             base, _, quote = s.partition("/")
             if quote.upper() == "USDC" and _is_valid_base_token(base):
@@ -1591,9 +1591,9 @@ async def update_regime_tf_cache(
     limit: int = 100,
     use_websocket: bool = False,
     force_websocket_history: bool = False,
-    max_concurrent: int | None = None,
-    notifier: TelegramNotifier | None = None,
-    df_map: Dict[str, Dict[str, pd.DataFrame]] | None = None,
+    max_concurrent: Optional[int] = None,
+    notifier: Optional[TelegramNotifier] = None,
+    df_map: Optional[Dict[str, Dict[str, pd.DataFrame]]] = None,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """Update OHLCV caches for regime detection timeframes."""
     limit = max(limit, 200)

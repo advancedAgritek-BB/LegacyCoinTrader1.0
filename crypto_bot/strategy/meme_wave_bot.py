@@ -40,8 +40,8 @@ async def exit_trade(price_feed, entry_price: float, cfg: Mapping[str, float]) -
 
 async def generate_signal(
     df: pd.DataFrame,
-    symbol: str | None = None,
-    timeframe: str | None = None,
+    symbol: Optional[str] = None,
+    timeframe: Optional[str] = None,
     **kwargs,
 ) -> Tuple[float, str]:
     """Return a meme wave score and direction using volume and sentiment."""

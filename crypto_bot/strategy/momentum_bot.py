@@ -21,8 +21,8 @@ else:  # pragma: no cover - fallback
 
 def generate_signal(
     df: pd.DataFrame,
-    symbol: str | None = None,
-    timeframe: str | None = None,
+    symbol: Optional[str] = None,
+    timeframe: Optional[str] = None,
     **kwargs,
 ) -> Tuple[float, str]:
     """Donchian breakout with volume confirmation."""

@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from typing import Dict
 
 try:  # pragma: no cover - optional scipy dependency
     from scipy.signal import find_peaks  # type: ignore
@@ -14,7 +15,7 @@ except Exception:  # pragma: no cover - fallback when scipy missing
         return np.array(idx), {}
 
 
-def detect_patterns(df: pd.DataFrame, *, min_conf: float = 0.0) -> dict[str, float]:
+def detect_patterns(df: pd.DataFrame, *, min_conf: float = 0.0) -> Dict[str, float]:
     """Return confidence scores for simple chart patterns detected in ``df``.
 
     The latest candle and recent history are inspected for a small
@@ -41,8 +42,8 @@ def detect_patterns(df: pd.DataFrame, *, min_conf: float = 0.0) -> dict[str, flo
     ``"three_bar_reversal"`` -- two bars one way then strong reversal
     ``"volume_spike"``     -- volume significantly above average
     """
-    scores: dict[str, float] = {}
-    patterns: dict[str, float] = {}
+    scores: Dict[str, float] = {}
+    patterns: Dict[str, float] = {}
     if df is None or len(df) < 2:
         return patterns
 

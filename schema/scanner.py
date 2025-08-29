@@ -1,3 +1,4 @@
+from typing import Optional
 from __future__ import annotations
 
 import os
@@ -8,13 +9,13 @@ class ScannerConfig(BaseModel):
     """Configuration for market scanning."""
 
     scan_markets: bool = Field(False, description="Load all exchange pairs")
-    symbols: list[str] | None = Field(default_factory=list, description="Symbols to trade")
-    excluded_symbols: list[str] = Field(default_factory=list, description="Symbols to skip")
-    exchange_market_types: list[str] = Field(default_factory=lambda: ["spot"], description="Market types")
+    symbols: Optional[List[str]] = Field(default_factory=list, description="Symbols to trade")
+    excluded_symbols: List[str] = Field(default_factory=list, description="Symbols to skip")
+    exchange_market_types: List[str] = Field(default_factory=lambda: ["spot"], description="Market types")
     min_symbol_age_days: int = 0
     symbol_batch_size: int = 10
     scan_lookback_limit: int = 50
-    cycle_lookback_limit: int | None = Field(
+    cycle_lookback_limit: Optional[int] = Field(
         default=None,
         description="Override per-cycle candle load (default min(150, timeframe_minutes * 2))",
     )

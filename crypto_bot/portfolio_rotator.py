@@ -87,7 +87,7 @@ class PortfolioRotator:
         exchange,
         wallet: str,
         current_holdings: Dict[str, float],
-        notifier: TelegramNotifier | None = None,
+        notifier: Optional[TelegramNotifier] = None,
         paper_wallet=None,  # Add paper wallet parameter
     ) -> Dict[str, float]:
         """Rebalance holdings toward the highest scored assets."""

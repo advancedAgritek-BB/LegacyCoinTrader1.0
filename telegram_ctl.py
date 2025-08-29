@@ -48,14 +48,14 @@ def _cleanup(chat_id: str) -> None:
         callback_state.pop(chat_id, None)
 
 
-def set_page(chat_id: str | int, key: str, value: int) -> None:
+def set_page(chat_id: Union[str, int], key: str, value: int) -> None:
     cid = str(chat_id)
     _cleanup(cid)
     store = callback_state.setdefault(cid, {})
     store[key] = (value, time.time())
 
 
-def get_page(chat_id: str | int, key: str) -> int:
+def get_page(chat_id: Union[str, int], key: str) -> int:
     cid = str(chat_id)
     _cleanup(cid)
     store = callback_state.get(cid)
@@ -73,7 +73,7 @@ def get_page(chat_id: str | int, key: str) -> int:
     return page
 
 
-def _paginate(lines: list[str], page: int) -> tuple[str, InlineKeyboardMarkup]:
+def _paginate(lines: List[str], page: int) -> Tuple[str, InlineKeyboardMarkup]:
     total_pages = max(1, (len(lines) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
     page = max(0, min(page, total_pages - 1))
     start = page * ITEMS_PER_PAGE

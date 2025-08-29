@@ -2,7 +2,7 @@ import asyncio
 import importlib
 import functools
 import pandas as pd
-from typing import Dict, Iterable, Tuple, List
+from typing import Dict, Iterable, Tuple, List, Optional
 
 from .logger import LOG_DIR, setup_logger
 from . import perf
@@ -48,7 +48,7 @@ async def run_candidates(
     strategies: Iterable,
     symbol: str,
     cfg: Dict,
-    regime: str | None = None,
+    regime: Optional[str] = None,
 ) -> List[Tuple[callable, float, str]]:
     """Evaluate ``strategies`` and rank them by score times edge."""
 
@@ -114,7 +114,7 @@ async def analyze_symbol(
     df_map: Dict[str, pd.DataFrame],
     mode: str,
     config: Dict,
-    notifier: TelegramNotifier | None = None,
+    notifier: Optional[TelegramNotifier] = None,
 ) -> Dict:
     """Classify the market regime and evaluate the trading signal for ``symbol``.
 
@@ -128,7 +128,7 @@ async def analyze_symbol(
         Execution mode of the bot ("cex", "onchain" or "auto").
     config : Dict
         Bot configuration.
-    notifier : TelegramNotifier | None
+    notifier : Optional[TelegramNotifier]
         Optional notifier used to send a message when the strategy is invoked.
     """
     router_cfg = RouterConfig.from_dict(config)

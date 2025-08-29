@@ -24,7 +24,7 @@ def _load_stats() -> dict:
         return {}
 
 
-def _extract_records(data: object, symbol: str | None) -> Sequence[dict] | None:
+def _extract_records(data: object, symbol: Optional[str]) -> Optional[Sequence[dict]]:
     """Return list of trade/return records from ``data``."""
     if isinstance(data, list):
         if symbol:
@@ -62,7 +62,7 @@ def edge(strategy: str, symbol: str, coef: float = 0.3) -> float:
 
     now = datetime.utcnow()
     start = now - timedelta(days=30)
-    values: list[float] = []
+    values: List[float] = []
     for rec in records:
         if not isinstance(rec, dict):
             continue

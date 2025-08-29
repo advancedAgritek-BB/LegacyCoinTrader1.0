@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 import asyncio
 import time
 import logging
@@ -60,7 +60,7 @@ PATTERN_WEIGHTS = {
 }
 
 
-def adaptive_thresholds(cfg: dict, df: pd.DataFrame | None, symbol: str | None) -> dict:
+def adaptive_thresholds(cfg: dict, df: Optional[pd.DataFrame], symbol: Optional[str]) -> dict:
     """Return a copy of ``cfg`` with thresholds scaled based on volatility.
 
     The average ATR over ``df`` is compared to ``cfg["atr_baseline"]`` and
@@ -121,7 +121,7 @@ def _ml_fallback(df: pd.DataFrame) -> Tuple[str, float]:
         return "unknown", 0.0
 
 
-def _probabilities(label: str, confidence: float | None = None) -> Dict[str, float]:
+def _probabilities(label: str, confidence: Optional[float] = None) -> Dict[str, float]:
     """Return a probability mapping for all regimes."""
     probs = {r: 0.0 for r in _ALL_REGIMES}
     if confidence is None:
@@ -281,7 +281,7 @@ def _classify_all(
     cfg: dict,
     *,
     df_map: Optional[Dict[str, pd.DataFrame]] = None,
-) -> Tuple[str, Dict[str, float], Dict[str, float]] | Dict[str, str] | Tuple[str, str]:
+) -> Union[Tuple[str, Dict[str, float], Dict[str, float]], Dict[str, str], Tuple[str, str]]:
     """Return regime label, probability mapping and patterns or labels for ``df_map``."""
 
     ml_min_bars = cfg.get("ml_min_bars", 20)
@@ -376,14 +376,14 @@ def classify_regime(
     df_map: Optional[Dict[str, pd.DataFrame]] = None,
     config_path: Optional[str] = None,
     symbol: Optional[str] = None,
-) -> Tuple[str, object] | Dict[str, str] | Tuple[str, str]:
+) -> Union[Tuple[str, object], Dict[str, str], Tuple[str, str]]:
     """Classify market regime.
 
     Parameters
     ----------
-    df : pd.DataFrame | None
+    df : Optional[pd.DataFrame]
         OHLCV data for the base timeframe.
-    df_map : dict[str, pd.DataFrame] | None
+    df_map : Optional[Dict[str, pd.DataFrame]]
         Optional mapping of timeframe to dataframes. When provided the function
         returns only the regime labels for each timeframe without pattern
         information.
@@ -449,7 +449,7 @@ async def classify_regime_async(
     df_map: Optional[Dict[str, pd.DataFrame]] = None,
     config_path: Optional[str] = None,
     symbol: Optional[str] = None,
-) -> Tuple[str, object] | Dict[str, str] | Tuple[str, str]:
+) -> Union[Tuple[str, object], Dict[str, str], Tuple[str, str]]:
     """Asynchronous wrapper around :func:`classify_regime`."""
     return await asyncio.to_thread(
         classify_regime,
@@ -480,8 +480,8 @@ async def classify_regime_with_patterns_async(
 
 # Caching utilities -----------------------------------------------------
 
-regime_cache: Dict[tuple[str, str], str] = {}
-_regime_cache_ts: Dict[tuple[str, str], int] = {}
+regime_cache: Dict[Tuple[str, str], str] = {}
+_regime_cache_ts: Dict[Tuple[str, str], int] = {}
 
 
 async def classify_regime_cached(

@@ -60,8 +60,8 @@ def _norm_symbol(sym: str) -> str:
 
 
 # cache for ticker data when using watchTickers
-ticker_cache: dict[str, dict] = {}
-ticker_ts: dict[str, float] = {}
+ticker_cache: Dict[str, dict] = {}
+ticker_ts: Dict[str, float] = {}
 
 # Cache of recent liquidity metrics per symbol
 liq_cache = TTLCache(maxsize=2000, ttl=900)
@@ -173,7 +173,7 @@ def _parse_metrics(symbol: str, ticker: dict) -> tuple[float, float, float]:
 async def _refresh_tickers(
     exchange,
     symbols: Iterable[str],
-    config: dict | None = None,
+    config: Optional[dict] = None,
 ) -> dict:
     """Return ticker data using WS/HTTP and fall back to per-symbol fetch."""
 
@@ -250,7 +250,7 @@ async def _refresh_tickers(
             symbols_list = list(symbols)
             for i in range(0, len(symbols_list), batch):
                 chunk = symbols_list[i : i + batch]
-                chunk_data: dict | None = None
+                chunk_data: Optional[dict] = None
                 for attempt in range(3):
                     try:
                         fetcher = getattr(exchange, "fetch_tickers", None)
@@ -402,7 +402,7 @@ async def _refresh_tickers(
                 ticker_ts[sym] = now
             return {s: t.get("info", t) for s, t in data.items()}
 
-    result: dict[str, dict] = {}
+    result: Dict[str, dict] = {}
     if getattr(getattr(exchange, "has", {}), "get", lambda _k: False)("fetchTicker"):
         for sym in symbols:
             try:
@@ -449,7 +449,7 @@ def _timeframe_seconds(exchange, timeframe: str) -> int:
     raise ValueError(f"Unknown timeframe {timeframe}")
 
 
-def _history_in_cache(df: pd.DataFrame | None, days: int, seconds: int) -> bool:
+def _history_in_cache(df: Optional[pd.DataFrame], days: int, seconds: int) -> bool:
     """Return ``True`` when ``df`` has at least ``days`` days of candles."""
     if df is None or df.empty:
         return False
@@ -465,7 +465,7 @@ async def _bounded_score(
     spread_pct: float,
     liquidity_score: float,
     cfg: dict,
-) -> tuple[str, float]:
+) -> Tuple[str, float]:
     """Return ``(symbol, score)`` using the global semaphore."""
 
     async with SEMA:
@@ -478,9 +478,9 @@ async def _bounded_score(
 async def filter_symbols(
     exchange,
     symbols: Iterable[str],
-    config: dict | None = None,
-    df_cache: Dict[str, pd.DataFrame] | None = None,
-) -> List[tuple[str, float]]:
+    config: Optional[dict] = None,
+    df_cache: Optional[Dict[str, pd.DataFrame]] = None,
+) -> List[Tuple[str, float]]:
     """Return ``symbols`` passing liquidity checks sorted by score."""
 
     cfg = config or {}
@@ -510,7 +510,7 @@ async def filter_symbols(
         raise
 
     # map of ids returned by Kraken to human readable symbols
-    id_map: dict[str, str] = {}
+    id_map: Dict[str, str] = {}
     request_map = {_norm_symbol(s.replace("/", "")): _norm_symbol(s) for s in symbols}
 
     if hasattr(exchange, "markets_by_id"):
@@ -640,7 +640,7 @@ async def filter_symbols(
         if denom <= 0:
             denom = 1.0
 
-        async def _fetch_liq(sym: str) -> tuple[str, float]:
+        async def _fetch_liq(sym: str) -> Tuple[str, float]:
             try:
                 _, _, reserve = await fetch_geckoterminal_ohlcv(sym, limit=1)
                 return sym, reserve / denom
@@ -652,7 +652,7 @@ async def filter_symbols(
         )
         liq_scores = {s: sc for s, sc in liq_results}
 
-    scored: List[tuple[str, float]] = []
+    scored: List[Tuple[str, float]] = []
     if metrics:
         results = await asyncio.gather(
             *[
@@ -675,7 +675,7 @@ async def filter_symbols(
                 skipped += 1
     scored.sort(key=lambda x: x[1], reverse=True)
 
-    corr_map: Dict[tuple[str, str], float] = {}
+    corr_map: Dict[Tuple[str, str], float] = {}
     if df_cache:
         # only compute correlations for the top N scoring symbols
         max_pairs = sf.get("correlation_max_pairs")
@@ -714,7 +714,7 @@ async def filter_symbols(
                 max_concurrent=len(missing),
             )
 
-    result: List[tuple[str, float]] = []
+    result: List[Tuple[str, float]] = []
     for sym, score in scored:
         if min_age > 0 and not _history_in_cache(
             df_cache.get(sym) if df_cache else None, min_age, seconds

@@ -47,7 +47,7 @@ class Telemetry:
         """Reset all counters."""
         self._counters.clear()
 
-    def export_csv(self, path: str | Path | None = None) -> None:
+    def export_csv(self, path: Union[str, Path, None] = None) -> None:
         """Append current counters to a CSV file."""
         file = Path(path or LOG_FILE)
         metrics = {**self.snapshot(), "timestamp": datetime.utcnow().isoformat()}

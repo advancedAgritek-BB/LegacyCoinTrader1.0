@@ -1,3 +1,4 @@
+from typing import Optional
 from __future__ import annotations
 
 """Log active trade position and wallet balance."""
@@ -22,7 +23,7 @@ def log_position(
     entry_price: float,
     current_price: float,
     balance: float,
-    pnl: float | None = None,
+    pnl: Optional[float] = None,
 ) -> None:
     """Write a log entry describing the active position.
 

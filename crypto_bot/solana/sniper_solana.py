@@ -10,7 +10,7 @@ from .score import score_event
 from .watcher import NewPoolEvent
 
 
-def generate_signal(df: pd.DataFrame, config: dict | None = None) -> Tuple[float, str]:
+def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[float, str]:
     """Return a neutral signal placeholder for Solana sniping."""
     return 0.0, "none"
 

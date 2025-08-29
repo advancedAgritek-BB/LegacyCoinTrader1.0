@@ -14,16 +14,16 @@ class BotContext:
     df_cache: dict
     regime_cache: dict
     config: dict
-    exchange: object | None = None
-    ws_client: object | None = None
-    risk_manager: object | None = None
-    notifier: object | None = None
-    paper_wallet: object | None = None
-    position_guard: object | None = None
+    exchange: Optional[object] = None
+    ws_client: Optional[object] = None
+    risk_manager: Optional[object] = None
+    notifier: Optional[object] = None
+    paper_wallet: Optional[object] = None
+    position_guard: Optional[object] = None
     balance: float = 0.0
-    current_batch: list[str] = field(default_factory=list)
-    analysis_results: list | None = field(default_factory=list)
-    timing: dict | None = field(default_factory=dict)
+    current_batch: List[str] = field(default_factory=list)
+    analysis_results: Optional[list] = field(default_factory=list)
+    timing: Optional[dict] = field(default_factory=dict)
     volatility_factor: float = 1.0
 
 

@@ -28,8 +28,8 @@ _CORRELATION_THRESHOLD = 0.8
 def generate_signal(
     df_a: pd.DataFrame,
     df_b: pd.DataFrame,
-    symbol: str | None = None,
-    timeframe: str | None = None,
+    symbol: Optional[str] = None,
+    timeframe: Optional[str] = None,
     **kwargs,
 ) -> Tuple[float, str]:
     """Return (score, direction) based on the price spread z-score."""

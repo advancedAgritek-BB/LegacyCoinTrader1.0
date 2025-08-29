@@ -26,7 +26,7 @@ async def helius_ws(api_key: str):
         await session.close()
 
 
-async def fetch_jito_bundle(bundle_id: str, api_key: str, session: aiohttp.ClientSession | None = None):
+async def fetch_jito_bundle(bundle_id: str, api_key: str, session: Optional[aiohttp.ClientSession] = None):
     """Fetch a bundle status from Jito Block Engine."""
 
     close = False

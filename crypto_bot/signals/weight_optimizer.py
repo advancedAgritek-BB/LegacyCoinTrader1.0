@@ -67,7 +67,7 @@ class OnlineWeightOptimizer:
 _optimizer = OnlineWeightOptimizer()
 
 
-def get_optimizer(config: dict | None = None) -> OnlineWeightOptimizer:
+def get_optimizer(config: Optional[dict] = None) -> OnlineWeightOptimizer:
     """Return global optimizer configured from ``config``."""
     if config is None:
         return _optimizer

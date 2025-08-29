@@ -11,7 +11,7 @@ if TYPE_CHECKING:  # pragma: no cover - type checking only
     from crypto_bot.bot_controller import TradingBotController
 
 app = FastAPI()
-CONTROLLER: "TradingBotController | None" = None
+CONTROLLER: "Optional[TradingBotController]" = None
 
 
 def get_controller() -> "TradingBotController":
@@ -45,11 +45,11 @@ POS_PATTERN = re.compile(
 
 
 @app.get("/positions")
-def positions() -> list[dict]:
+def positions() -> List[dict]:
     """Return parsed position log entries."""
     if not POSITIONS_FILE.exists():
         return []
-    entries: list[dict] = []
+    entries: List[dict] = []
     for line in POSITIONS_FILE.read_text().splitlines():
         match = POS_PATTERN.search(line)
         if not match:

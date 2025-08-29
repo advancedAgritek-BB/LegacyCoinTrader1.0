@@ -107,8 +107,19 @@ setup_python_env() {
     fi
     
     if [[ -f "requirements_gpu.txt" ]]; then
-        print_status "Installing GPU-accelerated dependencies..."
-        pip install -r requirements_gpu.txt
+        if [[ "$OS" == "macos" ]]; then
+            print_warning "Skipping GPU dependencies on macOS (CUDA not supported)"
+            print_status "GPU acceleration will not be available on this platform"
+            
+            # Install macOS-optimized dependencies instead
+            if [[ -f "requirements_macos.txt" ]]; then
+                print_status "Installing macOS-optimized performance dependencies..."
+                pip install -r requirements_macos.txt
+            fi
+        else
+            print_status "Installing GPU-accelerated dependencies..."
+            pip install -r requirements_gpu.txt
+        fi
     fi
 }
 

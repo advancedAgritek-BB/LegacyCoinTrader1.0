@@ -88,12 +88,12 @@ class TelegramBotUI:
         self,
         notifier: TelegramNotifier,
         state: Dict[str, object],
-        log_file: Path | str,
-        rotator: PortfolioRotator | None = None,
-        exchange: object | None = None,
-        wallet: str | None = None,
+        log_file: Union[Path, str],
+        rotator: Optional[PortfolioRotator] = None,
+        exchange: Optional[object] = None,
+        wallet: Optional[str] = None,
         command_cooldown: float = 5,
-        paper_wallet: object | None = None,
+        paper_wallet: Optional[object] = None,
     ) -> None:
         self.notifier = notifier
         self.token = notifier.token
@@ -106,7 +106,7 @@ class TelegramBotUI:
         self.wallet = wallet
         self.paper_wallet = paper_wallet
         self.command_cooldown = command_cooldown
-        self._last_exec: Dict[tuple[str, str], float] = {}
+        self._last_exec: Dict[Tuple[str, str], float] = {}
         self.logger = setup_logger(__name__, LOG_DIR / "telegram_ui.log")
 
         self.app = ApplicationBuilder().token(self.token).build()
@@ -173,7 +173,7 @@ class TelegramBotUI:
             CallbackQueryHandler(self.show_pnl_stats, pattern=f"^{PNL_STATS}$")
         )
 
-        self.scheduler_thread: threading.Thread | None = None
+        self.scheduler_thread: Optional[threading.Thread] = None
 
         schedule.every().day.at("00:00").do(self.send_daily_summary)
         self.scheduler_thread = threading.Thread(
@@ -181,7 +181,7 @@ class TelegramBotUI:
         )
         self.scheduler_thread.start()
 
-        self.task: asyncio.Task | None = None
+        self.task: Optional[asyncio.Task] = None
 
     def run_async(self) -> None:
         """Start polling within the current event loop."""
@@ -209,7 +209,7 @@ class TelegramBotUI:
         self,
         update: Update,
         text: str,
-        reply_markup: InlineKeyboardMarkup | None = None,
+        reply_markup: Optional[InlineKeyboardMarkup] = None,
     ) -> None:
         if getattr(update, "callback_query", None):
             try:
@@ -619,7 +619,7 @@ class TelegramBotUI:
             return
         if not await self._check_admin(update):
             return
-        lines: list[str] = []
+        lines: List[str] = []
         if TRADES_FILE.exists():
             lines = TRADES_FILE.read_text().splitlines()[-100:]
         text, page, total_pages = _paginate(lines, 0)

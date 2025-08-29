@@ -1,4 +1,4 @@
-from typing import Callable, Tuple, Dict, Iterable, Union, Mapping, Any
+from typing import Callable, Tuple, Dict, Iterable, Union, Mapping, Any, Optional
 
 import asyncio
 
@@ -64,7 +64,7 @@ with open(CONFIG_PATH) as f:
 symbol_locks: Dict[str, asyncio.Lock] = {}
 
 # Event loop captured when locks are first acquired
-_LOCK_LOOP: asyncio.AbstractEventLoop | None = None
+_LOCK_LOOP: Optional[asyncio.AbstractEventLoop] = None
 
 
 async def acquire_symbol_lock(symbol: str) -> None:
@@ -93,17 +93,17 @@ class RouterConfig:
     perf_window: int = 20
     min_confidence: float = 0.0
     fusion_enabled: bool = False
-    strategies: list[tuple[str, float]] = field(default_factory=list)
+    strategies: list[Tuple[str, float]] = field(default_factory=list)
     rl_selector: bool = False
     meta_selector: bool = False
     bandit_enabled: bool = False
     timeframe: str = "1h"
     timeframe_minutes: int = 60
-    trending_timeframe: str | None = None
-    volatile_timeframe: str | None = None
-    sideways_timeframe: str | None = None
-    scalp_timeframe: str | None = None
-    breakout_timeframe: str | None = None
+    trending_timeframe: Optional[str] = None
+    volatile_timeframe: Optional[str] = None
+    sideways_timeframe: Optional[str] = None
+    scalp_timeframe: Optional[str] = None
+    breakout_timeframe: Optional[str] = None
     commit_lock_intervals: int = 0
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
@@ -187,7 +187,7 @@ def score_bot(stats: BotStats) -> float:
     )
 
 
-def cfg_get(cfg: Mapping[str, Any] | RouterConfig, key: str, default: Any | None = None) -> Any:
+def cfg_get(cfg: Union[Mapping[str, Any], RouterConfig], key: str, default: Optional[Any] = None) -> Any:
     """Return configuration value ``key`` from ``cfg``.
 
     Supports both :class:`RouterConfig` instances and plain mapping objects. For
@@ -308,7 +308,7 @@ class Selector:
 
 def get_strategy_by_name(
     name: str,
-) -> Callable[[pd.DataFrame], Tuple[float, str]] | None:
+) -> Optional[Callable[[pd.DataFrame], Tuple[float, str]]]:
     """Return strategy callable for ``name`` if available."""
     from . import meta_selector
     from .rl import strategy_selector as rl_selector
@@ -320,7 +320,7 @@ def get_strategy_by_name(
 
 
 @cache_by_id
-def _build_mappings(config: Mapping[str, Any] | RouterConfig) -> tuple[
+def _build_mappings(config: Union[Mapping[str, Any], RouterConfig]) -> tuple[
     Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]],
     Dict[str, list[Callable[[pd.DataFrame], Tuple[float, str]]]],
 ]:
@@ -342,10 +342,10 @@ def _build_mappings(config: Mapping[str, Any] | RouterConfig) -> tuple[
     return strat_map, regime_map
 
 
-_CONFIG_REGISTRY: Dict[int, Mapping[str, Any] | RouterConfig] = {}
+_CONFIG_REGISTRY: Dict[int, Union[Mapping[str, Any], RouterConfig]] = {}
 
 
-def _register_config(cfg: Mapping[str, Any] | RouterConfig) -> int:
+def _register_config(cfg: Union[Mapping[str, Any], RouterConfig]) -> int:
     """Register config and return its id for cache lookups."""
     cid = id(cfg)
     _CONFIG_REGISTRY[cid] = cfg
@@ -365,7 +365,7 @@ STRATEGY_MAP, REGIME_STRATEGIES = _build_mappings_cached(id(DEFAULT_ROUTER_CFG))
 
 
 def strategy_for(
-    regime: str, config: RouterConfig | Mapping[str, Any] | None = None
+    regime: str, config: Optional[Union[RouterConfig, Mapping[str, Any]]] = None
 ) -> Callable[[pd.DataFrame], Tuple[float, str]]:
     """Return strategy callable for a given regime."""
     cfg = config or DEFAULT_ROUTER_CFG
@@ -377,7 +377,7 @@ def strategy_for(
 
 
 def get_strategies_for_regime(
-    regime: str, config: RouterConfig | Mapping[str, Any] | None = None
+    regime: str, config: Optional[Union[RouterConfig, Mapping[str, Any]]] = None
 ) -> list[Callable[[pd.DataFrame], Tuple[float, str]]]:
     """Return list of strategies mapped to ``regime``."""
     cfg = config or DEFAULT_ROUTER_CFG
@@ -403,7 +403,7 @@ def get_strategies_for_regime(
 def evaluate_regime(
     regime: str,
     df: pd.DataFrame,
-    config: RouterConfig | Mapping[str, Any] | None = None,
+    config: Optional[Union[RouterConfig, Mapping[str, Any]]] = None,
 ) -> Tuple[float, str]:
     """Evaluate and fuse all strategies assigned to ``regime``."""
     cfg = config or DEFAULT_ROUTER_CFG
@@ -461,7 +461,7 @@ def evaluate_regime(
 
 
 def _bandit_context(
-    df: pd.DataFrame, regime: str, symbol: str | None = None
+    df: pd.DataFrame, regime: str, symbol: Optional[str] = None
 ) -> Dict[str, float]:
     """Return bandit context features for Thompson sampling."""
     context: Dict[str, float] = {}
@@ -525,10 +525,10 @@ def strategy_name(regime: str, mode: str) -> str:
 def route(
     regime: Union[str, Dict[str, str]],
     mode: str,
-    config: RouterConfig | Mapping[str, Any] | None = None,
-    notifier: TelegramNotifier | None = None,
-    df_map: Mapping[str, pd.DataFrame] | pd.DataFrame | None = None,
-) -> Callable[[pd.DataFrame | Mapping[str, pd.DataFrame]], Tuple[float, str]]:
+    config: Optional[Union[RouterConfig, Mapping[str, Any]]] = None,
+    notifier: Optional[TelegramNotifier] = None,
+    df_map: Union[Mapping[str, pd.DataFrame], Optional[pd.DataFrame]] = None,
+) -> Callable[[Union[pd.DataFrame, Mapping[str, pd.DataFrame]]], Tuple[float, str]]:
     """Select a strategy based on market regime and operating mode.
 
     Parameters
@@ -537,13 +537,13 @@ def route(
         Current market regime as classified by indicators.
     mode : str
         Trading environment, either ``cex``, ``onchain`` or ``auto``.
-    config : RouterConfig | dict | None
+    config : Optional[Union[RouterConfig, dict]]
         Optional configuration object. When ``meta_selector.enabled`` is
         ``True`` the strategy choice is delegated to the meta selector.
-    notifier : TelegramNotifier | None
+    notifier : Optional[TelegramNotifier]
         Optional notifier used to send a message when the strategy is called.
 
-    df_map : Mapping[str, pd.DataFrame] | pd.DataFrame | None
+    df_map : Mapping[str, pd.DataFrame] | Optional[pd.DataFrame]
         Optional dataframe or mapping used for fast-path checks. When provided
         the router may immediately return a strategy without additional
         context.

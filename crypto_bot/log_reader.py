@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple
 import pandas as pd
 
 
-def _read_trades(path: Path | str) -> pd.DataFrame:
+def _read_trades(path: Union[Path, str]) -> pd.DataFrame:
     file = Path(path)
     if not file.exists():
         return pd.DataFrame(columns=["symbol", "side", "amount", "price", "timestamp"])
@@ -25,7 +25,7 @@ def _read_trades(path: Path | str) -> pd.DataFrame:
     return df
 
 
-def trade_summary(path: Path | str) -> Dict[str, float]:
+def trade_summary(path: Union[Path, str]) -> Dict[str, float]:
     df = _read_trades(path)
     num_trades = len(df)
     pnl = 0.0

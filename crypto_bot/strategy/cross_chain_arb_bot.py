@@ -25,8 +25,8 @@ def _fetch_prices(symbols: List[str]) -> Dict[str, float]:
 
 def generate_signal(
     df: pd.DataFrame,
-    symbol: str | None = None,
-    timeframe: str | None = None,
+    symbol: Optional[str] = None,
+    timeframe: Optional[str] = None,
     **kwargs,
 ) -> Tuple[float, str]:
     """Return arbitrage signal comparing CEX OHLCV data to Solana prices."""

@@ -19,7 +19,7 @@ class RiskState:
 class RiskTracker:
     """Utility for enforcing risk limits across snipes."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: Union[str, Path]) -> None:
         self.path = Path(path)
         self.state = RiskState()
         self.load()

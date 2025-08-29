@@ -33,7 +33,7 @@ logger = setup_logger(__name__, LOG_DIR / "bot.log")
 _admin_ids: set[str] = set()
 
 
-def set_admin_ids(admins: Iterable[str] | str | Any | None) -> None:
+def set_admin_ids(admins: Optional[Union[Iterable[str], str, Any]]) -> None:
     """Configure allowed Telegram admin chat IDs."""
     global _admin_ids
     if admins is None:
@@ -122,7 +122,7 @@ class TelegramNotifier:
         enabled: bool = True,
         token: str = "",
         chat_id: str = "",
-        admins: Iterable[str] | str | None = None,
+        admins: Optional[Union[Iterable[str], str]] = None,
     ) -> None:
         self.enabled = enabled
         self.token = token

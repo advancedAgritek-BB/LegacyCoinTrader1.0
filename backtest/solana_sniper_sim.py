@@ -27,7 +27,7 @@ def backtest(df: pd.DataFrame, *, atr_window: int, min_volume_usd: float) -> dic
     wins = 0
     trades = 0
     entry_price = None
-    position: str | None = None
+    position: Optional[str] = None
 
     for i in range(len(df)):
         row = df.iloc[: i + 1]

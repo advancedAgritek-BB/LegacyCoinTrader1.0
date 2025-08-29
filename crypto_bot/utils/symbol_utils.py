@@ -1,3 +1,4 @@
+from typing import Optional
 import asyncio
 import time
 
@@ -16,7 +17,7 @@ def fix_symbol(sym: str) -> str:
 logger = setup_logger("bot", LOG_DIR / "bot.log")
 
 
-_cached_symbols: list | None = None
+_cached_symbols: Optional[list] = None
 _last_refresh: float = 0.0
 
 

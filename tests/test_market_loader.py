@@ -83,7 +83,7 @@ class DummySliceExchange:
     has = {"fetchMarketsByType": True}
 
     def __init__(self):
-        self.called: list[str] = []
+        self.called: List[str] = []
 
     def fetch_markets_by_type(self, market_type):
         self.called.append(market_type)
@@ -582,7 +582,7 @@ class DummyMultiTFExchange:
     has = {"fetchOHLCV": True}
 
     def __init__(self):
-        self.calls: list[str] = []
+        self.calls: List[str] = []
 
     async def fetch_ohlcv(self, symbol, timeframe="1h", limit=100):
         self.calls.append(timeframe)
@@ -1055,7 +1055,7 @@ class RateLimitExchange:
     has = {"fetchOHLCV": True}
 
     def __init__(self):
-        self.times: list[float] = []
+        self.times: List[float] = []
         self.rateLimit = 50
 
     async def fetch_ohlcv(self, symbol, timeframe="1h", limit=100):
@@ -1081,8 +1081,8 @@ class SymbolCheckExchange:
     has = {"fetchOHLCV": True}
 
     def __init__(self):
-        self.symbols: list[str] = []
-        self.calls: list[str] = []
+        self.symbols: List[str] = []
+        self.calls: List[str] = []
         self.loaded = False
 
     def load_markets(self):
@@ -1160,7 +1160,7 @@ def test_fetch_ohlcv_retry_520(monkeypatch):
                 raise err
             return [[1] * 6]
 
-    sleeps: list[float] = []
+    sleeps: List[float] = []
 
     async def fake_sleep(secs):
         sleeps.append(secs)
@@ -1191,7 +1191,7 @@ def test_fetch_ohlcv_retry_520_network(monkeypatch):
                 raise err
             return [[1] * 6]
 
-    sleeps: list[float] = []
+    sleeps: List[float] = []
 
     async def fake_sleep(secs):
         sleeps.append(secs)
@@ -1285,7 +1285,7 @@ class PendingWSExchange:
 
     def __init__(self):
         self.closed = False
-        self.calls: list[str] = []
+        self.calls: List[str] = []
 
     async def watch_ohlcv(self, symbol, timeframe="1h", limit=100):
         self.calls.append("watch")
@@ -1499,7 +1499,7 @@ def test_fetch_geckoterminal_ohlcv_network_error(monkeypatch):
 def test_fetch_geckoterminal_ohlcv_retry(monkeypatch):
     from crypto_bot.utils import market_loader
 
-    sleeps: list[float] = []
+    sleeps: List[float] = []
 
     async def fake_sleep(secs):
         sleeps.append(secs)
@@ -1652,7 +1652,7 @@ def test_update_multi_tf_ohlcv_cache_min_volume(monkeypatch):
     async def fake_fetch(*_a, **_k):
         return [[0, 1, 2, 3, 4, 5]], 50.0, 1000.0
 
-    calls: list[float] = []
+    calls: List[float] = []
 
     async def fake_fetch(*_a, min_24h_volume=0, **_k):
         calls.append(min_24h_volume)

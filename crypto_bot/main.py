@@ -1,3 +1,4 @@
+from typing import Optional
 import os
 import asyncio
 import contextlib
@@ -152,11 +153,11 @@ TOTAL_ANALYSES = 0
 class SessionState:
     """Runtime session state shared across tasks."""
 
-    positions: dict[str, dict] = field(default_factory=dict)
+    positions: Dict[str, dict] = field(default_factory=dict)
     df_cache: dict[str, dict[str, pd.DataFrame]] = field(default_factory=dict)
     regime_cache: dict[str, dict[str, pd.DataFrame]] = field(default_factory=dict)
-    last_balance: float | None = None
-    scan_task: asyncio.Task | None = None
+    last_balance: Optional[float] = None
+    scan_task: Optional[asyncio.Task] = None
 
 
 def update_df_cache(
@@ -177,9 +178,9 @@ def update_df_cache(
         tf_cache.popitem(last=False)
 
 
-def compute_average_atr(symbols: list[str], df_cache: dict, timeframe: str) -> float:
+def compute_average_atr(symbols: List[str], df_cache: dict, timeframe: str) -> float:
     """Return the average ATR for symbols present in ``df_cache``."""
-    atr_values: list[float] = []
+    atr_values: List[float] = []
     tf_cache = df_cache.get(timeframe, {})
     for sym in symbols:
         df = tf_cache.get(sym)
@@ -190,7 +191,7 @@ def compute_average_atr(symbols: list[str], df_cache: dict, timeframe: str) -> f
 
 
 def is_market_pumping(
-    symbols: list[str], df_cache: dict, timeframe: str = "1h", lookback_hours: int = 24
+    symbols: List[str], df_cache: dict, timeframe: str = "1h", lookback_hours: int = 24
 ) -> bool:
     """Return ``True`` when the average % change over ``lookback_hours`` exceeds ~10%."""
 
@@ -200,7 +201,7 @@ def is_market_pumping(
 
     sec = timeframe_seconds(None, timeframe)
     candles = int(lookback_hours * 3600 / sec) if sec else 0
-    changes: list[float] = []
+    changes: List[float] = []
     for sym in symbols:
         df = tf_cache.get(sym)
         if df is None or df.empty or "close" not in df:
@@ -232,7 +233,7 @@ def opposite_side(side: str) -> str:
     return "sell" if side == "buy" else "buy"
 
 
-def _closest_wall_distance(book: dict, entry: float, side: str) -> float | None:
+def _closest_wall_distance(book: dict, entry: float, side: str) -> Optional[float]:
     """Return distance to the nearest bid/ask wall from ``entry``."""
     if not isinstance(book, dict):
         return None
@@ -251,8 +252,8 @@ def _closest_wall_distance(book: dict, entry: float, side: str) -> float | None:
 
 
 def notify_balance_change(
-    notifier: TelegramNotifier | None,
-    previous: float | None,
+    notifier: Optional[TelegramNotifier],
+    previous: Optional[float],
     new_balance: float,
     enabled: bool,
     is_paper_trading: bool = False,
@@ -435,7 +436,7 @@ def _emit_timing(
     ohlcv_t: float,
     analyze_t: float,
     total_t: float,
-    metrics_path: Path | None = None,
+    metrics_path: Optional[Path] = None,
     ohlcv_fetch_latency: float = 0.0,
     execution_latency: float = 0.0,
 ) -> None:
@@ -528,7 +529,7 @@ def maybe_reload_config(state: dict, config: dict) -> None:
 
 def _flatten_config(data: dict, parent: str = "") -> dict:
     """Flatten nested config keys to ENV_STYLE names."""
-    flat: dict[str, str] = {}
+    flat: Dict[str, str] = {}
     for key, value in data.items():
         new_key = f"{parent}_{key}" if parent else key
         if isinstance(value, dict):
@@ -637,7 +638,7 @@ async def initial_scan(
     exchange: object,
     config: dict,
     state: SessionState,
-    notifier: TelegramNotifier | None = None,
+    notifier: Optional[TelegramNotifier] = None,
 ) -> None:
     """Populate OHLCV and regime caches before trading begins."""
 
@@ -715,7 +716,7 @@ async def fetch_candidates(ctx: BotContext) -> None:
 
     ctx.timing["symbol_time"] = time.perf_counter() - t0
 
-    solana_tokens: list[str] = []
+    solana_tokens: List[str] = []
     sol_cfg = ctx.config.get("solana_scanner", {})
     if sol_cfg.get("enabled"):
         try:
@@ -759,9 +760,9 @@ async def fetch_candidates(ctx: BotContext) -> None:
         ]
 
 
-async def scan_arbitrage(exchange: object, config: dict) -> list[str]:
+async def scan_arbitrage(exchange: object, config: dict) -> List[str]:
     """Return symbols with profitable Solana arbitrage opportunities."""
-    pairs: list[str] = config.get("arbitrage_pairs", [])
+    pairs: List[str] = config.get("arbitrage_pairs", [])
     if not pairs:
         return []
 
@@ -770,7 +771,7 @@ async def scan_arbitrage(exchange: object, config: dict) -> list[str]:
     except Exception:
         fetch_geckoterminal_ohlcv = None
 
-    gecko_prices: dict[str, float] = {}
+    gecko_prices: Dict[str, float] = {}
     if fetch_geckoterminal_ohlcv:
         for sym in pairs:
             try:
@@ -782,7 +783,7 @@ async def scan_arbitrage(exchange: object, config: dict) -> list[str]:
                 gecko_prices[sym] = price
 
     remaining = [s for s in pairs if s not in gecko_prices]
-    dex_prices: dict[str, float] = gecko_prices.copy()
+    dex_prices: Dict[str, float] = gecko_prices.copy()
     if remaining:
         try:
             from crypto_bot.solana import fetch_solana_prices
@@ -790,7 +791,7 @@ async def scan_arbitrage(exchange: object, config: dict) -> list[str]:
             fetch_solana_prices = None
         if fetch_solana_prices:
             dex_prices.update(await fetch_solana_prices(remaining))
-    results: list[str] = []
+    results: List[str] = []
     threshold = float(config.get("arbitrage_threshold", 0.0))
 
     for sym in pairs:
@@ -1550,7 +1551,7 @@ async def _rotation_loop(
     exchange: object,
     wallet: str,
     state: dict,
-    notifier: TelegramNotifier | None,
+    notifier: Optional[TelegramNotifier],
     check_balance_change: callable,
 ) -> None:
     """Periodically rotate portfolio holdings."""
@@ -1699,7 +1700,7 @@ async def _main_impl() -> TelegramNotifier:
     if config.get("scan_markets", False) and not config.get("symbols"):
         attempt = 0
         delay = SYMBOL_SCAN_RETRY_DELAY
-        discovered: list[str] | None = None
+        discovered: Optional[List[str]] = None
         while attempt < MAX_SYMBOL_SCAN_ATTEMPTS:
             start_scan = time.perf_counter()
             discovered = await load_kraken_symbols(
@@ -1826,7 +1827,7 @@ async def _main_impl() -> TelegramNotifier:
     state = {"running": True, "mode": mode}
     # Caches for OHLCV and regime data are stored on the session_state
     session_state = SessionState(last_balance=last_balance)
-    last_candle_ts: dict[str, int] = {}
+    last_candle_ts: Dict[str, int] = {}
 
     control_task = asyncio.create_task(console_control.control_loop(state))
     rotation_task = asyncio.create_task(
@@ -1839,7 +1840,7 @@ async def _main_impl() -> TelegramNotifier:
             check_balance_change,
         )
     )
-    solana_scan_task: asyncio.Task | None = None
+    solana_scan_task: Optional[asyncio.Task] = None
     if config.get("solana_scanner", {}).get("enabled"):
         solana_scan_task = asyncio.create_task(solana_scan_loop())
     print("Bot running. Type 'stop' to pause, 'start' to resume, 'quit' to exit.")
@@ -2030,7 +2031,7 @@ async def _main_impl() -> TelegramNotifier:
             # Refresh OHLCV for open positions if a new candle has formed
             tf = config.get("timeframe", "1h")
             tf_sec = timeframe_seconds(None, tf)
-            open_syms: list[str] = []
+            open_syms: List[str] = []
             for sym in ctx.positions:
                 last_ts = last_candle_ts.get(sym, 0)
                 if time.time() - last_ts >= tf_sec:
@@ -2202,7 +2203,7 @@ async def _main_impl() -> TelegramNotifier:
 
 async def main() -> None:
     """Entry point for running the trading bot with error handling."""
-    notifier: TelegramNotifier | None = None
+    notifier: Optional[TelegramNotifier] = None
     try:
         notifier = await _main_impl()
     except Exception as exc:  # pragma: no cover - error path

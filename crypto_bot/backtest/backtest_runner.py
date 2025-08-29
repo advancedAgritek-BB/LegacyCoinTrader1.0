@@ -74,8 +74,8 @@ class BacktestConfig:
     misclass_prob: float = 0.0
     seed: Optional[int] = None
     risk_per_trade_pct: float = 0.01
-    trailing_stop_atr_mult: float | None = None
-    partial_tp_atr_mult: float | None = None
+    trailing_stop_atr_mult: Optional[float] = None
+    partial_tp_atr_mult: Optional[float] = None
 
 
 class BacktestRunner:
@@ -84,13 +84,13 @@ class BacktestRunner:
     def __init__(
         self,
         config: BacktestConfig,
-        exchange: ccxt.Exchange | None = None,
-        df: pd.DataFrame | None = None,
+            exchange: Optional[ccxt.Exchange] = None,
+    df: Optional[pd.DataFrame] = None,
     ) -> None:
         self.config = config
         self.exchange = exchange
         self.rng = np.random.default_rng(config.seed)
-        df_raw: pd.DataFrame | list | None
+        df_raw: Union[pd.DataFrame, list, None]
         if df is not None:
             df_raw = df
         else:
@@ -486,9 +486,9 @@ def backtest(
     since: int,
     limit: int = 1000,
     mode: str = "cex",
-    strategy: str | None = None,
-    stop_loss_range: Iterable[float] | None = None,
-    take_profit_range: Iterable[float] | None = None,
+    strategy: Optional[str] = None,
+    stop_loss_range: Optional[Iterable[float]] = None,
+    take_profit_range: Optional[Iterable[float]] = None,
     slippage_pct: float = 0.001,
     fee_pct: float = 0.001,
     misclass_prob: float = 0.0,
@@ -522,8 +522,8 @@ def walk_forward_optimize(
     limit: int,
     window: int,
     mode: str = "cex",
-    stop_loss_range: Iterable[float] | None = None,
-    take_profit_range: Iterable[float] | None = None,
+    stop_loss_range: Optional[Iterable[float]] = None,
+    take_profit_range: Optional[Iterable[float]] = None,
     slippage_pct: float = 0.001,
     fee_pct: float = 0.001,
     misclass_prob: float = 0.0,

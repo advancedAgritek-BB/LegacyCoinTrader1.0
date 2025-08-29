@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 import json
 import os
 from pathlib import Path
@@ -110,7 +110,7 @@ async def auto_convert_funds(
     amount: float,
     dry_run: bool = True,
     slippage_bps: int = 50,
-    notifier: TelegramNotifier | None = None,
+    notifier: Optional[TelegramNotifier] = None,
     paper_wallet=None,  # Add paper wallet parameter
 ) -> Dict:
     """Convert funds using the Solana Jupiter aggregator."""

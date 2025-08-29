@@ -1,3 +1,4 @@
+from typing import Optional, Tuple
 import pandas as pd
 import numpy as np
 from scipy.stats import pearsonr
@@ -24,8 +25,8 @@ def _welford_corr(x: np.ndarray, y: np.ndarray) -> float:
 
 
 def compute_pairwise_correlation(
-    df_cache: dict[str, pd.DataFrame], max_pairs: int | None = None
-) -> dict[tuple[str, str], float]:
+    df_cache: dict[str, pd.DataFrame], max_pairs: Optional[int] = None
+) -> dict[Tuple[str, str], float]:
     """Return Pearson correlation coefficients for each pair of symbols.
 
     Parameters
@@ -37,7 +38,7 @@ def compute_pairwise_correlation(
         possible pairs are evaluated.
     """
     symbols = list(df_cache.keys())
-    correlations: dict[tuple[str, str], float] = {}
+    correlations: dict[Tuple[str, str], float] = {}
     computed = 0
     for i, sym1 in enumerate(symbols):
         if max_pairs is not None and computed >= max_pairs:
@@ -114,7 +115,7 @@ def compute_correlation_matrix(df_cache: dict[str, pd.DataFrame]) -> pd.DataFram
 
 def incremental_correlation(
     df_cache: dict[str, pd.DataFrame], window: int = 100
-) -> dict[tuple[str, str], float]:
+) -> dict[Tuple[str, str], float]:
     """Return correlation of returns for each pair of symbols.
 
     Parameters
@@ -134,7 +135,7 @@ def incremental_correlation(
             returns[sym] = arr[-window:]
 
     symbols = list(returns.keys())
-    correlations: dict[tuple[str, str], float] = {}
+    correlations: dict[Tuple[str, str], float] = {}
     for i, sym1 in enumerate(symbols):
         r1 = returns[sym1]
         for sym2 in symbols[i + 1 :]:

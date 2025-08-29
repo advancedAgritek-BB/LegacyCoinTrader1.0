@@ -24,7 +24,7 @@ class PaperWallet:
         self.initial_balance = balance
         self.balance = balance
         # mapping of identifier (symbol or trade id) -> position details
-        # each position: {"symbol": str | None, "side": str, "amount": float, "entry_price": float, "reserved": float}
+        # each position: {"symbol": Optional[str], "side": str, "amount": float, "entry_price": float, "reserved": float}
         self.positions: Dict[str, Dict[str, Any]] = {}
         self.realized_pnl = 0.0
         self.max_open_trades = max_open_trades
@@ -47,7 +47,7 @@ class PaperWallet:
         return total
 
     @property
-    def entry_price(self) -> float | None:
+    def entry_price(self) -> Optional[float]:
         if not self.positions:
             return None
         total_amt = self.position_size
@@ -60,7 +60,7 @@ class PaperWallet:
         return total / total_amt
 
     @property
-    def side(self) -> str | None:
+    def side(self) -> Optional[str]:
         if not self.positions:
             return None
         first = next(iter(self.positions.values()))["side"]

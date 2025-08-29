@@ -111,7 +111,7 @@ _STRATEGY_FN_MAP = {}
 
 def get_strategy_by_name(
     name: str,
-) -> Callable[[pd.DataFrame], tuple] | None:
+) -> Optional[Callable[[pd.DataFrame], tuple]]:
     """Return the strategy function mapped to ``name`` if present."""
     # Populate the strategy map lazily if it's empty
     if not _STRATEGY_FN_MAP:

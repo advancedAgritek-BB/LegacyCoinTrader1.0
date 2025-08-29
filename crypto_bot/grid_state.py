@@ -39,12 +39,12 @@ def update_spacing(symbol: str, spacing: float, atr: float) -> None:
     _last_atr[symbol] = atr
 
 
-def get_spacing(symbol: str) -> float | None:
+def get_spacing(symbol: str) -> Optional[float]:
     """Return stored grid spacing for ``symbol``."""
     return _grid_spacing.get(symbol)
 
 
-def get_grid_step(symbol: str) -> float | None:
+def get_grid_step(symbol: str) -> Optional[float]:
     """Return stored grid step size for ``symbol``."""
     return _grid_step.get(symbol)
 
@@ -54,7 +54,7 @@ def set_grid_step(symbol: str, step: float) -> None:
     _grid_step[symbol] = step
 
 
-def get_last_atr(symbol: str) -> float | None:
+def get_last_atr(symbol: str) -> Optional[float]:
     """Return most recent ATR% value for ``symbol`` if known."""
     return _last_atr.get(symbol)
 

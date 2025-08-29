@@ -21,16 +21,23 @@ from crypto_bot.strategy import (
 LOG_FILE = Path("crypto_bot/logs/strategy_pnl.csv")
 
 # Map strategy names to generation functions
-_STRATEGY_FN_MAP: Dict[str, Callable[[pd.DataFrame], tuple]] = {
-    "trend_bot": trend_bot.generate_signal,
-    "grid_bot": grid_bot.generate_signal,
-    "sniper_bot": sniper_bot.generate_signal,
-    "dex_scalper": dex_scalper.generate_signal,
-    "dca_bot": dca_bot.generate_signal,
-    "mean_bot": mean_bot.generate_signal,
-    "breakout_bot": breakout_bot.generate_signal,
-    "solana_scalping": solana_scalping.generate_signal,
-}
+_STRATEGY_FN_MAP: Dict[str, Callable[[pd.DataFrame], tuple]] = {}
+if trend_bot is not None:
+    _STRATEGY_FN_MAP["trend_bot"] = trend_bot.generate_signal
+if grid_bot is not None:
+    _STRATEGY_FN_MAP["grid_bot"] = grid_bot.generate_signal
+if sniper_bot is not None:
+    _STRATEGY_FN_MAP["sniper_bot"] = sniper_bot.generate_signal
+if dex_scalper is not None:
+    _STRATEGY_FN_MAP["dex_scalper"] = dex_scalper.generate_signal
+if dca_bot is not None:
+    _STRATEGY_FN_MAP["dca_bot"] = dca_bot.generate_signal
+if mean_bot is not None:
+    _STRATEGY_FN_MAP["mean_bot"] = mean_bot.generate_signal
+if breakout_bot is not None:
+    _STRATEGY_FN_MAP["breakout_bot"] = breakout_bot.generate_signal
+if solana_scalping is not None:
+    _STRATEGY_FN_MAP["solana_scalping"] = solana_scalping.generate_signal
 
 
 class RLStrategySelector:

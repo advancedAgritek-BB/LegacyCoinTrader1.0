@@ -63,7 +63,7 @@ async def execute_swap(
     unwrap_sol: bool = False,
     compute_unit_price: int = 1000,
     tx_version: str = "V0",
-    risk_manager: object | None = None,
+    risk_manager: Optional[object] = None,
 ) -> Mapping[str, Any]:
     """Execute a Raydium swap and return the RPC result."""
     payload = dict(swap_response)
@@ -119,8 +119,8 @@ async def sniper_trade(
     input_mint: str,
     output_mint: str,
     amount: int,
-    notifier: Any | None = None,
-    config: Mapping[str, Any] | None = None,
+    notifier: Optional[Any] = None,
+    config: Optional[Mapping[str, Any]] = None,
 ) -> Mapping[str, Any]:
     """Execute a simple snipe trade and convert profits to BTC."""
     from crypto_bot.risk.risk_manager import RiskManager, RiskConfig

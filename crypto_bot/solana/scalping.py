@@ -1,13 +1,14 @@
+from typing import Optional, Tuple
 import pandas as pd
 import ta
 
 
 def generate_signal(
     df: pd.DataFrame,
-    config: dict | None = None,
+    config: Optional[dict] = None,
     *,
-    pyth_price: float | None = None,
-) -> tuple[float, str]:
+    pyth_price: Optional[float] = None,
+) -> Tuple[float, str]:
     """Return a simple Solana scalping signal using RSI and MACD.
 
     Parameters

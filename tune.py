@@ -51,7 +51,7 @@ class LocalRunner(BacktestRunner):
         return self._df_source
 
 
-def optimise(df: pd.DataFrame, trials: int, cfg: dict[str, Any]) -> optuna.Study:
+def optimise(df: pd.DataFrame, trials: int, cfg: Dict[str, Any]) -> optuna.Study:
     """Run Optuna search over stop-loss and take-profit."""
 
     df = df[df["timestamp"] >= df["timestamp"].max() - pd.Timedelta(days=90)]

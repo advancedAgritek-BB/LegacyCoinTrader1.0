@@ -38,13 +38,13 @@ class RiskConfig:
     risk_pct: float = 0.01
     min_volume: float = 0.0
     volume_threshold_ratio: float = 0.1
-    strategy_allocation: dict | None = None
+    strategy_allocation: Optional[dict] = None
     volume_ratio: float = 1.0
     atr_short_window: int = 14
     atr_long_window: int = 50
     max_volatility_factor: float = 1.5
     min_expected_value: float = 0.0
-    default_expected_value: float | None = None
+    default_expected_value: Optional[float] = None
     atr_period: int = 14
     stop_loss_atr_mult: float = 2.0
     take_profit_atr_mult: float = 4.0
@@ -61,8 +61,8 @@ class RiskManager:
         self.capital_tracker = CapitalTracker(config.strategy_allocation or {})
         self.equity = 1.0
         self.peak_equity = 1.0
-        self.stop_orders: dict[str, dict] = {}
-        self.stop_order: dict | None = None
+        self.stop_orders: Dict[str, dict] = {}
+        self.stop_order: Optional[dict] = None
         # Track protective stop orders for each open trade by symbol
         self.boost = 1.0
 
@@ -92,7 +92,7 @@ class RiskManager:
         config = RiskConfig(**params)
         return cls(config)
 
-    def get_stop_order(self, symbol: str) -> dict | None:
+    def get_stop_order(self, symbol: str) -> Optional[dict]:
         """Return the stop order for ``symbol`` if present."""
         return self.stop_orders.get(symbol)
 
@@ -130,9 +130,9 @@ class RiskManager:
         confidence: float,
         balance: float,
         df: Optional[pd.DataFrame] = None,
-        stop_distance: float | None = None,
-        atr: float | None = None,
-        price: float | None = None,
+        stop_distance: Optional[float] = None,
+        atr: Optional[float] = None,
+        price: Optional[float] = None,
     ) -> float:
         """Return the trade value for a signal.
 
@@ -189,7 +189,7 @@ class RiskManager:
         )
         return size
 
-    def allow_trade(self, df: Any, strategy: str | None = None) -> tuple[bool, str]:
+    def allow_trade(self, df: Any, strategy: Optional[str] = None) -> Tuple[bool, str]:
         """Assess whether market conditions merit taking a trade.
 
         Parameters
@@ -199,7 +199,7 @@ class RiskManager:
 
         Returns
         -------
-        tuple[bool, str]
+        Tuple[bool, str]
             ``True``/``False`` along with the reason for the decision.
         """
         df_len = len(df)
@@ -325,12 +325,12 @@ class RiskManager:
     def register_stop_order(
         self,
         order: dict,
-        strategy: str | None = None,
-        symbol: str | None = None,
-        entry_price: float | None = None,
-        confidence: float | None = None,
-        direction: str | None = None,
-        take_profit: float | None = None,
+        strategy: Optional[str] = None,
+        symbol: Optional[str] = None,
+        entry_price: Optional[float] = None,
+        confidence: Optional[float] = None,
+        direction: Optional[str] = None,
+        take_profit: Optional[float] = None,
     ) -> None:
         """Store the protective stop order and related trade info."""
         order = dict(order)
@@ -354,7 +354,7 @@ class RiskManager:
             self.stop_orders[symbol] = order
         logger.info("Registered stop order %s", order)
 
-    def update_stop_order(self, new_amount: float, symbol: str | None = None) -> None:
+    def update_stop_order(self, new_amount: float, symbol: Optional[str] = None) -> None:
         """Update the stored stop order amount."""
         order = self.stop_orders.get(symbol) if symbol else self.stop_order
         if not order:
@@ -366,7 +366,7 @@ class RiskManager:
             self.stop_order = order
         logger.info("Updated stop order amount to %.4f", new_amount)
 
-    def cancel_stop_order(self, exchange, symbol: str | None = None) -> None:
+    def cancel_stop_order(self, exchange, symbol: Optional[str] = None) -> None:
         """Cancel the existing stop order if needed."""
         order = self.stop_orders.get(symbol) if symbol else self.stop_order
         if not order:

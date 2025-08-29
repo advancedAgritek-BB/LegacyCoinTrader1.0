@@ -2,7 +2,7 @@ import argparse
 from crypto_bot.backtest.backtest_runner import BacktestConfig, BacktestRunner
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: Optional[List[str]] = None) -> None:
     parser = argparse.ArgumentParser(description="Run BacktestRunner")
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--timeframe", required=True)

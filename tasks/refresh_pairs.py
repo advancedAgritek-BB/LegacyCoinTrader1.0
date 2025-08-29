@@ -1,3 +1,4 @@
+from typing import Union
 from __future__ import annotations
 
 import argparse
@@ -24,7 +25,7 @@ DEFAULT_REFRESH_INTERVAL = 6 * 3600  # 6 hours
 logger = logging.getLogger(__name__)
 
 
-def _parse_interval(value: str | int | float) -> float:
+def _parse_interval(value: Union[str, int, float]) -> float:
     """Return ``value`` in seconds, accepting shorthand like "6h"."""
     if isinstance(value, (int, float)):
         return float(value)
@@ -91,7 +92,7 @@ async def _close_exchange(exchange: ccxt.Exchange) -> None:
             pass
 
 
-async def get_solana_liquid_pairs(min_volume: float) -> list[str]:
+async def get_solana_liquid_pairs(min_volume: float) -> List[str]:
     """Return Raydium symbols with liquidity above ``min_volume``."""
     url = "https://api.raydium.io/v2/main/pairs"
     try:
@@ -109,7 +110,7 @@ async def get_solana_liquid_pairs(min_volume: float) -> list[str]:
     if not isinstance(items, list):
         return []
 
-    results: list[str] = []
+    results: List[str] = []
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -139,10 +140,10 @@ async def get_solana_liquid_pairs(min_volume: float) -> list[str]:
     return results
 
 
-async def refresh_pairs_async(min_volume_usd: float, top_k: int, config: dict) -> list[str]:
+async def refresh_pairs_async(min_volume_usd: float, top_k: int, config: dict) -> List[str]:
     """Fetch tickers and update the cached liquid pairs list."""
-    old_pairs: list[str] = []
-    old_map: dict[str, float] = {}
+    old_pairs: List[str] = []
+    old_map: Dict[str, float] = {}
     if PAIR_FILE.exists():
         try:
             with open(PAIR_FILE) as f:
@@ -202,7 +203,7 @@ async def refresh_pairs_async(min_volume_usd: float, top_k: int, config: dict) -
         if secondary:
             await _close_exchange(secondary)
 
-    pairs: list[tuple[str, float]] = []
+    pairs: list[Tuple[str, float]] = []
     for symbol, data in tickers.items():
         vol = data.get("quoteVolume")
         if vol is None:
@@ -231,7 +232,7 @@ async def refresh_pairs_async(min_volume_usd: float, top_k: int, config: dict) -
     return top_list
 
 
-def refresh_pairs(min_volume_usd: float, top_k: int, config: dict) -> list[str]:
+def refresh_pairs(min_volume_usd: float, top_k: int, config: dict) -> List[str]:
     """Synchronous wrapper for :func:`refresh_pairs_async`."""
     return asyncio.run(refresh_pairs_async(min_volume_usd, top_k, config))
 

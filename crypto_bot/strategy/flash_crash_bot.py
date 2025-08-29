@@ -8,8 +8,8 @@ NAME = "flash_crash_bot"
 
 def generate_signal(
     df: pd.DataFrame,
-    symbol: str | None = None,
-    timeframe: str | None = None,
+    symbol: Optional[str] = None,
+    timeframe: Optional[str] = None,
     **kwargs,
 ) -> Tuple[float, str]:
     """Return long signal on sudden drops with high volume."""

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 MIN_BALANCE_THRESHOLD = float(os.getenv("MIN_BALANCE_THRESHOLD", "0.0"))
 
 
-async def get_token_accounts(wallet_address: str, threshold: float | None = None) -> List[Dict[str, Any]]:
+async def get_token_accounts(wallet_address: str, threshold: Optional[float] = None) -> List[Dict[str, Any]]:
     """Return SPL token accounts with balances above ``threshold``.
 
     Parameters
