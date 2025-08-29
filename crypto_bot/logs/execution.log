@@ -1,0 +1,6 @@
+2025-08-26 14:01:52,768 - INFO - Order executed buy CXT/EUR 45193.04724990 (id/tx: None)
+2025-08-26 14:01:55,575 - INFO - Logged trade: {'symbol': 'CXT/EUR', 'side': 'buy', 'amount': np.float64(45193.047249903), 'price': 0.02517, 'timestamp': '2025-08-26T19:01:55.574138', 'is_stop': False}
+2025-08-26 14:01:55,576 - INFO - Order executed - id=None side=buy amount=45193.047249903 price=0.02517 dry_run=True
+2025-08-26 14:01:56,033 - INFO - Order executed buy BTC/USD 0.00810040 (id/tx: None)
+2025-08-26 14:02:01,208 - INFO - Logged trade: {'symbol': 'BTC/USD', 'side': 'buy', 'amount': np.float64(0.008100400681202503), 'price': 110640.1, 'timestamp': '2025-08-26T19:02:01.206690', 'is_stop': False}
+2025-08-26 14:02:01,208 - INFO - Order executed - id=None side=buy amount=0.008100400681202503 price=110640.1 dry_run=True

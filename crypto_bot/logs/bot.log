@@ -1,0 +1,1697 @@
+2025-08-26 13:44:54,316 - INFO - Starting bot
+2025-08-26 13:44:54,316 - INFO - Loading config from /Users/brandonburnette/Downloads/coinTrader2.0-codex-modify-execute_signals-for-short-selling/crypto_bot/config.yaml
+2025-08-26 13:44:54,333 - INFO - Setting HELIUS_KEY from .env
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair ADA/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair AI16Z/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair ALGO/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair APE/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair ATOM/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair AVAX/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair BCH/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair BERA/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair BNB/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair CRO/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair DOT/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair ETH/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair EUROP/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair EURR/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair FARTCOIN/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair LINK/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair LTC/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair MANA/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair MELANIA/USDC
+2025-08-26 13:50:53,754 - INFO - Dropping invalid USDC pair PEAQ/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair PENGU/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair RLUSD/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair SHIB/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair SOL/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair S/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair TON/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair TRUMP/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair USDG/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair USDQ/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair USDR/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair USTC/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair VIRTUAL/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair BTC/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair DOGE/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair XMR/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair XRP/USDC
+2025-08-26 13:50:53,755 - INFO - Dropping invalid USDC pair XTZ/USDC
+2025-08-26 13:50:53,759 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 13:50:53,759 - INFO - Starting update for timeframe 1m
+2025-08-26 13:50:53,759 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 13:50:53,759 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 13:51:42,516 - INFO - 797 symbols passed filtering
+2025-08-26 13:51:42,516 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 13:51:42,516 - INFO - Starting update for timeframe 1m
+2025-08-26 13:51:42,516 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 13:51:42,516 - INFO - Fetching 200 candles for 50 symbols on 1m
+2025-08-26 13:52:31,367 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 13:52:31,389 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 13:52:31,389 - INFO - Finished update for timeframe 1m
+2025-08-26 13:52:31,389 - INFO - Starting update for timeframe 5m
+2025-08-26 13:52:31,389 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 13:52:31,389 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 13:53:48,173 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 13:53:48,187 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 13:53:48,188 - INFO - Finished update for timeframe 1m
+2025-08-26 13:53:48,188 - INFO - Starting update for timeframe 5m
+2025-08-26 13:53:48,188 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 13:53:48,188 - INFO - Fetching 200 candles for 50 symbols on 5m
+2025-08-26 13:54:26,766 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 13:54:26,787 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 13:54:26,787 - INFO - Finished update for timeframe 5m
+2025-08-26 13:54:26,787 - INFO - Starting update for timeframe 15m
+2025-08-26 13:54:26,787 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 13:54:26,787 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 13:55:48,223 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 13:55:48,237 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 13:55:48,238 - INFO - Finished update for timeframe 5m
+2025-08-26 13:55:48,238 - INFO - Starting update for timeframe 15m
+2025-08-26 13:55:48,238 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 13:55:48,238 - INFO - Fetching 200 candles for 50 symbols on 15m
+2025-08-26 13:56:12,324 - WARNING - Incomplete OHLCV for AKE/USD: got 404 of 700
+2025-08-26 13:56:26,739 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 13:56:26,760 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 13:56:26,760 - INFO - Finished update for timeframe 15m
+2025-08-26 13:56:26,760 - INFO - Starting update for timeframe 1h
+2025-08-26 13:56:26,760 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 13:56:26,760 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 13:56:44,949 - WARNING - Incomplete OHLCV for AB/EUR: got 437 of 700
+2025-08-26 13:56:49,760 - WARNING - Incomplete OHLCV for AB/USD: got 437 of 700
+2025-08-26 13:57:50,577 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 13:57:50,591 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 13:57:50,591 - INFO - Finished update for timeframe 15m
+2025-08-26 13:57:50,591 - INFO - Starting update for timeframe 1h
+2025-08-26 13:57:50,591 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 13:57:50,591 - INFO - Fetching 200 candles for 50 symbols on 1h
+2025-08-26 13:58:11,303 - WARNING - Incomplete OHLCV for AKE/USD: got 101 of 700
+2025-08-26 13:58:24,169 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 13:58:29,111 - WARNING - Incomplete OHLCV for AKE/USD: got 101 of 700
+2025-08-26 13:58:30,112 - WARNING - Skipping AKE/USD: only 101/700 candles
+2025-08-26 13:58:30,115 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 13:58:30,118 - INFO - Finished update for timeframe 1h
+2025-08-26 13:58:30,118 - INFO - Starting update for timeframe 4h
+2025-08-26 13:58:30,118 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 13:58:30,118 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 13:58:47,122 - WARNING - Incomplete OHLCV for AB/EUR: got 110 of 700
+2025-08-26 13:58:51,926 - WARNING - Incomplete OHLCV for AB/USD: got 110 of 700
+2025-08-26 13:59:02,722 - WARNING - Incomplete OHLCV for SAPIEN/USD: got 146 of 200
+2025-08-26 13:59:07,716 - WARNING - Incomplete OHLCV for SAPIEN/EUR: got 146 of 200
+2025-08-26 13:59:42,381 - WARNING - Incomplete OHLCV for A/EUR: got 207 of 700
+2025-08-26 13:59:50,596 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 13:59:50,611 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 13:59:50,611 - INFO - Finished update for timeframe 1h
+2025-08-26 13:59:50,611 - INFO - Starting update for timeframe 4h
+2025-08-26 13:59:50,611 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 13:59:50,611 - INFO - Fetching 200 candles for 50 symbols on 4h
+2025-08-26 14:00:01,753 - WARNING - Incomplete OHLCV for AIOZ/EUR: got 278 of 700
+2025-08-26 14:00:02,947 - WARNING - Incomplete OHLCV for AIOZ/USD: got 278 of 700
+2025-08-26 14:00:08,715 - WARNING - Incomplete OHLCV for NODE/USD: got 159 of 200
+2025-08-26 14:00:13,527 - WARNING - Incomplete OHLCV for AKE/USD: got 26 of 700
+2025-08-26 14:00:30,350 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 14:00:35,113 - WARNING - Incomplete OHLCV for AB/EUR: got 110 of 700
+2025-08-26 14:00:36,114 - WARNING - Skipping AB/EUR: only 110/700 candles
+2025-08-26 14:00:41,127 - WARNING - Incomplete OHLCV for AB/USD: got 110 of 700
+2025-08-26 14:00:42,128 - WARNING - Skipping AB/USD: only 110/700 candles
+2025-08-26 14:00:47,352 - WARNING - Incomplete OHLCV for A/EUR: got 207 of 700
+2025-08-26 14:00:48,353 - WARNING - Skipping A/EUR: only 207/700 candles
+2025-08-26 14:00:50,728 - WARNING - Incomplete OHLCV for SAPIEN/USD: got 37 of 200
+2025-08-26 14:00:51,922 - WARNING - Incomplete OHLCV for SAPIEN/EUR: got 37 of 200
+2025-08-26 14:00:53,155 - WARNING - Incomplete OHLCV for AIOZ/EUR: got 278 of 700
+2025-08-26 14:00:54,155 - WARNING - Skipping AIOZ/EUR: only 278/700 candles
+2025-08-26 14:00:59,217 - WARNING - Incomplete OHLCV for AIOZ/USD: got 278 of 700
+2025-08-26 14:01:00,217 - WARNING - Skipping AIOZ/USD: only 278/700 candles
+2025-08-26 14:01:05,117 - WARNING - Incomplete OHLCV for AKE/USD: got 26 of 700
+2025-08-26 14:01:06,117 - WARNING - Skipping AKE/USD: only 26/700 candles
+2025-08-26 14:01:06,120 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 14:01:06,123 - INFO - Finished update for timeframe 4h
+2025-08-26 14:01:06,123 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:01:06,123 - INFO - Initial scan 4.4% complete
+2025-08-26 14:01:06,134 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:01:06,134 - INFO - Starting update for timeframe 1m
+2025-08-26 14:01:06,134 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 14:01:06,134 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 14:01:27,775 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 14:01:32,708 - WARNING - Incomplete OHLCV for SAPIEN/USD: got 37 of 200
+2025-08-26 14:01:33,709 - WARNING - Skipping SAPIEN/USD: only 37/200 candles
+2025-08-26 14:01:38,729 - WARNING - Incomplete OHLCV for SAPIEN/EUR: got 37 of 200
+2025-08-26 14:01:39,729 - WARNING - Skipping SAPIEN/EUR: only 37/200 candles
+2025-08-26 14:01:39,735 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 14:01:39,735 - INFO - Finished update for timeframe 4h
+2025-08-26 14:01:39,735 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:01:39,735 - INFO - Volume spike priority for CRO/USD: z=5.77
+2025-08-26 14:01:39,745 - INFO - Volume spike priority for CRO/EUR: z=7.53
+2025-08-26 14:01:39,754 - INFO - Volume spike priority for CRO/USDT: z=7.99
+2025-08-26 14:01:39,764 - INFO - Volume spike priority for NMR/USD: z=8.78
+2025-08-26 14:01:39,773 - INFO - Volume spike priority for MAT/EUR: z=6.30
+2025-08-26 14:01:39,782 - INFO - Volume spike priority for MAT/USD: z=7.25
+2025-08-26 14:01:39,791 - INFO - Volume spike priority for NMR/EUR: z=8.33
+2025-08-26 14:01:39,800 - INFO - Volume spike priority for NODE/USD: z=11.00
+2025-08-26 14:01:39,810 - INFO - Volume spike priority for CXT/EUR: z=5.53
+2025-08-26 14:01:39,819 - INFO - Volume spike priority for XRP/USD: z=5.35
+2025-08-26 14:01:39,828 - INFO - Volume spike priority for SOL/USD: z=4.80
+2025-08-26 14:01:39,837 - INFO - Volume spike priority for ETH/USD: z=6.72
+2025-08-26 14:01:39,846 - INFO - Volume spike priority for BERA/EUR: z=11.75
+2025-08-26 14:01:39,855 - INFO - Volume spike priority for LPT/USD: z=6.67
+2025-08-26 14:01:39,865 - INFO - Volume spike priority for ETH/EUR: z=6.82
+2025-08-26 14:01:39,874 - INFO - Volume spike priority for LPT/EUR: z=13.25
+2025-08-26 14:01:39,883 - INFO - Volume spike priority for MELANIA/EUR: z=10.88
+2025-08-26 14:01:39,892 - INFO - Volume spike priority for CXT/USD: z=9.64
+2025-08-26 14:01:39,900 - INFO - Volume spike priority for MELANIA/USD: z=7.78
+2025-08-26 14:01:39,909 - INFO - Volume spike priority for BERA/USD: z=10.94
+2025-08-26 14:01:39,917 - INFO - Volume spike priority for RAIIN/USD: z=11.26
+2025-08-26 14:01:39,926 - INFO - Volume spike priority for MELANIA/USDT: z=10.14
+2025-08-26 14:01:39,935 - INFO - Volume spike priority for ORDER/USD: z=8.62
+2025-08-26 14:01:39,944 - INFO - Volume spike priority for SPK/USD: z=5.67
+2025-08-26 14:01:39,952 - INFO - Volume spike priority for CFG/USD: z=8.66
+2025-08-26 14:01:39,961 - INFO - Volume spike priority for PROMPT/USD: z=7.45
+2025-08-26 14:01:39,971 - INFO - Volume spike priority for BTC/USD: z=8.04
+2025-08-26 14:01:39,979 - INFO - Volume spike priority for PROMPT/EUR: z=5.98
+2025-08-26 14:01:39,988 - INFO - Volume spike priority for USDC/EUR: z=4.68
+2025-08-26 14:01:39,996 - INFO - Volume spike priority for USDT/EUR: z=4.55
+2025-08-26 14:01:40,005 - INFO - Volume spike priority for SAPIEN/USD: z=6.56
+2025-08-26 14:01:40,014 - INFO - Volume spike priority for SAPIEN/EUR: z=6.78
+2025-08-26 14:01:40,022 - INFO - Volume spike priority for EDGE/USD: z=8.58
+2025-08-26 14:01:40,031 - INFO - Volume spike priority for VINE/USD: z=7.69
+2025-08-26 14:01:40,039 - INFO - Volume spike priority for BTC/EUR: z=12.80
+2025-08-26 14:01:40,048 - INFO - Volume spike priority for GHIBLI/USD: z=6.75
+2025-08-26 14:01:40,057 - INFO - Volume spike priority for PUMP/USD: z=8.58
+2025-08-26 14:01:40,066 - INFO - Volume spike priority for PARTI/USD: z=10.73
+2025-08-26 14:01:40,074 - INFO - Volume spike priority for DOGE/USD: z=8.92
+2025-08-26 14:01:40,083 - INFO - Volume spike priority for BERA/USDT: z=10.20
+2025-08-26 14:01:40,091 - INFO - Volume spike priority for USDUC/USD: z=10.91
+2025-08-26 14:01:40,100 - INFO - Volume spike priority for ODOS/USD: z=5.36
+2025-08-26 14:01:40,109 - INFO - Volume spike priority for SNX/USD: z=7.05
+2025-08-26 14:01:40,117 - INFO - Volume spike priority for FIS/USD: z=6.51
+2025-08-26 14:01:40,126 - INFO - Volume spike priority for SNX/EUR: z=9.22
+2025-08-26 14:01:40,135 - INFO - Volume spike priority for FIS/EUR: z=10.26
+2025-08-26 14:01:40,144 - INFO - Volume spike priority for MKR/USD: z=5.22
+2025-08-26 14:01:40,152 - INFO - Volume spike priority for MKR/EUR: z=6.98
+2025-08-26 14:01:40,162 - INFO - Volume spike priority for PUMP/EUR: z=10.70
+2025-08-26 14:01:40,170 - INFO - Volume spike priority for ZEUS/USD: z=10.74
+2025-08-26 14:01:51,962 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,965 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,967 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,968 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,970 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,972 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,973 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,975 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,976 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,978 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,980 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,982 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,984 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,985 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,987 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,989 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,991 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,992 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,994 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:51,995 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:01:52,478 - INFO - Analysis result: {'symbol': 'CXT/EUR', 'df':          timestamp     open     high      low    close       volume    return
+0    1756054800000  0.03311  0.03329  0.03311  0.03328  30676.16094       NaN
+1    1756055700000  0.03292  0.03292  0.03207  0.03207   9320.97394 -0.036358
+2    1756056600000  0.03293  0.03293  0.03196  0.03196   6286.74461 -0.003430
+3    1756057500000  0.03169  0.03221  0.03169  0.03221   3715.86712  0.007822
+4    1756058400000  0.03225  0.03225  0.03185  0.03195  28848.51418 -0.008072
+..             ...      ...      ...      ...      ...          ...       ...
+195  1756230300000  0.02444  0.02444  0.02444  0.02444      0.00000  0.000000
+196  1756231200000  0.02444  0.02444  0.02444  0.02444      0.00000  0.000000
+197  1756232100000  0.02444  0.02444  0.02444  0.02444      0.00000  0.000000
+198  1756233000000  0.02444  0.02444  0.02444  0.02444      0.00000  0.000000
+199  1756233900000  0.02479  0.02517  0.02479  0.02517  19216.25826  0.029869
+
+[200 rows x 7 columns], 'regime': 'breakout', 'sub_regime': 'breakout', 'patterns': {'trending': 0.0, 'sideways': 0.0, 'mean-reverting': 0.0, 'breakout': 1.0, 'volatile': 0.0, 'bullish_trending': 0.0, 'bearish_volatile': 0.0, 'unknown': 0.0}, 'future_return': np.float64(2.9869067103109717), 'confidence': 0.8, 'min_confidence': 0.061648113365707406, 'probabilities': {'trending': 0.0, 'sideways': 0.0, 'mean-reverting': 0.0, 'breakout': 1.0, 'volatile': 0.0, 'bullish_trending': 0.0, 'bearish_volatile': 0.0, 'unknown': 0.0}, 'env': 'cex', 'name': 'generate_signal', 'score': 0.47, 'direction': 'long', 'atr': None}
+2025-08-26 14:01:52,482 - INFO - [EVAL] Data length: 200
+2025-08-26 14:01:52,638 - INFO - BTC/USDT | Last close: 0.03, Time: 199
+2025-08-26 14:01:52,638 - INFO - [EVAL] len=200 volume=19216.2583 (mean 10414.8722 | min 0.1000 | threshold 1.0415)
+2025-08-26 14:01:52,638 - WARNING - Strategy stats file /Users/brandonburnette/Downloads/coinTrader2.0-codex-modify-execute_signals-for-short-selling/crypto_bot/logs/strategy_stats.json not found
+2025-08-26 14:01:52,744 - INFO - [EVAL] Trade allowed for BTC/USDT – Volume 19216.2583 >= 0.01% of mean 10414.8722
+2025-08-26 14:01:52,744 - INFO - [EVAL] Trade allowed (boost 1.00)
+2025-08-26 14:01:52,745 - INFO - Calculated position size: 1137.5090 (vol 1.14 risk 1.00)
+2025-08-26 14:01:55,576 - INFO - Registered stop order {'symbol': 'CXT/EUR', 'side': 'buy', 'amount': np.float64(45193.047249903), 'dry_run': True, 'price': 0.02517, 'strategy': 'generate_signal', 'entry_price': np.float64(0.02517), 'confidence': 0.47, 'direction': 'buy'}
+2025-08-26 14:01:55,576 - INFO - Analysis result: {'symbol': 'NMR/EUR', 'df':          timestamp   open   high   low  close      volume    return
+0    1756054800000   7.30   7.30  7.30   7.30    0.000000       NaN
+1    1756055700000   7.30   7.30  7.30   7.30    0.000000  0.000000
+2    1756056600000   7.30   7.30  7.30   7.30    0.000000  0.000000
+3    1756057500000   7.30   7.30  7.30   7.30    0.000000  0.000000
+4    1756058400000   7.30   7.30  7.30   7.30    0.000000  0.000000
+..             ...    ...    ...   ...    ...         ...       ...
+195  1756230300000  10.12  10.45  9.82   9.91   59.328092 -0.057985
+196  1756231200000   9.97  10.60  9.97  10.00   41.687295  0.009082
+197  1756232100000   9.93  10.15  9.67   9.67  227.912006 -0.033000
+198  1756233000000   9.67   9.88  9.61   9.61   22.989048 -0.006205
+199  1756233900000   9.84   9.86  9.20   9.29  168.270289 -0.033299
+
+[200 rows x 7 columns], 'regime': 'breakout', 'sub_regime': 'breakout', 'patterns': {'trending': 0.0, 'sideways': 0.0, 'mean-reverting': 0.0, 'breakout': 1.0, 'volatile': 0.0, 'bullish_trending': 0.0, 'bearish_volatile': 0.0, 'unknown': 0.0}, 'future_return': np.float64(-7.100000000000009), 'confidence': 0.6, 'min_confidence': 0.042517743479541466, 'probabilities': {'trending': 0.0, 'sideways': 0.0, 'mean-reverting': 0.0, 'breakout': 1.0, 'volatile': 0.0, 'bullish_trending': 0.0, 'bearish_volatile': 0.0, 'unknown': 0.0}, 'env': 'cex', 'name': 'generate_signal', 'score': 0.44, 'direction': 'short', 'atr': None}
+2025-08-26 14:01:55,580 - INFO - [EVAL] Data length: 200
+2025-08-26 14:01:55,685 - INFO - BTC/USDT | Last close: 9.29, Time: 199
+2025-08-26 14:01:55,685 - INFO - [EVAL] len=200 volume=168.2703 (mean 119.8952 | min 0.1000 | threshold 0.0120)
+2025-08-26 14:01:55,786 - INFO - [EVAL] Trade allowed for BTC/USDT – Volume 168.2703 >= 0.01% of mean 119.8952
+2025-08-26 14:01:55,786 - INFO - [EVAL] Trade allowed (boost 1.00)
+2025-08-26 14:01:55,788 - INFO - Calculated position size: 1873.0089 (vol 2.11 risk 1.00)
+2025-08-26 14:01:55,788 - INFO - Short selling disabled; skipping signal for NMR/EUR
+2025-08-26 14:01:55,788 - INFO - Analysis result: {'symbol': 'BTC/USD', 'df':          timestamp      open      high       low     close     volume    return
+0    1756054800000  114293.5  114461.4  114274.4  114383.8  11.421486       NaN
+1    1756055700000  114383.8  114432.2  114270.5  114270.6   3.196689 -0.000990
+2    1756056600000  114270.5  114495.0  114252.3  114494.9  24.852331  0.001963
+3    1756057500000  114494.9  114500.0  114299.3  114375.7   3.886879 -0.001041
+4    1756058400000  114375.7  114660.3  114273.5  114660.2  49.809778  0.002487
+..             ...       ...       ...       ...       ...        ...       ...
+195  1756230300000  109649.5  109944.9  109649.5  109944.9  16.749036  0.002695
+196  1756231200000  109944.9  110149.8  109944.8  110114.8  14.053733  0.001545
+197  1756232100000  110112.6  110447.5  110100.0  110447.5  27.074705  0.003021
+198  1756233000000  110447.6  110988.6  110400.0  110975.1  50.111940  0.004777
+199  1756233900000  110975.0  110975.0  110746.5  110752.2  38.206452 -0.002009
+
+[200 rows x 7 columns], 'regime': 'breakout', 'sub_regime': 'breakout', 'patterns': {'trending': 0.0, 'sideways': 0.0, 'mean-reverting': 0.0, 'breakout': 1.0, 'volatile': 0.0, 'bullish_trending': 0.0, 'bearish_volatile': 0.0, 'unknown': 0.0}, 'future_return': np.float64(0.5788504360903295), 'confidence': 0.6, 'min_confidence': 0.09681939878854354, 'probabilities': {'trending': 0.0, 'sideways': 0.0, 'mean-reverting': 0.0, 'breakout': 1.0, 'volatile': 0.0, 'bullish_trending': 0.0, 'bearish_volatile': 0.0, 'unknown': 0.0}, 'env': 'cex', 'name': 'generate_signal', 'score': 0.44, 'direction': 'long', 'atr': None}
+2025-08-26 14:01:55,792 - INFO - [EVAL] Data length: 200
+2025-08-26 14:01:55,899 - INFO - BTC/USDT | Last close: 110752.20, Time: 199
+2025-08-26 14:01:55,899 - INFO - [EVAL] len=200 volume=38.2065 (mean 16.8016 | min 0.1000 | threshold 0.0017)
+2025-08-26 14:01:56,008 - INFO - [EVAL] Trade allowed for BTC/USDT – Volume 38.2065 >= 0.01% of mean 16.8016
+2025-08-26 14:01:56,008 - INFO - [EVAL] Trade allowed (boost 1.00)
+2025-08-26 14:01:56,010 - INFO - Calculated position size: 897.1372 (vol 1.01 risk 1.00)
+2025-08-26 14:02:01,208 - INFO - Registered stop order {'symbol': 'BTC/USD', 'side': 'buy', 'amount': np.float64(0.008100400681202503), 'dry_run': True, 'price': 110640.1, 'strategy': 'generate_signal', 'entry_price': np.float64(110752.2), 'confidence': 0.44, 'direction': 'buy'}
+2025-08-26 14:02:01,209 - INFO - Analysis result: {'symbol': 'MKR/USD', 'df':          timestamp    open    high     low   close     volume    return
+0    1756054800000  1595.0  1595.0  1595.0  1595.0   0.000000       NaN
+1    1756055700000  1587.0  1588.0  1583.0  1583.0   2.089617 -0.007524
+2    1756056600000  1585.2  1592.2  1585.2  1592.2   0.011955  0.005812
+3    1756057500000  1588.3  1588.3  1584.1  1584.2   1.323813 -0.005024
+4    1756058400000  1578.9  1579.5  1577.1  1577.1   0.069545 -0.004482
+..             ...     ...     ...     ...     ...        ...       ...
+195  1756230300000  1556.4  1567.3  1556.4  1567.3   0.117342  0.006421
+196  1756231200000  1563.2  1564.5  1563.2  1564.5   0.153327 -0.001787
+197  1756232100000  1566.4  1588.8  1564.7  1588.8   7.727472  0.015532
+198  1756233000000  1598.3  1624.8  1598.3  1607.5  12.311220  0.011770
+199  1756233900000  1601.7  1604.3  1594.7  1597.0   5.332964 -0.006532
+
+[200 rows x 7 columns], 'regime': 'breakout', 'sub_regime': 'mean-reverting', 'patterns': {'trending': 0.0, 'sideways': 0.0, 'mean-reverting': 1.0, 'breakout': 0.0, 'volatile': 0.0, 'bullish_trending': 0.0, 'bearish_volatile': 0.0, 'unknown': 0.0}, 'future_return': np.float64(2.0773410035155004), 'confidence': 0.4, 'min_confidence': 0.062228164464905436, 'probabilities': {'trending': 0.0, 'sideways': 0.0, 'mean-reverting': 1.0, 'breakout': 0.0, 'volatile': 0.0, 'bullish_trending': 0.0, 'bearish_volatile': 0.0, 'unknown': 0.0}, 'env': 'cex', 'name': 'generate_signal', 'score': 0.41000000000000003, 'direction': 'long', 'atr': None}
+2025-08-26 14:02:01,212 - INFO - [EVAL] Data length: 200
+2025-08-26 14:02:01,317 - INFO - BTC/USDT | Last close: 1597.00, Time: 199
+2025-08-26 14:02:01,318 - INFO - [EVAL] len=200 volume=5.3330 (mean 2.5156 | min 0.1000 | threshold 0.0003)
+2025-08-26 14:02:01,417 - INFO - [EVAL] Trade allowed for BTC/USDT – Volume 5.3330 >= 0.01% of mean 2.5156
+2025-08-26 14:02:01,417 - INFO - [EVAL] Trade allowed (boost 1.00)
+2025-08-26 14:02:01,419 - INFO - Calculated position size: 0.0000 (vol 1.40 risk 1.00)
+2025-08-26 14:02:01,419 - INFO - Calculated size 0.0000 for MKR/USD - skipping
+2025-08-26 14:02:01,626 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 14:02:01,626 - INFO - Fetching 200 candles for 2 symbols on 15m
+2025-08-26 14:02:16,534 - INFO - Fetched OHLCV for 2/2 symbols on 15m
+2025-08-26 14:02:22,192 - WARNING - Incomplete OHLCV for CXT/EUR: got 1 of 2
+2025-08-26 14:02:32,548 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 14:02:32,571 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 14:02:32,571 - INFO - Finished update for timeframe 1m
+2025-08-26 14:02:32,571 - INFO - Starting update for timeframe 5m
+2025-08-26 14:02:32,571 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 14:02:32,571 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 14:02:33,804 - WARNING - Incomplete OHLCV for BTC/USD: got 1 of 2
+2025-08-26 14:02:40,600 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 14:02:40,629 - INFO - ⏱️ Cycle timing - Symbols: 48.76s, OHLCV: 597.63s, Analyze: 12.29s, Total: 706.84s
+2025-08-26 14:02:40,630 - INFO - Sleeping for 0.50 minutes
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair ADA/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair AI16Z/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair ALGO/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair APE/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair ATOM/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair AVAX/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair BCH/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair BERA/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair BNB/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair CRO/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair DOT/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair ETH/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair EUROP/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair EURR/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair FARTCOIN/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair LINK/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair LTC/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair MANA/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair MELANIA/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair PEAQ/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair PENGU/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair RLUSD/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair SHIB/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair SOL/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair S/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair TON/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair TRUMP/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair USDG/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair USDQ/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair USDR/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair USTC/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair VIRTUAL/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair BTC/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair DOGE/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair XMR/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair XRP/USDC
+2025-08-26 14:03:10,632 - INFO - Dropping invalid USDC pair XTZ/USDC
+2025-08-26 14:03:22,223 - INFO - 797 symbols passed filtering
+2025-08-26 14:03:22,242 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:03:22,242 - INFO - Starting update for timeframe 1m
+2025-08-26 14:03:22,242 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 14:03:22,243 - INFO - Fetching 200 candles for 500 symbols on 1m
+2025-08-26 14:03:50,048 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 14:03:50,069 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 14:03:50,069 - INFO - Finished update for timeframe 5m
+2025-08-26 14:03:50,069 - INFO - Starting update for timeframe 15m
+2025-08-26 14:03:50,069 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 14:03:50,069 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 14:04:05,757 - WARNING - Incomplete OHLCV for ALKIMI/EUR: got 685 of 700
+2025-08-26 14:04:22,245 - ERROR - WS OHLCV timeout for ZEUS/USD on kraken (tf=1m limit=-29241302415 ws=True): 
+2025-08-26 14:04:22,245 - INFO - Falling back to REST fetch_ohlcv for ZEUS/USD on 1m limit -29241302415
+2025-08-26 14:04:22,245 - ERROR - WS OHLCV timeout for PUMP/EUR on kraken (tf=1m limit=-29241302415 ws=True): 
+2025-08-26 14:04:22,245 - INFO - Falling back to REST fetch_ohlcv for PUMP/EUR on 1m limit -29241302415
+2025-08-26 14:05:02,692 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 14:05:02,713 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 14:05:02,714 - INFO - Finished update for timeframe 15m
+2025-08-26 14:05:02,714 - INFO - Starting update for timeframe 1h
+2025-08-26 14:05:02,714 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 14:05:02,714 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 14:05:16,870 - WARNING - Incomplete OHLCV for ALKIMI/EUR: got 172 of 700
+2025-08-26 14:05:19,148 - WARNING - Incomplete OHLCV for ALKIMI/USD: got 177 of 700
+2025-08-26 14:05:28,830 - ERROR - WS OHLCV timeout for MKR/USD on kraken (tf=1m limit=-29241302414 ws=True): 
+2025-08-26 14:05:28,830 - INFO - Falling back to REST fetch_ohlcv for MKR/USD on 1m limit -29241302414
+2025-08-26 14:05:54,217 - ERROR - WS OHLCV timeout for FIS/EUR on kraken (tf=1m limit=-29241302414 ws=True): 
+2025-08-26 14:05:54,217 - INFO - Falling back to REST fetch_ohlcv for FIS/EUR on 1m limit -29241302414
+2025-08-26 14:06:14,206 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 14:06:15,448 - WARNING - Incomplete OHLCV for ALKIMI/EUR: got 172 of 700
+2025-08-26 14:06:16,448 - WARNING - Skipping ALKIMI/EUR: only 172/700 candles
+2025-08-26 14:06:17,597 - WARNING - Incomplete OHLCV for ALKIMI/USD: got 177 of 700
+2025-08-26 14:06:18,598 - WARNING - Skipping ALKIMI/USD: only 177/700 candles
+2025-08-26 14:06:18,614 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 14:06:18,615 - INFO - Finished update for timeframe 1h
+2025-08-26 14:06:18,615 - INFO - Starting update for timeframe 4h
+2025-08-26 14:06:18,615 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 14:06:18,615 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 14:06:34,160 - WARNING - Incomplete OHLCV for ALKIMI/EUR: got 43 of 700
+2025-08-26 14:06:35,162 - WARNING - Incomplete OHLCV for ALKIMI/USD: got 45 of 700
+2025-08-26 14:06:35,281 - ERROR - WS OHLCV timeout for SNX/EUR on kraken (tf=1m limit=-29241302413 ws=True): 
+2025-08-26 14:06:35,281 - INFO - Falling back to REST fetch_ohlcv for SNX/EUR on 1m limit -29241302413
+2025-08-26 14:06:59,872 - ERROR - WS OHLCV timeout for FIS/USD on kraken (tf=1m limit=-29241302413 ws=True): 
+2025-08-26 14:06:59,872 - INFO - Falling back to REST fetch_ohlcv for FIS/USD on 1m limit -29241302413
+2025-08-26 14:07:24,616 - WARNING - Incomplete OHLCV for ASRR/EUR: got 499 of 700
+2025-08-26 14:07:25,638 - WARNING - Incomplete OHLCV for ASRR/USD: got 499 of 700
+2025-08-26 14:07:31,234 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 14:07:32,592 - WARNING - Incomplete OHLCV for ALKIMI/EUR: got 43 of 700
+2025-08-26 14:07:33,593 - WARNING - Skipping ALKIMI/EUR: only 43/700 candles
+2025-08-26 14:07:34,951 - WARNING - Incomplete OHLCV for ALKIMI/USD: got 45 of 700
+2025-08-26 14:07:35,952 - WARNING - Skipping ALKIMI/USD: only 45/700 candles
+2025-08-26 14:07:35,969 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 14:07:35,970 - INFO - Finished update for timeframe 4h
+2025-08-26 14:07:35,970 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:07:35,970 - INFO - Initial scan 8.7% complete
+2025-08-26 14:07:35,980 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:07:35,980 - INFO - Starting update for timeframe 1m
+2025-08-26 14:07:35,980 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 14:07:35,980 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 14:07:40,980 - ERROR - WS OHLCV timeout for SNX/USD on kraken (tf=1m limit=-29241302412 ws=True): 
+2025-08-26 14:07:40,981 - INFO - Falling back to REST fetch_ohlcv for SNX/USD on 1m limit -29241302412
+2025-08-26 14:08:06,573 - ERROR - WS OHLCV timeout for ODOS/USD on kraken (tf=1m limit=-29241302411 ws=True): 
+2025-08-26 14:08:06,573 - INFO - Falling back to REST fetch_ohlcv for ODOS/USD on 1m limit -29241302411
+2025-08-26 14:08:47,742 - ERROR - WS OHLCV timeout for USDUC/USD on kraken (tf=1m limit=-29241302411 ws=True): 
+2025-08-26 14:08:47,742 - INFO - Falling back to REST fetch_ohlcv for USDUC/USD on 1m limit -29241302411
+2025-08-26 14:08:48,596 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 14:08:48,617 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 14:08:48,617 - INFO - Finished update for timeframe 1m
+2025-08-26 14:08:48,617 - INFO - Starting update for timeframe 5m
+2025-08-26 14:08:48,617 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 14:08:48,618 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 14:09:12,352 - ERROR - WS OHLCV timeout for BERA/USDT on kraken (tf=1m limit=-29241302410 ws=True): 
+2025-08-26 14:09:12,352 - INFO - Falling back to REST fetch_ohlcv for BERA/USDT on 1m limit -29241302410
+2025-08-26 14:10:01,267 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 14:10:01,288 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 14:10:01,288 - INFO - Finished update for timeframe 5m
+2025-08-26 14:10:01,288 - INFO - Starting update for timeframe 15m
+2025-08-26 14:10:01,288 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 14:10:01,288 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 14:10:17,410 - ERROR - WS OHLCV timeout for PARTI/USD on kraken (tf=1m limit=-29241302409 ws=True): 
+2025-08-26 14:10:17,410 - INFO - Falling back to REST fetch_ohlcv for PARTI/USD on 1m limit -29241302409
+2025-08-26 14:10:18,942 - ERROR - WS OHLCV timeout for PUMP/USD on kraken (tf=1m limit=-29241302409 ws=True): 
+2025-08-26 14:10:18,942 - INFO - Falling back to REST fetch_ohlcv for PUMP/USD on 1m limit -29241302409
+2025-08-26 14:11:12,700 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 14:11:12,721 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 14:11:12,721 - INFO - Finished update for timeframe 15m
+2025-08-26 14:11:12,721 - INFO - Starting update for timeframe 1h
+2025-08-26 14:11:12,721 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 14:11:12,721 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 14:11:23,446 - ERROR - WS OHLCV timeout for GHIBLI/USD on kraken (tf=1m limit=-29241302408 ws=True): 
+2025-08-26 14:11:23,446 - INFO - Falling back to REST fetch_ohlcv for GHIBLI/USD on 1m limit -29241302408
+2025-08-26 14:11:32,700 - ERROR - WS OHLCV timeout for VINE/USD on kraken (tf=1m limit=-29241302408 ws=True): 
+2025-08-26 14:11:32,700 - INFO - Falling back to REST fetch_ohlcv for VINE/USD on 1m limit -29241302408
+2025-08-26 14:12:25,340 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 14:12:25,361 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 14:12:25,361 - INFO - Finished update for timeframe 1h
+2025-08-26 14:12:25,361 - INFO - Starting update for timeframe 4h
+2025-08-26 14:12:25,361 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 14:12:25,361 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 14:12:39,494 - ERROR - WS OHLCV timeout for SAPIEN/EUR on kraken (tf=1m limit=-29241302407 ws=True): 
+2025-08-26 14:12:39,494 - INFO - Falling back to REST fetch_ohlcv for SAPIEN/EUR on 1m limit -29241302407
+2025-08-26 14:12:50,308 - WARNING - Incomplete OHLCV for A/USD: got 207 of 700
+2025-08-26 14:13:18,169 - ERROR - WS OHLCV timeout for SAPIEN/USD on kraken (tf=1m limit=-29241302406 ws=True): 
+2025-08-26 14:13:18,169 - INFO - Falling back to REST fetch_ohlcv for SAPIEN/USD on 1m limit -29241302406
+2025-08-26 14:13:35,765 - WARNING - Incomplete OHLCV for BDXN/EUR: got 507 of 700
+2025-08-26 14:13:37,156 - WARNING - Incomplete OHLCV for BDXN/USD: got 507 of 700
+2025-08-26 14:13:38,156 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 14:13:39,502 - WARNING - Incomplete OHLCV for A/USD: got 207 of 700
+2025-08-26 14:13:40,503 - WARNING - Skipping A/USD: only 207/700 candles
+2025-08-26 14:13:40,517 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 14:13:40,519 - INFO - Finished update for timeframe 4h
+2025-08-26 14:13:40,519 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:13:40,519 - INFO - Initial scan 13.1% complete
+2025-08-26 14:13:40,529 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:13:40,529 - INFO - Starting update for timeframe 1m
+2025-08-26 14:13:40,529 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 14:13:40,529 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 14:13:44,470 - WARNING - Incomplete OHLCV for BERA/EUR: got 21 of 22
+2025-08-26 14:13:45,490 - WARNING - Incomplete OHLCV for BERA/USD: got 21 of 22
+2025-08-26 14:13:48,879 - WARNING - Incomplete OHLCV for BERA/USDT: got 20 of 21
+2025-08-26 14:14:07,413 - ERROR - WS OHLCV timeout for PROMPT/EUR on kraken (tf=1m limit=-29241301405 ws=True): 
+2025-08-26 14:14:07,413 - INFO - Falling back to REST fetch_ohlcv for PROMPT/EUR on 1m limit -29241301405
+2025-08-26 14:14:56,498 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 14:14:56,520 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 14:14:56,520 - INFO - Finished update for timeframe 1m
+2025-08-26 14:14:56,520 - INFO - Starting update for timeframe 5m
+2025-08-26 14:14:56,520 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 14:14:56,520 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 14:15:00,271 - WARNING - Incomplete OHLCV for BERA/EUR: got 5 of 6
+2025-08-26 14:15:01,505 - WARNING - Incomplete OHLCV for BERA/USD: got 5 of 6
+2025-08-26 14:15:06,118 - WARNING - Incomplete OHLCV for BERA/USDT: got 4 of 5
+2025-08-26 14:15:13,328 - ERROR - WS OHLCV timeout for SPK/USD on kraken (tf=1m limit=-29241301404 ws=True): 
+2025-08-26 14:15:13,328 - INFO - Falling back to REST fetch_ohlcv for SPK/USD on 1m limit -29241301404
+2025-08-26 14:15:39,262 - ERROR - WS OHLCV timeout for ORDER/USD on kraken (tf=1m limit=-29241301404 ws=True): 
+2025-08-26 14:15:39,262 - INFO - Falling back to REST fetch_ohlcv for ORDER/USD on 1m limit -29241301404
+2025-08-26 14:16:13,930 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 14:16:13,953 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 14:16:13,953 - INFO - Finished update for timeframe 5m
+2025-08-26 14:16:13,953 - INFO - Starting update for timeframe 15m
+2025-08-26 14:16:13,953 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 14:16:13,953 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 14:16:17,922 - WARNING - Incomplete OHLCV for BERA/EUR: got 2 of 3
+2025-08-26 14:16:18,879 - ERROR - WS OHLCV timeout for MELANIA/USDT on kraken (tf=1m limit=-29241301403 ws=True): 
+2025-08-26 14:16:18,879 - INFO - Falling back to REST fetch_ohlcv for MELANIA/USDT on 1m limit -29241301403
+2025-08-26 14:16:19,089 - WARNING - Incomplete OHLCV for BERA/USD: got 2 of 3
+2025-08-26 14:16:22,314 - WARNING - Incomplete OHLCV for BERA/USDT: got 2 of 3
+2025-08-26 14:16:45,739 - ERROR - WS OHLCV timeout for RAIIN/USD on kraken (tf=1m limit=-29241301403 ws=True): 
+2025-08-26 14:16:45,739 - INFO - Falling back to REST fetch_ohlcv for RAIIN/USD on 1m limit -29241301403
+2025-08-26 14:17:25,718 - ERROR - WS OHLCV timeout for BERA/USD on kraken (tf=1m limit=-29241301402 ws=True): 
+2025-08-26 14:17:25,718 - INFO - Falling back to REST fetch_ohlcv for BERA/USD on 1m limit -29241301402
+2025-08-26 14:17:31,179 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 14:17:31,201 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 14:17:31,201 - INFO - Finished update for timeframe 15m
+2025-08-26 14:17:31,201 - INFO - Starting update for timeframe 1h
+2025-08-26 14:17:31,201 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 14:17:31,201 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 14:17:34,954 - WARNING - Incomplete OHLCV for BERA/EUR: got 1 of 2
+2025-08-26 14:17:36,176 - WARNING - Incomplete OHLCV for BERA/USD: got 1 of 2
+2025-08-26 14:17:39,592 - WARNING - Incomplete OHLCV for BERA/USDT: got 1 of 2
+2025-08-26 14:17:53,361 - ERROR - WS OHLCV timeout for CXT/USD on kraken (tf=1m limit=-29241301402 ws=True): 
+2025-08-26 14:17:53,361 - INFO - Falling back to REST fetch_ohlcv for CXT/USD on 1m limit -29241301402
+2025-08-26 14:18:32,304 - ERROR - WS OHLCV timeout for MELANIA/EUR on kraken (tf=1m limit=-29241301401 ws=True): 
+2025-08-26 14:18:32,304 - INFO - Falling back to REST fetch_ohlcv for MELANIA/EUR on 1m limit -29241301401
+2025-08-26 14:18:43,001 - WARNING - Incomplete OHLCV for CARV/EUR: got 434 of 700
+2025-08-26 14:18:45,015 - WARNING - Incomplete OHLCV for CARV/USD: got 436 of 700
+2025-08-26 14:18:48,438 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 14:18:48,460 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 14:18:48,460 - INFO - Finished update for timeframe 1h
+2025-08-26 14:18:48,460 - INFO - Starting update for timeframe 4h
+2025-08-26 14:18:48,460 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 14:18:48,460 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 14:18:52,219 - WARNING - Incomplete OHLCV for BERA/EUR: got 0 of 1
+2025-08-26 14:18:53,509 - WARNING - Incomplete OHLCV for BERA/USD: got 0 of 1
+2025-08-26 14:18:57,008 - WARNING - Incomplete OHLCV for BERA/USDT: got 0 of 1
+2025-08-26 14:19:00,353 - ERROR - WS OHLCV timeout for LPT/EUR on kraken (tf=1m limit=-29241301401 ws=True): 
+2025-08-26 14:19:00,353 - INFO - Falling back to REST fetch_ohlcv for LPT/EUR on 1m limit -29241301401
+2025-08-26 14:19:55,109 - ERROR - WS OHLCV timeout for BERA/EUR on kraken (tf=1m limit=-29241301400 ws=True): 
+2025-08-26 14:19:55,109 - INFO - Falling back to REST fetch_ohlcv for BERA/EUR on 1m limit -29241301400
+2025-08-26 14:19:56,492 - WARNING - Incomplete OHLCV for CAKE/EUR: got 699 of 700
+2025-08-26 14:19:58,813 - WARNING - Incomplete OHLCV for CARV/EUR: got 109 of 700
+2025-08-26 14:20:02,219 - WARNING - Incomplete OHLCV for CARV/USD: got 109 of 700
+2025-08-26 14:20:03,456 - WARNING - Incomplete OHLCV for CAT/EUR: got 574 of 700
+2025-08-26 14:20:04,689 - WARNING - Incomplete OHLCV for CAT/USD: got 577 of 700
+2025-08-26 14:20:05,689 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 14:20:07,064 - WARNING - Incomplete OHLCV for CARV/EUR: got 109 of 700
+2025-08-26 14:20:08,064 - WARNING - Skipping CARV/EUR: only 109/700 candles
+2025-08-26 14:20:09,440 - WARNING - Incomplete OHLCV for CARV/USD: got 109 of 700
+2025-08-26 14:20:10,440 - WARNING - Skipping CARV/USD: only 109/700 candles
+2025-08-26 14:20:10,441 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 14:20:10,444 - INFO - Finished update for timeframe 4h
+2025-08-26 14:20:10,444 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:20:10,444 - INFO - Initial scan 17.5% complete
+2025-08-26 14:20:10,455 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:20:10,455 - INFO - Starting update for timeframe 1m
+2025-08-26 14:20:10,455 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 14:20:10,455 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 14:20:21,203 - WARNING - Incomplete OHLCV for CFG/USD: got 28 of 29
+2025-08-26 14:20:40,509 - ERROR - WS OHLCV timeout for CXT/EUR on kraken (tf=1m limit=-29241301399 ws=True): 
+2025-08-26 14:20:40,509 - INFO - Falling back to REST fetch_ohlcv for CXT/EUR on 1m limit -29241301399
+2025-08-26 14:21:01,205 - ERROR - WS OHLCV timeout for NODE/USD on kraken (tf=1m limit=-29241301398 ws=True): 
+2025-08-26 14:21:01,205 - INFO - Falling back to REST fetch_ohlcv for NODE/USD on 1m limit -29241301398
+2025-08-26 14:21:14,812 - WARNING - Incomplete OHLCV for CRO/EUR: got 30 of 31
+2025-08-26 14:21:16,025 - WARNING - Incomplete OHLCV for CRO/USD: got 30 of 31
+2025-08-26 14:21:18,412 - WARNING - Incomplete OHLCV for CRO/USDT: got 30 of 31
+2025-08-26 14:21:27,665 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 14:21:27,688 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 14:21:27,688 - INFO - Finished update for timeframe 1m
+2025-08-26 14:21:27,688 - INFO - Starting update for timeframe 5m
+2025-08-26 14:21:27,688 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 14:21:27,688 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 14:21:38,245 - WARNING - Incomplete OHLCV for CFG/USD: got 6 of 7
+2025-08-26 14:21:46,620 - ERROR - WS OHLCV timeout for NMR/EUR on kraken (tf=1m limit=-29241301398 ws=True): 
+2025-08-26 14:21:46,621 - INFO - Falling back to REST fetch_ohlcv for NMR/EUR on 1m limit -29241301398
+2025-08-26 14:22:06,800 - ERROR - WS OHLCV timeout for MAT/USD on kraken (tf=1m limit=-29241301397 ws=True): 
+2025-08-26 14:22:06,800 - INFO - Falling back to REST fetch_ohlcv for MAT/USD on 1m limit -29241301397
+2025-08-26 14:22:32,236 - WARNING - Incomplete OHLCV for CRO/EUR: got 6 of 7
+2025-08-26 14:22:33,240 - WARNING - Incomplete OHLCV for CRO/USD: got 6 of 7
+2025-08-26 14:22:35,832 - WARNING - Incomplete OHLCV for CRO/USDT: got 6 of 7
+2025-08-26 14:22:47,479 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 14:22:47,500 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 14:22:47,501 - INFO - Finished update for timeframe 5m
+2025-08-26 14:22:47,501 - INFO - Starting update for timeframe 15m
+2025-08-26 14:22:47,501 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 14:22:47,501 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 14:23:02,659 - WARNING - Incomplete OHLCV for CFG/USD: got 2 of 3
+2025-08-26 14:24:16,859 - WARNING - Incomplete OHLCV for CRO/EUR: got 2 of 3
+2025-08-26 14:24:20,249 - WARNING - Incomplete OHLCV for CRO/USD: got 2 of 3
+2025-08-26 14:24:22,666 - WARNING - Incomplete OHLCV for CRO/USDT: got 2 of 3
+2025-08-26 14:24:35,497 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 14:24:35,519 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 14:24:35,519 - INFO - Finished update for timeframe 15m
+2025-08-26 14:24:35,519 - INFO - Starting update for timeframe 1h
+2025-08-26 14:24:35,519 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 14:24:35,520 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 14:24:50,843 - WARNING - Incomplete OHLCV for CFG/USD: got 1 of 2
+2025-08-26 14:26:04,847 - WARNING - Incomplete OHLCV for CRO/EUR: got 1 of 2
+2025-08-26 14:26:06,236 - WARNING - Incomplete OHLCV for CRO/USD: got 1 of 2
+2025-08-26 14:26:10,848 - WARNING - Incomplete OHLCV for CRO/USDT: got 1 of 2
+2025-08-26 14:26:22,507 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 14:26:22,529 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 14:26:22,529 - INFO - Finished update for timeframe 1h
+2025-08-26 14:26:22,529 - INFO - Starting update for timeframe 4h
+2025-08-26 14:26:22,529 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 14:26:22,530 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 14:26:26,087 - WARNING - Incomplete OHLCV for CCD/EUR: got 200 of 700
+2025-08-26 14:26:27,289 - WARNING - Incomplete OHLCV for CCD/USD: got 200 of 700
+2025-08-26 14:26:37,838 - WARNING - Incomplete OHLCV for CFG/USD: got 0 of 1
+2025-08-26 14:26:44,857 - WARNING - Incomplete OHLCV for CHEX/EUR: got 416 of 700
+2025-08-26 14:26:48,498 - WARNING - Incomplete OHLCV for CHEX/USD: got 416 of 700
+2025-08-26 14:26:50,899 - WARNING - Incomplete OHLCV for CHILLHOUSE/EUR: got 246 of 700
+2025-08-26 14:26:52,100 - WARNING - Incomplete OHLCV for CHILLHOUSE/USD: got 248 of 700
+2025-08-26 14:27:01,495 - WARNING - Incomplete OHLCV for CLANKER/EUR: got 530 of 700
+2025-08-26 14:27:03,691 - WARNING - Incomplete OHLCV for CLANKER/USD: got 596 of 700
+2025-08-26 14:27:15,493 - WARNING - Incomplete OHLCV for CMETH/ETH: got 420 of 700
+2025-08-26 14:27:16,693 - WARNING - Incomplete OHLCV for CMETH/USD: got 417 of 700
+2025-08-26 14:27:24,909 - WARNING - Incomplete OHLCV for COOKIE/EUR: got 662 of 700
+2025-08-26 14:27:26,118 - WARNING - Incomplete OHLCV for COOKIE/USD: got 662 of 700
+2025-08-26 14:27:27,480 - WARNING - Incomplete OHLCV for COQ/EUR: got 302 of 700
+2025-08-26 14:27:30,912 - WARNING - Incomplete OHLCV for COQ/USD: got 302 of 700
+2025-08-26 14:27:50,908 - WARNING - Incomplete OHLCV for CRO/EUR: got 0 of 1
+2025-08-26 14:27:55,464 - WARNING - Incomplete OHLCV for CRO/USD: got 0 of 1
+2025-08-26 14:27:57,857 - WARNING - Incomplete OHLCV for CRO/USDT: got 0 of 1
+2025-08-26 14:28:09,501 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 14:28:13,090 - WARNING - Incomplete OHLCV for CCD/EUR: got 200 of 700
+2025-08-26 14:28:14,090 - WARNING - Skipping CCD/EUR: only 200/700 candles
+2025-08-26 14:28:16,561 - WARNING - Incomplete OHLCV for CCD/USD: got 200 of 700
+2025-08-26 14:28:17,561 - WARNING - Skipping CCD/USD: only 200/700 candles
+2025-08-26 14:28:20,036 - WARNING - Incomplete OHLCV for CHILLHOUSE/EUR: got 246 of 700
+2025-08-26 14:28:21,036 - WARNING - Skipping CHILLHOUSE/EUR: only 246/700 candles
+2025-08-26 14:28:23,434 - WARNING - Incomplete OHLCV for CHILLHOUSE/USD: got 248 of 700
+2025-08-26 14:28:24,434 - WARNING - Skipping CHILLHOUSE/USD: only 248/700 candles
+2025-08-26 14:28:27,079 - WARNING - Incomplete OHLCV for COQ/EUR: got 302 of 700
+2025-08-26 14:28:28,080 - WARNING - Skipping COQ/EUR: only 302/700 candles
+2025-08-26 14:28:30,520 - WARNING - Incomplete OHLCV for COQ/USD: got 302 of 700
+2025-08-26 14:28:31,520 - WARNING - Skipping COQ/USD: only 302/700 candles
+2025-08-26 14:28:31,529 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 14:28:31,530 - INFO - Finished update for timeframe 4h
+2025-08-26 14:28:31,531 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:28:31,531 - INFO - Initial scan 21.8% complete
+2025-08-26 14:28:31,542 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:28:31,542 - INFO - Starting update for timeframe 1m
+2025-08-26 14:28:31,542 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 14:28:31,542 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 14:28:45,647 - WARNING - Incomplete OHLCV for CXT/EUR: got 36 of 37
+2025-08-26 14:28:49,317 - WARNING - Incomplete OHLCV for CXT/USD: got 36 of 37
+2025-08-26 14:30:13,698 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 14:30:13,722 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 14:30:13,722 - INFO - Finished update for timeframe 1m
+2025-08-26 14:30:13,722 - INFO - Starting update for timeframe 5m
+2025-08-26 14:30:13,722 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 14:30:13,722 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 14:30:29,087 - WARNING - Incomplete OHLCV for CXT/EUR: got 8 of 9
+2025-08-26 14:30:32,641 - WARNING - Incomplete OHLCV for CXT/USD: got 8 of 9
+2025-08-26 14:31:58,531 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 14:31:58,553 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 14:31:58,553 - INFO - Finished update for timeframe 5m
+2025-08-26 14:31:58,553 - INFO - Starting update for timeframe 15m
+2025-08-26 14:31:58,553 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 14:31:58,553 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 14:32:13,647 - WARNING - Incomplete OHLCV for CXT/EUR: got 2 of 3
+2025-08-26 14:32:17,245 - WARNING - Incomplete OHLCV for CXT/USD: got 3 of 4
+2025-08-26 14:33:42,896 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 14:33:42,919 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 14:33:42,919 - INFO - Finished update for timeframe 15m
+2025-08-26 14:33:42,919 - INFO - Starting update for timeframe 1h
+2025-08-26 14:33:42,919 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 14:33:42,920 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 14:33:57,045 - WARNING - Incomplete OHLCV for CXT/EUR: got 1 of 2
+2025-08-26 14:34:00,648 - WARNING - Incomplete OHLCV for CXT/USD: got 1 of 2
+2025-08-26 14:35:26,310 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 14:35:26,333 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 14:35:26,333 - INFO - Finished update for timeframe 1h
+2025-08-26 14:35:26,333 - INFO - Starting update for timeframe 4h
+2025-08-26 14:35:26,333 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 14:35:26,333 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 14:35:41,639 - WARNING - Incomplete OHLCV for CXT/EUR: got 0 of 1
+2025-08-26 14:35:44,061 - WARNING - Incomplete OHLCV for CXT/USD: got 0 of 1
+2025-08-26 14:36:07,453 - WARNING - Incomplete OHLCV for DEEP/EUR: got 494 of 700
+2025-08-26 14:36:08,828 - WARNING - Incomplete OHLCV for DEEP/USD: got 494 of 700
+2025-08-26 14:36:12,286 - WARNING - Incomplete OHLCV for DEGEN/EUR: got 583 of 700
+2025-08-26 14:36:14,530 - WARNING - Incomplete OHLCV for DEGEN/USD: got 583 of 700
+2025-08-26 14:36:19,293 - WARNING - Incomplete OHLCV for DMC/EUR: got 381 of 700
+2025-08-26 14:36:21,706 - WARNING - Incomplete OHLCV for DMC/USD: got 381 of 700
+2025-08-26 14:36:22,901 - WARNING - Incomplete OHLCV for DOG/EUR: got 362 of 700
+2025-08-26 14:36:28,880 - WARNING - Incomplete OHLCV for DOG/USD: got 362 of 700
+2025-08-26 14:37:08,763 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 14:37:08,782 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 14:37:08,782 - INFO - Finished update for timeframe 4h
+2025-08-26 14:37:08,782 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:37:08,782 - INFO - Initial scan 26.2% complete
+2025-08-26 14:37:08,793 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:37:08,793 - INFO - Starting update for timeframe 1m
+2025-08-26 14:37:08,793 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 14:37:08,793 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 14:37:13,278 - WARNING - Incomplete OHLCV for EDGE/USD: got 44 of 45
+2025-08-26 14:38:50,665 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 14:38:50,689 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 14:38:50,689 - INFO - Finished update for timeframe 1m
+2025-08-26 14:38:50,689 - INFO - Starting update for timeframe 5m
+2025-08-26 14:38:50,689 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 14:38:50,689 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 14:38:54,244 - WARNING - Incomplete OHLCV for EDGE/USD: got 8 of 9
+2025-08-26 14:40:31,764 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 14:40:31,786 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 14:40:31,786 - INFO - Finished update for timeframe 5m
+2025-08-26 14:40:31,786 - INFO - Starting update for timeframe 15m
+2025-08-26 14:40:31,787 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 14:40:31,787 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 14:40:36,491 - WARNING - Incomplete OHLCV for EDGE/USD: got 3 of 4
+2025-08-26 14:41:22,355 - WARNING - Skipping unsupported symbol AIBTC/EUR on kraken
+2025-08-26 14:42:11,693 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 14:42:11,716 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 14:42:11,716 - INFO - Finished update for timeframe 15m
+2025-08-26 14:42:11,716 - INFO - Starting update for timeframe 1h
+2025-08-26 14:42:11,716 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 14:42:11,717 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 14:42:15,490 - WARNING - Incomplete OHLCV for EDGE/USD: got 1 of 2
+2025-08-26 14:43:52,696 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 14:43:52,719 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 14:43:52,719 - INFO - Finished update for timeframe 1h
+2025-08-26 14:43:52,719 - INFO - Starting update for timeframe 4h
+2025-08-26 14:43:52,719 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 14:43:52,719 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 14:43:56,442 - WARNING - Incomplete OHLCV for EDGE/USD: got 0 of 1
+2025-08-26 14:44:23,292 - WARNING - Incomplete OHLCV for EPT/EUR: got 296 of 700
+2025-08-26 14:44:25,693 - WARNING - Incomplete OHLCV for EPT/USD: got 296 of 700
+2025-08-26 14:44:28,281 - WARNING - Incomplete OHLCV for ES/EUR: got 249 of 700
+2025-08-26 14:44:29,296 - WARNING - Incomplete OHLCV for ES/USD: got 249 of 700
+2025-08-26 14:44:30,492 - WARNING - Incomplete OHLCV for ESX/EUR: got 408 of 700
+2025-08-26 14:44:33,924 - WARNING - Incomplete OHLCV for ESX/USD: got 408 of 700
+2025-08-26 14:45:34,906 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 14:45:38,490 - WARNING - Incomplete OHLCV for EPT/EUR: got 296 of 700
+2025-08-26 14:45:39,490 - WARNING - Skipping EPT/EUR: only 296/700 candles
+2025-08-26 14:45:42,026 - WARNING - Incomplete OHLCV for EPT/USD: got 296 of 700
+2025-08-26 14:45:43,026 - WARNING - Skipping EPT/USD: only 296/700 candles
+2025-08-26 14:45:46,889 - WARNING - Incomplete OHLCV for ES/EUR: got 249 of 700
+2025-08-26 14:45:47,889 - WARNING - Skipping ES/EUR: only 249/700 candles
+2025-08-26 14:45:51,526 - WARNING - Incomplete OHLCV for ES/USD: got 249 of 700
+2025-08-26 14:45:52,526 - WARNING - Skipping ES/USD: only 249/700 candles
+2025-08-26 14:45:52,540 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 14:45:52,541 - INFO - Finished update for timeframe 4h
+2025-08-26 14:45:52,541 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:45:52,541 - INFO - Initial scan 30.5% complete
+2025-08-26 14:45:52,554 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:45:52,554 - INFO - Starting update for timeframe 1m
+2025-08-26 14:45:52,554 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 14:45:52,554 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 14:46:26,635 - WARNING - Incomplete OHLCV for FIS/EUR: got 53 of 54
+2025-08-26 14:46:28,843 - WARNING - Incomplete OHLCV for FIS/USD: got 53 of 54
+2025-08-26 14:47:29,033 - WARNING - Incomplete OHLCV for GHIBLI/USD: got 54 of 55
+2025-08-26 14:47:37,093 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 14:47:37,115 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 14:47:37,115 - INFO - Finished update for timeframe 1m
+2025-08-26 14:47:37,115 - INFO - Starting update for timeframe 5m
+2025-08-26 14:47:37,115 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 14:47:37,115 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 14:47:40,692 - WARNING - Skipping unsupported symbol AIBTC/USD on kraken
+2025-08-26 14:48:11,266 - WARNING - Incomplete OHLCV for FIS/EUR: got 10 of 11
+2025-08-26 14:48:12,450 - WARNING - Incomplete OHLCV for FIS/USD: got 10 of 11
+2025-08-26 14:49:14,836 - WARNING - Incomplete OHLCV for GHIBLI/USD: got 10 of 11
+2025-08-26 14:49:23,892 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 14:49:23,914 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 14:49:23,914 - INFO - Finished update for timeframe 5m
+2025-08-26 14:49:23,914 - INFO - Starting update for timeframe 15m
+2025-08-26 14:49:23,914 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 14:49:23,914 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 14:49:57,037 - WARNING - Incomplete OHLCV for FIS/EUR: got 4 of 5
+2025-08-26 14:50:00,459 - WARNING - Incomplete OHLCV for FIS/USD: got 4 of 5
+2025-08-26 14:51:00,535 - WARNING - Incomplete OHLCV for GHIBLI/USD: got 4 of 5
+2025-08-26 14:51:08,521 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 14:51:08,543 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 14:51:08,543 - INFO - Finished update for timeframe 15m
+2025-08-26 14:51:08,543 - INFO - Starting update for timeframe 1h
+2025-08-26 14:51:08,543 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 14:51:08,544 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 14:51:35,545 - ERROR - Failed to load OHLCV for ZEUS/USD on 1m limit 200: []
+2025-08-26 14:51:35,546 - ERROR - Failed to load OHLCV for ZEUS/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,557 - ERROR - Failed to load OHLCV for PUMP/EUR on 1m limit 200: []
+2025-08-26 14:51:35,557 - ERROR - Failed to load OHLCV for PUMP/EUR on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,566 - ERROR - Failed to load OHLCV for MKR/USD on 1m limit 200: []
+2025-08-26 14:51:35,566 - ERROR - Failed to load OHLCV for MKR/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,575 - ERROR - Failed to load OHLCV for FIS/EUR on 1m limit 200: []
+2025-08-26 14:51:35,575 - ERROR - Failed to load OHLCV for FIS/EUR on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,584 - ERROR - Failed to load OHLCV for SNX/EUR on 1m limit 200: []
+2025-08-26 14:51:35,584 - ERROR - Failed to load OHLCV for SNX/EUR on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,593 - ERROR - Failed to load OHLCV for FIS/USD on 1m limit 200: []
+2025-08-26 14:51:35,593 - ERROR - Failed to load OHLCV for FIS/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,602 - ERROR - Failed to load OHLCV for SNX/USD on 1m limit 200: []
+2025-08-26 14:51:35,602 - ERROR - Failed to load OHLCV for SNX/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,610 - ERROR - Failed to load OHLCV for ODOS/USD on 1m limit 200: []
+2025-08-26 14:51:35,610 - ERROR - Failed to load OHLCV for ODOS/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,619 - ERROR - Failed to load OHLCV for USDUC/USD on 1m limit 200: []
+2025-08-26 14:51:35,619 - ERROR - Failed to load OHLCV for USDUC/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,627 - ERROR - Failed to load OHLCV for BERA/USDT on 1m limit 200: []
+2025-08-26 14:51:35,630 - ERROR - Failed to load OHLCV for BERA/USDT on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,639 - ERROR - Failed to load OHLCV for PARTI/USD on 1m limit 200: []
+2025-08-26 14:51:35,640 - ERROR - Failed to load OHLCV for PARTI/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,652 - ERROR - Failed to load OHLCV for PUMP/USD on 1m limit 200: []
+2025-08-26 14:51:35,652 - ERROR - Failed to load OHLCV for PUMP/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,661 - ERROR - Failed to load OHLCV for GHIBLI/USD on 1m limit 200: []
+2025-08-26 14:51:35,661 - ERROR - Failed to load OHLCV for GHIBLI/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,670 - ERROR - Failed to load OHLCV for VINE/USD on 1m limit 200: []
+2025-08-26 14:51:35,670 - ERROR - Failed to load OHLCV for VINE/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,679 - ERROR - Failed to load OHLCV for SAPIEN/EUR on 1m limit 200: []
+2025-08-26 14:51:35,679 - ERROR - Failed to load OHLCV for SAPIEN/EUR on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,688 - ERROR - Failed to load OHLCV for SAPIEN/USD on 1m limit 200: []
+2025-08-26 14:51:35,688 - ERROR - Failed to load OHLCV for SAPIEN/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,696 - ERROR - Failed to load OHLCV for PROMPT/EUR on 1m limit 200: []
+2025-08-26 14:51:35,696 - ERROR - Failed to load OHLCV for PROMPT/EUR on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,705 - ERROR - Failed to load OHLCV for SPK/USD on 1m limit 200: []
+2025-08-26 14:51:35,705 - ERROR - Failed to load OHLCV for SPK/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,713 - ERROR - Failed to load OHLCV for ORDER/USD on 1m limit 200: []
+2025-08-26 14:51:35,713 - ERROR - Failed to load OHLCV for ORDER/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,722 - ERROR - Failed to load OHLCV for MELANIA/USDT on 1m limit 200: []
+2025-08-26 14:51:35,722 - ERROR - Failed to load OHLCV for MELANIA/USDT on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,731 - ERROR - Failed to load OHLCV for RAIIN/USD on 1m limit 200: []
+2025-08-26 14:51:35,731 - ERROR - Failed to load OHLCV for RAIIN/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,739 - ERROR - Failed to load OHLCV for BERA/USD on 1m limit 200: []
+2025-08-26 14:51:35,739 - ERROR - Failed to load OHLCV for BERA/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,748 - ERROR - Failed to load OHLCV for CXT/USD on 1m limit 200: []
+2025-08-26 14:51:35,748 - ERROR - Failed to load OHLCV for CXT/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,756 - ERROR - Failed to load OHLCV for MELANIA/EUR on 1m limit 200: []
+2025-08-26 14:51:35,756 - ERROR - Failed to load OHLCV for MELANIA/EUR on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,765 - ERROR - Failed to load OHLCV for LPT/EUR on 1m limit 200: []
+2025-08-26 14:51:35,765 - ERROR - Failed to load OHLCV for LPT/EUR on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,773 - ERROR - Failed to load OHLCV for BERA/EUR on 1m limit 200: []
+2025-08-26 14:51:35,773 - ERROR - Failed to load OHLCV for BERA/EUR on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,783 - ERROR - Failed to load OHLCV for CXT/EUR on 1m limit 200: []
+2025-08-26 14:51:35,783 - ERROR - Failed to load OHLCV for CXT/EUR on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,791 - ERROR - Failed to load OHLCV for NODE/USD on 1m limit 200: []
+2025-08-26 14:51:35,791 - ERROR - Failed to load OHLCV for NODE/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,800 - ERROR - Failed to load OHLCV for NMR/EUR on 1m limit 200: []
+2025-08-26 14:51:35,800 - ERROR - Failed to load OHLCV for NMR/EUR on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,808 - ERROR - Failed to load OHLCV for MAT/USD on 1m limit 200: []
+2025-08-26 14:51:35,808 - ERROR - Failed to load OHLCV for MAT/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,817 - ERROR - Failed to load OHLCV for MAT/EUR on 1m limit 200: []
+2025-08-26 14:51:35,817 - ERROR - Failed to load OHLCV for MAT/EUR on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,825 - ERROR - Failed to load OHLCV for CRO/USDT on 1m limit 200: []
+2025-08-26 14:51:35,826 - ERROR - Failed to load OHLCV for CRO/USDT on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,834 - ERROR - Failed to load OHLCV for ALCX/USD on 1m limit 200: []
+2025-08-26 14:51:35,834 - ERROR - Failed to load OHLCV for ALCX/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,843 - ERROR - Failed to load OHLCV for ARPA/USD on 1m limit 200: []
+2025-08-26 14:51:35,843 - ERROR - Failed to load OHLCV for ARPA/USD on kraken (tf=1m limit=200 mode=websocket): []
+2025-08-26 14:51:35,853 - INFO - Fetched OHLCV for 464/500 symbols on 1m
+2025-08-26 14:51:39,394 - WARNING - Incomplete OHLCV for FIS/EUR: got 1 of 2
+2025-08-26 14:51:41,115 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:51:41,117 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:51:41,119 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:51:41,121 - ERROR - Failed to send message: Timed out. Verify your Telegram token and chat ID and ensure the bot has started a chat.
+2025-08-26 14:51:41,631 - WARNING - Incomplete OHLCV for FIS/USD: got 1 of 2
+2025-08-26 14:51:55,751 - WARNING - Incomplete OHLCV for MKR/EUR: got 58 of 59
+2025-08-26 14:52:13,512 - WARNING - Incomplete OHLCV for GAIA/EUR: got 659 of 700
+2025-08-26 14:52:14,645 - WARNING - Incomplete OHLCV for GAIA/USD: got 659 of 700
+2025-08-26 14:52:34,241 - WARNING - Incomplete OHLCV for GHIBLI/USD: got 1 of 2
+2025-08-26 14:52:42,323 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 14:52:42,345 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 14:52:42,345 - INFO - Finished update for timeframe 1h
+2025-08-26 14:52:42,345 - INFO - Starting update for timeframe 4h
+2025-08-26 14:52:42,345 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 14:52:42,346 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 14:53:02,575 - WARNING - Incomplete OHLCV for DOGE/USD: got 60 of 61
+2025-08-26 14:53:10,696 - WARNING - Incomplete OHLCV for FIS/EUR: got 0 of 1
+2025-08-26 14:53:12,182 - WARNING - Incomplete OHLCV for FIS/USD: got 0 of 1
+2025-08-26 14:53:29,557 - WARNING - Incomplete OHLCV for FLY/EUR: got 488 of 700
+2025-08-26 14:53:33,032 - WARNING - Incomplete OHLCV for FLY/USD: got 488 of 700
+2025-08-26 14:53:37,698 - WARNING - Incomplete OHLCV for BTC/EUR: got 60 of 61
+2025-08-26 14:53:44,890 - WARNING - Incomplete OHLCV for GAIA/EUR: got 165 of 700
+2025-08-26 14:53:46,197 - WARNING - Incomplete OHLCV for GAIA/USD: got 165 of 700
+2025-08-26 14:53:56,725 - WARNING - Incomplete OHLCV for EDGE/USD: got 60 of 61
+2025-08-26 14:54:04,698 - WARNING - Incomplete OHLCV for GHIBLI/USD: got 0 of 1
+2025-08-26 14:54:11,557 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 14:54:14,094 - WARNING - Incomplete OHLCV for GAIA/EUR: got 165 of 700
+2025-08-26 14:54:15,094 - WARNING - Skipping GAIA/EUR: only 165/700 candles
+2025-08-26 14:54:17,373 - WARNING - Incomplete OHLCV for GAIA/USD: got 165 of 700
+2025-08-26 14:54:18,373 - WARNING - Skipping GAIA/USD: only 165/700 candles
+2025-08-26 14:54:18,380 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 14:54:18,382 - INFO - Finished update for timeframe 4h
+2025-08-26 14:54:18,382 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:54:18,382 - INFO - Initial scan 34.9% complete
+2025-08-26 14:54:18,394 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 14:54:18,394 - INFO - Starting update for timeframe 1m
+2025-08-26 14:54:18,394 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 14:54:18,394 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 14:54:18,696 - WARNING - Incomplete OHLCV for USDT/EUR: got 62 of 63
+2025-08-26 14:54:31,723 - WARNING - Incomplete OHLCV for USDC/EUR: got 62 of 63
+2025-08-26 14:54:52,619 - WARNING - Incomplete OHLCV for BTC/USD: got 62 of 63
+2025-08-26 14:55:05,798 - WARNING - Incomplete OHLCV for PROMPT/USD: got 63 of 64
+2025-08-26 14:55:19,731 - WARNING - Incomplete OHLCV for CFG/USD: got 63 of 64
+2025-08-26 14:55:43,995 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 14:55:44,016 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 14:55:44,016 - INFO - Finished update for timeframe 1m
+2025-08-26 14:55:44,016 - INFO - Starting update for timeframe 5m
+2025-08-26 14:55:44,016 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 14:55:44,016 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 14:56:12,407 - WARNING - Incomplete OHLCV for MELANIA/USD: got 64 of 65
+2025-08-26 14:56:47,567 - WARNING - Incomplete OHLCV for ETH/EUR: got 64 of 65
+2025-08-26 14:57:01,583 - WARNING - Incomplete OHLCV for LPT/USD: got 65 of 66
+2025-08-26 14:57:07,444 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 14:57:07,466 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 14:57:07,466 - INFO - Finished update for timeframe 5m
+2025-08-26 14:57:07,467 - INFO - Starting update for timeframe 15m
+2025-08-26 14:57:07,467 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 14:57:07,467 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 14:57:21,663 - WARNING - Incomplete OHLCV for ETH/USD: got 65 of 66
+2025-08-26 14:57:34,588 - WARNING - Incomplete OHLCV for SOL/USD: got 65 of 66
+2025-08-26 14:57:48,573 - WARNING - Incomplete OHLCV for XRP/USD: got 65 of 66
+2025-08-26 14:58:33,035 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 14:58:33,056 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 14:58:33,056 - INFO - Finished update for timeframe 15m
+2025-08-26 14:58:33,056 - INFO - Starting update for timeframe 1h
+2025-08-26 14:58:33,056 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 14:58:33,056 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 14:58:34,383 - WARNING - Incomplete OHLCV for NMR/USD: got 67 of 68
+2025-08-26 14:58:53,244 - WARNING - Incomplete OHLCV for GOMINING/EUR: got 486 of 700
+2025-08-26 14:58:54,276 - WARNING - Incomplete OHLCV for CRO/EUR: got 67 of 68
+2025-08-26 14:58:55,494 - WARNING - Incomplete OHLCV for GOMINING/USD: got 486 of 700
+2025-08-26 14:59:07,201 - WARNING - Incomplete OHLCV for CRO/USD: got 68 of 69
+2025-08-26 14:59:21,190 - WARNING - Incomplete OHLCV for ARKM/USD: got 57 of 58
+2025-08-26 14:59:32,977 - WARNING - Incomplete OHLCV for ARKM/EUR: got 57 of 58
+2025-08-26 14:59:46,038 - WARNING - Incomplete OHLCV for HOUSE/EUR: got 678 of 700
+2025-08-26 14:59:47,030 - WARNING - Incomplete OHLCV for HOUSE/USD: got 678 of 700
+2025-08-26 14:59:56,266 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 14:59:56,289 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 14:59:56,289 - INFO - Finished update for timeframe 1h
+2025-08-26 14:59:56,289 - INFO - Starting update for timeframe 4h
+2025-08-26 14:59:56,289 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 14:59:56,289 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 15:00:12,653 - WARNING - Incomplete OHLCV for GOMINING/EUR: got 123 of 700
+2025-08-26 15:00:13,920 - WARNING - Incomplete OHLCV for GOMINING/USD: got 123 of 700
+2025-08-26 15:00:35,214 - WARNING - Incomplete OHLCV for HBAR/EUR: got 284 of 700
+2025-08-26 15:00:37,245 - WARNING - Incomplete OHLCV for HBAR/USD: got 284 of 700
+2025-08-26 15:00:41,024 - ERROR - WS OHLCV timeout for ALCX/USD on kraken (tf=1m limit=200 ws=True): 
+2025-08-26 15:00:41,024 - INFO - Falling back to REST fetch_ohlcv for ALCX/USD on 1m limit 200
+2025-08-26 15:00:44,292 - WARNING - Incomplete OHLCV for HIPPO/EUR: got 549 of 700
+2025-08-26 15:00:45,535 - WARNING - Incomplete OHLCV for HIPPO/USD: got 549 of 700
+2025-08-26 15:00:53,642 - WARNING - Incomplete OHLCV for APE/USD: got 59 of 60
+2025-08-26 15:00:57,327 - WARNING - Incomplete OHLCV for HOUSE/EUR: got 171 of 700
+2025-08-26 15:00:58,440 - WARNING - Incomplete OHLCV for HOUSE/USD: got 171 of 700
+2025-08-26 15:01:04,398 - WARNING - Incomplete OHLCV for ICNT/EUR: got 327 of 700
+2025-08-26 15:01:05,499 - WARNING - Incomplete OHLCV for ICNT/USD: got 327 of 700
+2025-08-26 15:01:06,641 - WARNING - Incomplete OHLCV for ALKIMI/USD: got 60 of 61
+2025-08-26 15:01:10,096 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 15:01:12,454 - WARNING - Incomplete OHLCV for GOMINING/EUR: got 123 of 700
+2025-08-26 15:01:13,454 - WARNING - Skipping GOMINING/EUR: only 123/700 candles
+2025-08-26 15:01:14,641 - WARNING - Incomplete OHLCV for ALGO/USD: got 60 of 61
+2025-08-26 15:01:16,053 - WARNING - Incomplete OHLCV for GOMINING/USD: got 123 of 700
+2025-08-26 15:01:17,053 - WARNING - Skipping GOMINING/USD: only 123/700 candles
+2025-08-26 15:01:18,448 - WARNING - Incomplete OHLCV for HBAR/EUR: got 284 of 700
+2025-08-26 15:01:19,448 - WARNING - Skipping HBAR/EUR: only 284/700 candles
+2025-08-26 15:01:19,791 - WARNING - Incomplete OHLCV for ANKR/USD: got 60 of 61
+2025-08-26 15:01:22,009 - WARNING - Incomplete OHLCV for HBAR/USD: got 284 of 700
+2025-08-26 15:01:23,009 - WARNING - Skipping HBAR/USD: only 284/700 candles
+2025-08-26 15:01:25,402 - WARNING - Incomplete OHLCV for HOUSE/EUR: got 171 of 700
+2025-08-26 15:01:26,402 - WARNING - Skipping HOUSE/EUR: only 171/700 candles
+2025-08-26 15:01:27,882 - WARNING - Incomplete OHLCV for HOUSE/USD: got 171 of 700
+2025-08-26 15:01:28,882 - WARNING - Skipping HOUSE/USD: only 171/700 candles
+2025-08-26 15:01:30,293 - WARNING - Incomplete OHLCV for ICNT/EUR: got 327 of 700
+2025-08-26 15:01:31,293 - WARNING - Skipping ICNT/EUR: only 327/700 candles
+2025-08-26 15:01:32,503 - WARNING - Incomplete OHLCV for ICNT/USD: got 327 of 700
+2025-08-26 15:01:33,503 - WARNING - Skipping ICNT/USD: only 327/700 candles
+2025-08-26 15:01:33,505 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 15:01:33,507 - INFO - Finished update for timeframe 4h
+2025-08-26 15:01:33,507 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 15:01:33,507 - INFO - Initial scan 39.3% complete
+2025-08-26 15:01:33,518 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 15:01:33,518 - INFO - Starting update for timeframe 1m
+2025-08-26 15:01:33,518 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 15:01:33,518 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 15:01:34,669 - WARNING - Incomplete OHLCV for ICX/EUR: got 30 of 31
+2025-08-26 15:01:35,881 - WARNING - Incomplete OHLCV for ICX/USD: got 33 of 34
+2025-08-26 15:01:44,068 - WARNING - Incomplete OHLCV for IMX/USD: got 25 of 26
+2025-08-26 15:01:45,282 - WARNING - Incomplete OHLCV for INIT/EUR: got 29 of 30
+2025-08-26 15:01:46,488 - WARNING - Incomplete OHLCV for INIT/USD: got 38 of 39
+2025-08-26 15:01:48,684 - WARNING - Incomplete OHLCV for INJ/EUR: got 31 of 32
+2025-08-26 15:01:54,662 - WARNING - Incomplete OHLCV for INJ/USD: got 31 of 32
+2025-08-26 15:02:06,289 - WARNING - Incomplete OHLCV for JASMY/EUR: got 27 of 28
+2025-08-26 15:02:07,468 - WARNING - Incomplete OHLCV for JASMY/USD: got 28 of 29
+2025-08-26 15:02:16,897 - WARNING - Incomplete OHLCV for JOE/USD: got 33 of 34
+2025-08-26 15:02:20,464 - WARNING - Incomplete OHLCV for JST/USD: got 36 of 37
+2025-08-26 15:02:24,223 - ERROR - WS OHLCV timeout for ARPA/USD on kraken (tf=1m limit=200 ws=True): 
+2025-08-26 15:02:24,223 - INFO - Falling back to REST fetch_ohlcv for ARPA/USD on 1m limit 200
+2025-08-26 15:02:33,299 - WARNING - Incomplete OHLCV for KAITO/EUR: got 33 of 34
+2025-08-26 15:02:35,486 - WARNING - Incomplete OHLCV for KAITO/USD: got 34 of 35
+2025-08-26 15:02:36,689 - WARNING - Incomplete OHLCV for ALKIMI/EUR: got 61 of 62
+2025-08-26 15:02:46,060 - WARNING - Incomplete OHLCV for KAS/USD: got 30 of 31
+2025-08-26 15:02:49,665 - WARNING - Incomplete OHLCV for APE/EUR: got 61 of 62
+2025-08-26 15:03:03,699 - WARNING - Incomplete OHLCV for ALGO/USDT: got 62 of 63
+2025-08-26 15:03:09,530 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 15:03:09,558 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 15:03:09,558 - INFO - Finished update for timeframe 1m
+2025-08-26 15:03:09,558 - INFO - Starting update for timeframe 5m
+2025-08-26 15:03:09,558 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 15:03:09,558 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 15:03:16,673 - WARNING - Incomplete OHLCV for API3/USD: got 61 of 62
+2025-08-26 15:03:30,854 - WARNING - Incomplete OHLCV for ALGO/EUR: got 62 of 63
+2025-08-26 15:03:43,696 - WARNING - Incomplete OHLCV for ARB/USD: got 61 of 62
+2025-08-26 15:03:57,664 - WARNING - Incomplete OHLCV for APT/USD: got 61 of 62
+2025-08-26 15:04:10,766 - WARNING - Incomplete OHLCV for ANKR/EUR: got 63 of 64
+2025-08-26 15:04:24,738 - WARNING - Incomplete OHLCV for AR/USD: got 62 of 63
+2025-08-26 15:04:35,125 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 15:04:35,277 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 15:04:35,277 - INFO - Finished update for timeframe 5m
+2025-08-26 15:04:35,277 - INFO - Starting update for timeframe 15m
+2025-08-26 15:04:35,277 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 15:04:35,277 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 15:04:35,355 - WARNING - Incomplete OHLCV for AR/EUR: got 62 of 63
+2025-08-26 15:04:49,305 - WARNING - Incomplete OHLCV for ALPHA/USD: got 63 of 64
+2025-08-26 15:05:02,276 - WARNING - Incomplete OHLCV for ARB/EUR: got 63 of 64
+2025-08-26 15:05:16,268 - WARNING - Incomplete OHLCV for ALGO/GBP: got 64 of 65
+2025-08-26 15:05:29,271 - WARNING - Incomplete OHLCV for ATH/EUR: got 63 of 64
+2025-08-26 15:05:38,731 - WARNING - Incomplete OHLCV for KAS/USDT: got 408 of 700
+2025-08-26 15:05:42,076 - WARNING - Incomplete OHLCV for APT/EUR: got 63 of 64
+2025-08-26 15:05:50,116 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 15:05:50,122 - INFO - Finished update for timeframe 1m
+2025-08-26 15:05:50,122 - INFO - Starting update for timeframe 5m
+2025-08-26 15:05:50,122 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 15:05:50,126 - INFO - Fetching 200 candles for 498 symbols on 5m
+2025-08-26 15:05:59,521 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 15:05:59,543 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 15:05:59,543 - INFO - Finished update for timeframe 15m
+2025-08-26 15:05:59,543 - INFO - Starting update for timeframe 1h
+2025-08-26 15:05:59,543 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 15:05:59,543 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 15:06:53,482 - WARNING - Incomplete OHLCV for KAS/USDT: got 103 of 700
+2025-08-26 15:07:17,019 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 15:07:20,657 - WARNING - Incomplete OHLCV for KAS/USDT: got 103 of 700
+2025-08-26 15:07:21,658 - WARNING - Skipping KAS/USDT: only 103/700 candles
+2025-08-26 15:07:21,665 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 15:07:21,666 - INFO - Finished update for timeframe 1h
+2025-08-26 15:07:21,666 - INFO - Starting update for timeframe 4h
+2025-08-26 15:07:21,666 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 15:07:21,666 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 15:07:58,137 - WARNING - Incomplete OHLCV for JITOSOL/SOL: got 368 of 700
+2025-08-26 15:08:00,363 - WARNING - Incomplete OHLCV for JITOSOL/EUR: got 367 of 700
+2025-08-26 15:08:00,382 - WARNING - Incomplete OHLCV for JITOSOL/USD: got 368 of 700
+2025-08-26 15:08:02,072 - WARNING - Incomplete OHLCV for JOE/EUR: got 291 of 700
+2025-08-26 15:08:04,794 - WARNING - Incomplete OHLCV for JOE/USD: got 302 of 700
+2025-08-26 15:08:30,708 - WARNING - Incomplete OHLCV for KAS/USDT: got 27 of 700
+2025-08-26 15:08:41,179 - WARNING - Incomplete OHLCV for KET/EUR: got 237 of 700
+2025-08-26 15:08:43,589 - WARNING - Incomplete OHLCV for KET/USD: got 237 of 700
+2025-08-26 15:08:55,177 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 15:08:58,909 - WARNING - Incomplete OHLCV for JOE/EUR: got 291 of 700
+2025-08-26 15:08:59,909 - WARNING - Skipping JOE/EUR: only 291/700 candles
+2025-08-26 15:09:02,389 - WARNING - Incomplete OHLCV for JOE/USD: got 302 of 700
+2025-08-26 15:09:03,389 - WARNING - Skipping JOE/USD: only 302/700 candles
+2025-08-26 15:09:05,864 - WARNING - Incomplete OHLCV for KAS/USDT: got 27 of 700
+2025-08-26 15:09:06,865 - WARNING - Skipping KAS/USDT: only 27/700 candles
+2025-08-26 15:09:10,328 - WARNING - Incomplete OHLCV for KET/EUR: got 237 of 700
+2025-08-26 15:09:11,328 - WARNING - Skipping KET/EUR: only 237/700 candles
+2025-08-26 15:09:13,930 - WARNING - Incomplete OHLCV for KET/USD: got 237 of 700
+2025-08-26 15:09:14,931 - WARNING - Skipping KET/USD: only 237/700 candles
+2025-08-26 15:09:14,935 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 15:09:14,936 - INFO - Finished update for timeframe 4h
+2025-08-26 15:09:14,937 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 15:09:14,937 - INFO - Initial scan 43.6% complete
+2025-08-26 15:09:14,949 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 15:09:14,949 - INFO - Starting update for timeframe 1m
+2025-08-26 15:09:14,949 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 15:09:14,949 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 15:09:16,299 - WARNING - Incomplete OHLCV for KMNO/EUR: got 44 of 45
+2025-08-26 15:09:17,315 - WARNING - Incomplete OHLCV for KMNO/USD: got 36 of 37
+2025-08-26 15:09:18,509 - WARNING - Incomplete OHLCV for KNC/EUR: got 38 of 39
+2025-08-26 15:09:19,701 - WARNING - Incomplete OHLCV for KNC/USD: got 42 of 43
+2025-08-26 15:09:38,299 - WARNING - Incomplete OHLCV for KSM/EUR: got 24 of 25
+2025-08-26 15:09:41,915 - WARNING - Incomplete OHLCV for KSM/USD: got 26 of 27
+2025-08-26 15:09:43,109 - WARNING - Incomplete OHLCV for KTA/EUR: got 44 of 45
+2025-08-26 15:09:46,751 - WARNING - Incomplete OHLCV for KTA/USD: got 26 of 27
+2025-08-26 15:09:59,691 - WARNING - Incomplete OHLCV for LAYER/USD: got 28 of 29
+2025-08-26 15:10:00,716 - WARNING - Incomplete OHLCV for LCX/EUR: got 46 of 47
+2025-08-26 15:10:03,179 - WARNING - Incomplete OHLCV for LCX/USD: got 47 of 48
+2025-08-26 15:10:05,624 - WARNING - Incomplete OHLCV for LDO/EUR: got 21 of 22
+2025-08-26 15:10:14,929 - WARNING - Incomplete OHLCV for LDO/USD: got 26 of 27
+2025-08-26 15:10:19,518 - WARNING - Incomplete OHLCV for LINK/EUR: got 34 of 35
+2025-08-26 15:10:24,315 - WARNING - Incomplete OHLCV for LINK/GBP: got 25 of 26
+2025-08-26 15:10:30,309 - WARNING - Incomplete OHLCV for LINK/USD: got 48 of 49
+2025-08-26 15:10:34,918 - WARNING - Incomplete OHLCV for LINK/USDT: got 39 of 40
+2025-08-26 15:10:50,361 - WARNING - Incomplete OHLCV for LOBO/USD: got 23 of 24
+2025-08-26 15:10:52,504 - WARNING - Incomplete OHLCV for LOCKIN/EUR: got 42 of 43
+2025-08-26 15:10:53,721 - WARNING - Incomplete OHLCV for LOCKIN/USD: got 27 of 28
+2025-08-26 15:11:03,116 - WARNING - Incomplete OHLCV for LOFI/USD: got 26 of 27
+2025-08-26 15:11:04,326 - WARNING - Incomplete OHLCV for LPT/EUR: got 15 of 16
+2025-08-26 15:11:07,928 - WARNING - Incomplete OHLCV for LPT/USD: got 14 of 15
+2025-08-26 15:11:17,121 - WARNING - Incomplete OHLCV for LQTY/USD: got 29 of 30
+2025-08-26 15:11:18,343 - WARNING - Incomplete OHLCV for LRC/EUR: got 36 of 37
+2025-08-26 15:11:20,708 - WARNING - Incomplete OHLCV for LRC/USD: got 34 of 35
+2025-08-26 15:11:31,311 - WARNING - Incomplete OHLCV for LSETH/USD: got 25 of 26
+2025-08-26 15:11:34,726 - WARNING - Incomplete OHLCV for LSK/USD: got 25 of 26
+2025-08-26 15:11:51,137 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 15:11:53,297 - WARNING - Incomplete OHLCV for LSETH/USD: got 25 of 26
+2025-08-26 15:11:58,305 - WARNING - Incomplete OHLCV for LSK/USD: got 25 of 26
+2025-08-26 15:12:01,380 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 15:12:01,383 - INFO - Finished update for timeframe 1m
+2025-08-26 15:12:01,383 - INFO - Starting update for timeframe 5m
+2025-08-26 15:12:01,383 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 15:12:01,384 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 15:13:18,965 - WARNING - Incomplete OHLCV for LPT/EUR: got 16 of 17
+2025-08-26 15:13:20,132 - WARNING - Incomplete OHLCV for LPT/USD: got 16 of 17
+2025-08-26 15:13:41,238 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 15:13:41,260 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 15:13:41,260 - INFO - Finished update for timeframe 5m
+2025-08-26 15:13:41,260 - INFO - Starting update for timeframe 15m
+2025-08-26 15:13:41,260 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 15:13:41,260 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 15:14:56,528 - WARNING - Incomplete OHLCV for LPT/EUR: got 5 of 6
+2025-08-26 15:14:58,740 - WARNING - Incomplete OHLCV for LPT/USD: got 5 of 6
+2025-08-26 15:15:19,998 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 15:15:20,022 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 15:15:20,022 - INFO - Finished update for timeframe 15m
+2025-08-26 15:15:20,022 - INFO - Starting update for timeframe 1h
+2025-08-26 15:15:20,022 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 15:15:20,022 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 15:15:39,792 - WARNING - Incomplete OHLCV for KTA/EUR: got 511 of 700
+2025-08-26 15:15:42,180 - WARNING - Incomplete OHLCV for KTA/USD: got 511 of 700
+2025-08-26 15:16:23,503 - WARNING - Incomplete OHLCV for LOBO/USD: got 510 of 700
+2025-08-26 15:16:33,944 - WARNING - Incomplete OHLCV for LPT/EUR: got 2 of 3
+2025-08-26 15:16:36,332 - WARNING - Incomplete OHLCV for LPT/USD: got 2 of 3
+2025-08-26 15:16:57,209 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 15:16:57,231 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 15:16:57,232 - INFO - Finished update for timeframe 1h
+2025-08-26 15:16:57,232 - INFO - Starting update for timeframe 4h
+2025-08-26 15:16:57,232 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 15:16:57,232 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 15:17:04,491 - WARNING - Incomplete OHLCV for KOBAN/EUR: got 627 of 700
+2025-08-26 15:17:06,788 - WARNING - Incomplete OHLCV for KOBAN/USD: got 627 of 700
+2025-08-26 15:17:17,400 - WARNING - Incomplete OHLCV for KTA/EUR: got 129 of 700
+2025-08-26 15:17:20,006 - WARNING - Incomplete OHLCV for KTA/USD: got 129 of 700
+2025-08-26 15:18:00,942 - WARNING - Incomplete OHLCV for LOBO/USD: got 129 of 700
+2025-08-26 15:18:06,676 - WARNING - Incomplete OHLCV for LOFI/EUR: got 633 of 700
+2025-08-26 15:18:07,872 - WARNING - Incomplete OHLCV for LOFI/USD: got 633 of 700
+2025-08-26 15:18:10,191 - WARNING - Incomplete OHLCV for LPT/EUR: got 1 of 2
+2025-08-26 15:18:11,397 - WARNING - Incomplete OHLCV for LPT/USD: got 1 of 2
+2025-08-26 15:18:34,865 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 15:18:38,436 - WARNING - Incomplete OHLCV for KTA/EUR: got 129 of 700
+2025-08-26 15:18:39,436 - WARNING - Skipping KTA/EUR: only 129/700 candles
+2025-08-26 15:18:40,991 - WARNING - Incomplete OHLCV for KTA/USD: got 129 of 700
+2025-08-26 15:18:41,991 - WARNING - Skipping KTA/USD: only 129/700 candles
+2025-08-26 15:18:44,614 - WARNING - Incomplete OHLCV for LOBO/USD: got 129 of 700
+2025-08-26 15:18:45,614 - WARNING - Skipping LOBO/USD: only 129/700 candles
+2025-08-26 15:18:45,623 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 15:18:45,625 - INFO - Finished update for timeframe 4h
+2025-08-26 15:18:45,625 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 15:18:45,625 - INFO - Initial scan 48.0% complete
+2025-08-26 15:18:45,636 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 15:18:45,636 - INFO - Starting update for timeframe 1m
+2025-08-26 15:18:45,637 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 15:18:45,637 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 15:18:47,978 - WARNING - Incomplete OHLCV for LTC/AUD: got 33 of 34
+2025-08-26 15:18:50,466 - WARNING - Incomplete OHLCV for LTC/GBP: got 43 of 44
+2025-08-26 15:18:55,379 - WARNING - Incomplete OHLCV for LTC/USDT: got 47 of 48
+2025-08-26 15:18:59,834 - WARNING - Incomplete OHLCV for LUNA/EUR: got 30 of 31
+2025-08-26 15:19:01,201 - WARNING - Incomplete OHLCV for LUNA/USD: got 28 of 29
+2025-08-26 15:19:03,372 - WARNING - Incomplete OHLCV for LUNC/EUR: got 31 of 32
+2025-08-26 15:19:10,360 - WARNING - Incomplete OHLCV for LUNC/USD: got 39 of 40
+2025-08-26 15:19:15,370 - WARNING - Incomplete OHLCV for MANA/EUR: got 47 of 48
+2025-08-26 15:19:16,392 - WARNING - Incomplete OHLCV for MANA/USD: got 46 of 47
+2025-08-26 15:19:25,788 - WARNING - Incomplete OHLCV for MANA/USDT: got 38 of 39
+2025-08-26 15:19:29,250 - WARNING - Incomplete OHLCV for MASK/EUR: got 30 of 31
+2025-08-26 15:19:31,775 - WARNING - Incomplete OHLCV for MASK/USD: got 41 of 42
+2025-08-26 15:19:35,177 - WARNING - Incomplete OHLCV for MAT/EUR: got 21 of 22
+2025-08-26 15:19:40,976 - WARNING - Incomplete OHLCV for MAT/USD: got 21 of 22
+2025-08-26 15:19:52,765 - WARNING - Incomplete OHLCV for MELANIA/EUR: got 23 of 24
+2025-08-26 15:19:54,102 - WARNING - Incomplete OHLCV for MELANIA/USD: got 23 of 24
+2025-08-26 15:19:58,750 - WARNING - Incomplete OHLCV for MELANIA/USDT: got 24 of 25
+2025-08-26 15:20:08,368 - WARNING - Incomplete OHLCV for MEME/USD: got 31 of 32
+2025-08-26 15:20:10,404 - WARNING - Incomplete OHLCV for MERL/USD: got 52 of 53
+2025-08-26 15:20:24,386 - WARNING - Incomplete OHLCV for M/EUR: got 50 of 51
+2025-08-26 15:20:29,206 - WARNING - Incomplete OHLCV for MEW/USD: got 42 of 43
+2025-08-26 15:20:42,182 - WARNING - Incomplete OHLCV for MINA/EUR: got 53 of 54
+2025-08-26 15:20:44,370 - WARNING - Incomplete OHLCV for MINA/GBP: got 48 of 49
+2025-08-26 15:20:45,569 - WARNING - Incomplete OHLCV for MINA/USD: got 51 of 52
+2025-08-26 15:20:59,986 - WARNING - Incomplete OHLCV for MKR/EUR: got 28 of 29
+2025-08-26 15:21:01,276 - WARNING - Incomplete OHLCV for MKR/USD: got 29 of 30
+2025-08-26 15:21:09,035 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 15:21:09,065 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 15:21:09,065 - INFO - Finished update for timeframe 1m
+2025-08-26 15:21:09,065 - INFO - Starting update for timeframe 5m
+2025-08-26 15:21:09,065 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 15:21:09,065 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 15:21:41,970 - WARNING - Incomplete OHLCV for MAT/EUR: got 18 of 19
+2025-08-26 15:21:44,377 - WARNING - Incomplete OHLCV for MAT/USD: got 18 of 19
+2025-08-26 15:21:57,175 - WARNING - Incomplete OHLCV for MELANIA/EUR: got 18 of 19
+2025-08-26 15:21:58,575 - WARNING - Incomplete OHLCV for MELANIA/USD: got 18 of 19
+2025-08-26 15:22:01,993 - WARNING - Incomplete OHLCV for MELANIA/USDT: got 18 of 19
+2025-08-26 15:22:46,594 - WARNING - Incomplete OHLCV for MKR/EUR: got 17 of 18
+2025-08-26 15:22:47,774 - WARNING - Incomplete OHLCV for MKR/USD: got 17 of 18
+2025-08-26 15:22:55,761 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 15:22:55,786 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 15:22:55,786 - INFO - Finished update for timeframe 5m
+2025-08-26 15:22:55,786 - INFO - Starting update for timeframe 15m
+2025-08-26 15:22:55,786 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 15:22:55,786 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 15:23:27,578 - WARNING - Incomplete OHLCV for MAT/EUR: got 6 of 7
+2025-08-26 15:23:28,772 - WARNING - Incomplete OHLCV for MAT/USD: got 6 of 7
+2025-08-26 15:23:40,572 - WARNING - Incomplete OHLCV for MELANIA/EUR: got 6 of 7
+2025-08-26 15:23:41,777 - WARNING - Incomplete OHLCV for MELANIA/USD: got 6 of 7
+2025-08-26 15:23:47,574 - WARNING - Incomplete OHLCV for MELANIA/USDT: got 6 of 7
+2025-08-26 15:24:37,075 - WARNING - Incomplete OHLCV for MKR/EUR: got 6 of 7
+2025-08-26 15:24:38,187 - WARNING - Incomplete OHLCV for MKR/USD: got 6 of 7
+2025-08-26 15:24:46,237 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 15:24:46,262 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 15:24:46,262 - INFO - Finished update for timeframe 15m
+2025-08-26 15:24:46,262 - INFO - Starting update for timeframe 1h
+2025-08-26 15:24:46,262 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 15:24:46,262 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 15:25:18,186 - WARNING - Incomplete OHLCV for MAT/EUR: got 2 of 3
+2025-08-26 15:25:21,580 - WARNING - Incomplete OHLCV for MAT/USD: got 2 of 3
+2025-08-26 15:25:32,171 - WARNING - Incomplete OHLCV for MELANIA/EUR: got 2 of 3
+2025-08-26 15:25:33,379 - WARNING - Incomplete OHLCV for MELANIA/USD: got 2 of 3
+2025-08-26 15:25:35,770 - WARNING - Incomplete OHLCV for MELANIA/USDT: got 2 of 3
+2025-08-26 15:26:12,214 - WARNING - Incomplete OHLCV for MIM/EUR: got 261 of 700
+2025-08-26 15:26:13,640 - WARNING - Incomplete OHLCV for MIM/USD: got 434 of 700
+2025-08-26 15:26:27,406 - WARNING - Incomplete OHLCV for MKR/EUR: got 2 of 3
+2025-08-26 15:26:28,598 - WARNING - Incomplete OHLCV for MKR/USD: got 2 of 3
+2025-08-26 15:26:34,448 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 15:26:36,817 - WARNING - Incomplete OHLCV for MIM/EUR: got 261 of 700
+2025-08-26 15:26:37,817 - WARNING - Skipping MIM/EUR: only 261/700 candles
+2025-08-26 15:26:37,823 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 15:26:37,825 - INFO - Finished update for timeframe 1h
+2025-08-26 15:26:37,825 - INFO - Starting update for timeframe 4h
+2025-08-26 15:26:37,825 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 15:26:37,826 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 15:27:09,609 - WARNING - Incomplete OHLCV for MAT/EUR: got 1 of 2
+2025-08-26 15:27:10,807 - WARNING - Incomplete OHLCV for MAT/USD: got 1 of 2
+2025-08-26 15:27:21,391 - WARNING - Incomplete OHLCV for MELANIA/EUR: got 1 of 2
+2025-08-26 15:27:23,674 - WARNING - Incomplete OHLCV for MELANIA/USD: got 1 of 2
+2025-08-26 15:27:28,437 - WARNING - Incomplete OHLCV for MELANIA/USDT: got 1 of 2
+2025-08-26 15:27:39,174 - WARNING - Incomplete OHLCV for MERL/EUR: got 327 of 700
+2025-08-26 15:27:40,344 - WARNING - Incomplete OHLCV for MERL/USD: got 327 of 700
+2025-08-26 15:27:43,645 - WARNING - Incomplete OHLCV for METH/ETH: got 421 of 700
+2025-08-26 15:27:44,974 - WARNING - Incomplete OHLCV for METH/USD: got 405 of 700
+2025-08-26 15:27:50,804 - WARNING - Incomplete OHLCV for M/EUR: got 328 of 700
+2025-08-26 15:28:01,742 - WARNING - Incomplete OHLCV for MIM/EUR: got 66 of 700
+2025-08-26 15:28:03,684 - WARNING - Incomplete OHLCV for MIM/USD: got 110 of 700
+2025-08-26 15:28:16,617 - WARNING - Incomplete OHLCV for MKR/EUR: got 1 of 2
+2025-08-26 15:28:17,798 - WARNING - Incomplete OHLCV for MKR/USD: got 1 of 2
+2025-08-26 15:28:25,874 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 15:28:28,794 - WARNING - Incomplete OHLCV for MERL/EUR: got 327 of 700
+2025-08-26 15:28:29,794 - WARNING - Skipping MERL/EUR: only 327/700 candles
+2025-08-26 15:28:32,186 - WARNING - Incomplete OHLCV for MERL/USD: got 327 of 700
+2025-08-26 15:28:33,187 - WARNING - Skipping MERL/USD: only 327/700 candles
+2025-08-26 15:28:34,731 - WARNING - Incomplete OHLCV for M/EUR: got 328 of 700
+2025-08-26 15:28:35,731 - WARNING - Skipping M/EUR: only 328/700 candles
+2025-08-26 15:28:39,159 - WARNING - Incomplete OHLCV for MIM/EUR: got 66 of 700
+2025-08-26 15:28:40,160 - WARNING - Skipping MIM/EUR: only 66/700 candles
+2025-08-26 15:28:42,701 - WARNING - Incomplete OHLCV for MIM/USD: got 110 of 700
+2025-08-26 15:28:43,701 - WARNING - Skipping MIM/USD: only 110/700 candles
+2025-08-26 15:28:43,707 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 15:28:43,709 - INFO - Finished update for timeframe 4h
+2025-08-26 15:28:43,709 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 15:28:43,710 - INFO - Initial scan 52.4% complete
+2025-08-26 15:28:43,721 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 15:28:43,721 - INFO - Starting update for timeframe 1m
+2025-08-26 15:28:43,721 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 15:28:43,722 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 15:28:48,785 - WARNING - Incomplete OHLCV for MNT/USD: got 58 of 59
+2025-08-26 15:28:52,091 - WARNING - Incomplete OHLCV for MOCA/EUR: got 38 of 39
+2025-08-26 15:28:53,297 - WARNING - Incomplete OHLCV for MOCA/USD: got 43 of 44
+2025-08-26 15:28:54,532 - WARNING - Incomplete OHLCV for MOG/EUR: got 39 of 40
+2025-08-26 15:29:03,900 - WARNING - Incomplete OHLCV for MOG/USD: got 40 of 41
+2025-08-26 15:29:06,288 - WARNING - Incomplete OHLCV for MOODENG/EUR: got 49 of 50
+2025-08-26 15:29:08,697 - WARNING - Incomplete OHLCV for MOODENG/USD: got 51 of 52
+2025-08-26 15:29:17,894 - WARNING - Incomplete OHLCV for MOON/USD: got 44 of 45
+2025-08-26 15:29:26,303 - WARNING - Incomplete OHLCV for MOVE/USD: got 44 of 45
+2025-08-26 15:29:28,595 - WARNING - Incomplete OHLCV for MOVR/EUR: got 42 of 43
+2025-08-26 15:29:31,018 - WARNING - Incomplete OHLCV for MOVR/USD: got 63 of 64
+2025-08-26 15:29:38,948 - ERROR - Failed to load OHLCV for FIS/EUR on 5m limit 200: []
+2025-08-26 15:29:38,948 - ERROR - Failed to load OHLCV for FIS/EUR on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:38,959 - ERROR - Failed to load OHLCV for CXT/EUR on 5m limit 200: []
+2025-08-26 15:29:38,959 - ERROR - Failed to load OHLCV for CXT/EUR on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:38,968 - ERROR - Failed to load OHLCV for GRASS/USD on 5m limit 200: []
+2025-08-26 15:29:38,968 - ERROR - Failed to load OHLCV for GRASS/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:38,977 - ERROR - Failed to load OHLCV for AUCTION/USD on 5m limit 200: []
+2025-08-26 15:29:38,977 - ERROR - Failed to load OHLCV for AUCTION/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:38,986 - ERROR - Failed to load OHLCV for ICX/USD on 5m limit 200: []
+2025-08-26 15:29:38,986 - ERROR - Failed to load OHLCV for ICX/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:38,995 - ERROR - Failed to load OHLCV for ALCX/USD on 5m limit 200: []
+2025-08-26 15:29:38,995 - ERROR - Failed to load OHLCV for ALCX/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,004 - ERROR - Failed to load OHLCV for GMX/EUR on 5m limit 200: []
+2025-08-26 15:29:39,004 - ERROR - Failed to load OHLCV for GMX/EUR on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,013 - ERROR - Failed to load OHLCV for INIT/EUR on 5m limit 200: []
+2025-08-26 15:29:39,013 - ERROR - Failed to load OHLCV for INIT/EUR on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,022 - ERROR - Failed to load OHLCV for DEEP/EUR on 5m limit 200: []
+2025-08-26 15:29:39,022 - ERROR - Failed to load OHLCV for DEEP/EUR on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,031 - ERROR - Failed to load OHLCV for DEGEN/USD on 5m limit 200: []
+2025-08-26 15:29:39,031 - ERROR - Failed to load OHLCV for DEGEN/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,039 - ERROR - Failed to load OHLCV for ARPA/USD on 5m limit 200: []
+2025-08-26 15:29:39,039 - ERROR - Failed to load OHLCV for ARPA/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,048 - ERROR - Failed to load OHLCV for HIPPO/USD on 5m limit 200: []
+2025-08-26 15:29:39,048 - ERROR - Failed to load OHLCV for HIPPO/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,057 - ERROR - Failed to load OHLCV for GRT/GBP on 5m limit 200: []
+2025-08-26 15:29:39,057 - ERROR - Failed to load OHLCV for GRT/GBP on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,066 - ERROR - Failed to load OHLCV for G/USD on 5m limit 200: []
+2025-08-26 15:29:39,066 - ERROR - Failed to load OHLCV for G/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,075 - ERROR - Failed to load OHLCV for IMX/EUR on 5m limit 200: []
+2025-08-26 15:29:39,075 - ERROR - Failed to load OHLCV for IMX/EUR on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,084 - ERROR - Failed to load OHLCV for CVC/USD on 5m limit 200: []
+2025-08-26 15:29:39,084 - ERROR - Failed to load OHLCV for CVC/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,093 - ERROR - Failed to load OHLCV for BAT/EUR on 5m limit 200: []
+2025-08-26 15:29:39,097 - ERROR - Failed to load OHLCV for BAT/EUR on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,106 - ERROR - Failed to load OHLCV for COOKIE/USD on 5m limit 200: []
+2025-08-26 15:29:39,106 - ERROR - Failed to load OHLCV for COOKIE/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,115 - ERROR - Failed to load OHLCV for DYM/EUR on 5m limit 200: []
+2025-08-26 15:29:39,115 - ERROR - Failed to load OHLCV for DYM/EUR on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,124 - ERROR - Failed to load OHLCV for BDXN/EUR on 5m limit 200: []
+2025-08-26 15:29:39,124 - ERROR - Failed to load OHLCV for BDXN/EUR on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,133 - ERROR - Failed to load OHLCV for DMC/EUR on 5m limit 200: []
+2025-08-26 15:29:39,133 - ERROR - Failed to load OHLCV for DMC/EUR on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,142 - ERROR - Failed to load OHLCV for GMX/USD on 5m limit 200: []
+2025-08-26 15:29:39,142 - ERROR - Failed to load OHLCV for GMX/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,151 - ERROR - Failed to load OHLCV for JTO/USD on 5m limit 200: []
+2025-08-26 15:29:39,151 - ERROR - Failed to load OHLCV for JTO/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,160 - ERROR - Failed to load OHLCV for BNT/EUR on 5m limit 200: []
+2025-08-26 15:29:39,160 - ERROR - Failed to load OHLCV for BNT/EUR on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,169 - ERROR - Failed to load OHLCV for KERNEL/USD on 5m limit 200: []
+2025-08-26 15:29:39,169 - ERROR - Failed to load OHLCV for KERNEL/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,177 - ERROR - Failed to load OHLCV for CARV/USD on 5m limit 200: []
+2025-08-26 15:29:39,177 - ERROR - Failed to load OHLCV for CARV/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,188 - ERROR - Failed to load OHLCV for COOKIE/EUR on 5m limit 200: []
+2025-08-26 15:29:39,188 - ERROR - Failed to load OHLCV for COOKIE/EUR on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,196 - ERROR - Failed to load OHLCV for GTC/USD on 5m limit 200: []
+2025-08-26 15:29:39,197 - ERROR - Failed to load OHLCV for GTC/USD on kraken (tf=5m limit=200 mode=websocket): []
+2025-08-26 15:29:39,205 - INFO - Fetched OHLCV for 470/498 symbols on 5m
+2025-08-26 15:29:39,210 - WARNING - Incomplete OHLCV for MSOL/USD: got 48 of 49
+2025-08-26 15:29:43,890 - WARNING - Incomplete OHLCV for ZEUS/USD: got 18 of 19
+2025-08-26 15:29:48,513 - WARNING - Incomplete OHLCV for M/USD: got 58 of 59
+2025-08-26 15:29:57,960 - WARNING - Incomplete OHLCV for PUMP/EUR: got 18 of 19
+2025-08-26 15:29:59,132 - WARNING - Incomplete OHLCV for NANO/EUR: got 44 of 45
+2025-08-26 15:30:00,419 - WARNING - Incomplete OHLCV for NANO/USD: got 62 of 63
+2025-08-26 15:30:01,500 - WARNING - Incomplete OHLCV for NEAR/EUR: got 61 of 62
+2025-08-26 15:30:02,738 - WARNING - Incomplete OHLCV for NEAR/USD: got 63 of 64
+2025-08-26 15:30:11,092 - WARNING - Incomplete OHLCV for MKR/EUR: got 19 of 20
+2025-08-26 15:30:14,513 - WARNING - Incomplete OHLCV for NEIRO/USD: got 65 of 66
+2025-08-26 15:30:19,089 - WARNING - Incomplete OHLCV for NMR/EUR: got 32 of 33
+2025-08-26 15:30:21,491 - WARNING - Incomplete OHLCV for NMR/USD: got 32 of 33
+2025-08-26 15:30:23,681 - WARNING - Incomplete OHLCV for NODE/USD: got 32 of 33
+2025-08-26 15:30:25,071 - WARNING - Incomplete OHLCV for MKR/USD: got 19 of 20
+2025-08-26 15:30:35,499 - WARNING - Incomplete OHLCV for NOS/USD: got 54 of 55
+2025-08-26 15:30:37,900 - WARNING - Incomplete OHLCV for NOT/USD: got 53 of 54
+2025-08-26 15:30:42,688 - WARNING - Incomplete OHLCV for NPC/EUR: got 47 of 48
+2025-08-26 15:30:44,882 - WARNING - Incomplete OHLCV for NPC/USD: got 46 of 47
+2025-08-26 15:30:46,117 - WARNING - Incomplete OHLCV for SNX/EUR: got 19 of 20
+2025-08-26 15:30:50,688 - WARNING - Incomplete OHLCV for NTRN/USD: got 68 of 69
+2025-08-26 15:30:55,301 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 15:30:55,331 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 15:30:55,331 - INFO - Finished update for timeframe 1m
+2025-08-26 15:30:55,331 - INFO - Starting update for timeframe 5m
+2025-08-26 15:30:55,331 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 15:30:55,331 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 15:30:56,494 - WARNING - Incomplete OHLCV for FIS/USD: got 9 of 10
+2025-08-26 15:31:09,532 - WARNING - Incomplete OHLCV for SNX/USD: got 19 of 20
+2025-08-26 15:31:23,526 - WARNING - Incomplete OHLCV for ODOS/USD: got 19 of 20
+2025-08-26 15:31:36,812 - WARNING - Incomplete OHLCV for USDUC/USD: got 19 of 20
+2025-08-26 15:31:50,669 - WARNING - Incomplete OHLCV for BERA/USDT: got 15 of 16
+2025-08-26 15:32:00,317 - WARNING - Incomplete OHLCV for NMR/EUR: got 20 of 21
+2025-08-26 15:32:01,102 - WARNING - Incomplete OHLCV for NMR/USD: got 20 of 21
+2025-08-26 15:32:02,388 - WARNING - Incomplete OHLCV for NODE/USD: got 20 of 21
+2025-08-26 15:32:03,494 - WARNING - Incomplete OHLCV for DOGE/USD: got 19 of 20
+2025-08-26 15:32:17,718 - WARNING - Incomplete OHLCV for PARTI/USD: got 19 of 20
+2025-08-26 15:32:26,677 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 15:32:26,700 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 15:32:26,700 - INFO - Finished update for timeframe 5m
+2025-08-26 15:32:26,700 - INFO - Starting update for timeframe 15m
+2025-08-26 15:32:26,700 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 15:32:26,700 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 15:32:27,079 - WARNING - Incomplete OHLCV for PUMP/USD: got 19 of 20
+2025-08-26 15:32:35,157 - WARNING - Incomplete OHLCV for MOCA/EUR: got 603 of 700
+2025-08-26 15:32:36,335 - WARNING - Incomplete OHLCV for MOCA/USD: got 603 of 700
+2025-08-26 15:32:40,886 - WARNING - Incomplete OHLCV for GHIBLI/USD: got 9 of 10
+2025-08-26 15:32:54,080 - WARNING - Incomplete OHLCV for BTC/EUR: got 19 of 20
+2025-08-26 15:33:07,880 - WARNING - Incomplete OHLCV for VINE/USD: got 19 of 20
+2025-08-26 15:33:22,082 - WARNING - Incomplete OHLCV for EDGE/USD: got 11 of 12
+2025-08-26 15:33:31,297 - WARNING - Incomplete OHLCV for NMR/EUR: got 7 of 8
+2025-08-26 15:33:32,619 - WARNING - Incomplete OHLCV for NMR/USD: got 7 of 8
+2025-08-26 15:33:33,677 - WARNING - Incomplete OHLCV for NODE/USD: got 7 of 8
+2025-08-26 15:33:34,897 - WARNING - Incomplete OHLCV for SAPIEN/EUR: got 19 of 20
+2025-08-26 15:33:49,079 - WARNING - Incomplete OHLCV for SAPIEN/USD: got 19 of 20
+2025-08-26 15:33:58,345 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 15:33:58,367 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 15:33:58,367 - INFO - Finished update for timeframe 15m
+2025-08-26 15:33:58,367 - INFO - Starting update for timeframe 1h
+2025-08-26 15:33:58,367 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 15:33:58,367 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 15:33:58,439 - WARNING - Incomplete OHLCV for USDT/EUR: got 20 of 21
+2025-08-26 15:34:06,830 - WARNING - Incomplete OHLCV for MOCA/EUR: got 151 of 700
+2025-08-26 15:34:08,127 - WARNING - Incomplete OHLCV for MOCA/USD: got 151 of 700
+2025-08-26 15:34:11,533 - WARNING - Incomplete OHLCV for USDC/EUR: got 20 of 21
+2025-08-26 15:34:25,727 - WARNING - Incomplete OHLCV for PROMPT/EUR: got 20 of 21
+2025-08-26 15:34:38,719 - WARNING - Incomplete OHLCV for BTC/USD: got 20 of 21
+2025-08-26 15:34:52,562 - WARNING - Incomplete OHLCV for PROMPT/USD: got 20 of 21
+2025-08-26 15:35:01,977 - WARNING - Incomplete OHLCV for NMR/EUR: got 2 of 3
+2025-08-26 15:35:03,178 - WARNING - Incomplete OHLCV for NMR/USD: got 2 of 3
+2025-08-26 15:35:04,333 - WARNING - Incomplete OHLCV for CFG/USD: got 15 of 16
+2025-08-26 15:35:05,550 - WARNING - Incomplete OHLCV for NODE/USD: got 2 of 3
+2025-08-26 15:35:18,344 - WARNING - Incomplete OHLCV for SPK/USD: got 21 of 22
+2025-08-26 15:35:28,931 - WARNING - Incomplete OHLCV for ORDER/USD: got 21 of 22
+2025-08-26 15:35:28,981 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 15:35:31,691 - WARNING - Incomplete OHLCV for MOCA/EUR: got 151 of 700
+2025-08-26 15:35:32,691 - WARNING - Skipping MOCA/EUR: only 151/700 candles
+2025-08-26 15:35:33,698 - WARNING - Incomplete OHLCV for MELANIA/USDT: got 21 of 22
+2025-08-26 15:35:36,107 - WARNING - Incomplete OHLCV for MOCA/USD: got 151 of 700
+2025-08-26 15:35:37,107 - WARNING - Skipping MOCA/USD: only 151/700 candles
+2025-08-26 15:35:37,128 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 15:35:37,130 - INFO - Finished update for timeframe 1h
+2025-08-26 15:35:37,130 - INFO - Starting update for timeframe 4h
+2025-08-26 15:35:37,130 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 15:35:37,130 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 15:35:43,339 - WARNING - Incomplete OHLCV for RAIIN/USD: got 21 of 22
+2025-08-26 15:35:44,565 - WARNING - Incomplete OHLCV for MOCA/EUR: got 39 of 700
+2025-08-26 15:35:46,883 - WARNING - Incomplete OHLCV for MOCA/USD: got 39 of 700
+2025-08-26 15:35:56,087 - WARNING - Incomplete OHLCV for BERA/USD: got 16 of 17
+2025-08-26 15:36:09,121 - WARNING - Incomplete OHLCV for MELANIA/USD: got 21 of 22
+2025-08-26 15:36:18,583 - WARNING - Incomplete OHLCV for M/USD: got 328 of 700
+2025-08-26 15:36:23,355 - WARNING - Incomplete OHLCV for CXT/USD: got 13 of 14
+2025-08-26 15:36:36,134 - WARNING - Incomplete OHLCV for MELANIA/EUR: got 21 of 22
+2025-08-26 15:36:40,780 - WARNING - Incomplete OHLCV for NMR/EUR: got 1 of 2
+2025-08-26 15:36:42,080 - WARNING - Incomplete OHLCV for NMR/USD: got 1 of 2
+2025-08-26 15:36:44,306 - WARNING - Incomplete OHLCV for NODE/USD: got 1 of 2
+2025-08-26 15:36:50,095 - WARNING - Incomplete OHLCV for LPT/EUR: got 21 of 22
+2025-08-26 15:37:00,754 - WARNING - Incomplete OHLCV for NPC/EUR: got 375 of 700
+2025-08-26 15:37:02,164 - WARNING - Incomplete OHLCV for NPC/USD: got 375 of 700
+2025-08-26 15:37:03,165 - WARNING - Incomplete OHLCV for ETH/EUR: got 21 of 22
+2025-08-26 15:37:07,640 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 15:37:09,215 - WARNING - Incomplete OHLCV for MOCA/EUR: got 39 of 700
+2025-08-26 15:37:10,211 - WARNING - Incomplete OHLCV for LPT/USD: got 21 of 22
+2025-08-26 15:37:10,215 - WARNING - Skipping MOCA/EUR: only 39/700 candles
+2025-08-26 15:37:13,616 - WARNING - Incomplete OHLCV for MOCA/USD: got 39 of 700
+2025-08-26 15:37:14,616 - WARNING - Skipping MOCA/USD: only 39/700 candles
+2025-08-26 15:37:15,826 - WARNING - Incomplete OHLCV for BERA/EUR: got 16 of 17
+2025-08-26 15:37:17,048 - WARNING - Incomplete OHLCV for M/USD: got 328 of 700
+2025-08-26 15:37:18,049 - WARNING - Skipping M/USD: only 328/700 candles
+2025-08-26 15:37:19,454 - WARNING - Incomplete OHLCV for NODE/USD: got 1 of 2
+2025-08-26 15:37:20,621 - WARNING - Incomplete OHLCV for ETH/USD: got 21 of 22
+2025-08-26 15:37:22,838 - WARNING - Skipping NODE/USD: only 160/700 candles
+2025-08-26 15:37:22,843 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 15:37:22,845 - INFO - Finished update for timeframe 4h
+2025-08-26 15:37:22,845 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 15:37:22,846 - INFO - Initial scan 56.7% complete
+2025-08-26 15:37:22,856 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 15:37:22,856 - INFO - Starting update for timeframe 1m
+2025-08-26 15:37:22,856 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 15:37:22,857 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 15:37:31,023 - WARNING - Incomplete OHLCV for SOL/USD: got 21 of 22
+2025-08-26 15:37:33,471 - WARNING - Incomplete OHLCV for ODOS/USD: got 45 of 46
+2025-08-26 15:37:34,819 - WARNING - Incomplete OHLCV for OGN/EUR: got 46 of 47
+2025-08-26 15:37:36,016 - WARNING - Incomplete OHLCV for OGN/USD: got 57 of 58
+2025-08-26 15:37:38,332 - WARNING - Incomplete OHLCV for OM/EUR: got 60 of 61
+2025-08-26 15:37:44,047 - WARNING - Incomplete OHLCV for XRP/USD: got 21 of 22
+2025-08-26 15:37:53,425 - WARNING - Incomplete OHLCV for OM/USD: got 62 of 63
+2025-08-26 15:37:54,815 - WARNING - Incomplete OHLCV for ONDO/EUR: got 69 of 70
+2025-08-26 15:37:55,819 - WARNING - Incomplete OHLCV for ONDO/USD: got 71 of 72
+2025-08-26 15:38:04,028 - WARNING - Incomplete OHLCV for NODE/USD: got 21 of 22
+2025-08-26 15:38:05,214 - WARNING - Incomplete OHLCV for OP/USD: got 49 of 50
+2025-08-26 15:38:06,628 - WARNING - Incomplete OHLCV for ORCA/EUR: got 51 of 52
+2025-08-26 15:38:08,644 - WARNING - Incomplete OHLCV for ORCA/USD: got 66 of 67
+2025-08-26 15:38:15,813 - WARNING - Incomplete OHLCV for ORDER/USD: got 43 of 44
+2025-08-26 15:38:17,033 - WARNING - Incomplete OHLCV for NMR/EUR: got 21 of 22
+2025-08-26 15:38:21,614 - WARNING - Incomplete OHLCV for OXT/EUR: got 55 of 56
+2025-08-26 15:38:26,220 - WARNING - Incomplete OHLCV for OXT/USD: got 50 of 51
+2025-08-26 15:38:31,203 - WARNING - Incomplete OHLCV for MAT/USD: got 21 of 22
+2025-08-26 15:38:33,427 - WARNING - Incomplete OHLCV for PARTI/EUR: got 73 of 74
+2025-08-26 15:38:34,619 - WARNING - Incomplete OHLCV for PARTI/USD: got 45 of 46
+2025-08-26 15:38:45,018 - WARNING - Incomplete OHLCV for MAT/EUR: got 21 of 22
+2025-08-26 15:38:52,434 - WARNING - Incomplete OHLCV for PEAQ/USD: got 47 of 48
+2025-08-26 15:38:54,674 - WARNING - Incomplete OHLCV for PEAQ/USDC: got 367 of 700
+2025-08-26 15:38:58,040 - WARNING - Incomplete OHLCV for NMR/USD: got 21 of 22
+2025-08-26 15:39:01,596 - WARNING - Incomplete OHLCV for PENGU/EUR: got 56 of 57
+2025-08-26 15:39:02,619 - WARNING - Incomplete OHLCV for PENGU/USD: got 69 of 70
+2025-08-26 15:39:06,229 - WARNING - Incomplete OHLCV for PENGU/USDT: got 62 of 63
+2025-08-26 15:39:12,335 - WARNING - Incomplete OHLCV for CRO/USDT: got 15 of 16
+2025-08-26 15:39:14,575 - WARNING - Incomplete OHLCV for PEPE/CAD: got 56 of 57
+2025-08-26 15:39:15,913 - WARNING - Incomplete OHLCV for PEPE/EUR: got 62 of 63
+2025-08-26 15:39:20,350 - WARNING - Incomplete OHLCV for PEPE/USD: got 65 of 66
+2025-08-26 15:39:23,829 - WARNING - Incomplete OHLCV for CRO/EUR: got 15 of 16
+2025-08-26 15:39:25,909 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 15:39:25,937 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 15:39:25,937 - INFO - Finished update for timeframe 1m
+2025-08-26 15:39:25,937 - INFO - Starting update for timeframe 5m
+2025-08-26 15:39:25,937 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 15:39:25,938 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 15:39:34,233 - WARNING - Incomplete OHLCV for CRO/USD: got 15 of 16
+2025-08-26 15:39:36,715 - WARNING - Incomplete OHLCV for ODOS/USD: got 1 of 2
+2025-08-26 15:39:47,328 - WARNING - Incomplete OHLCV for CLANKER/USD: got 15 of 16
+2025-08-26 15:40:04,825 - WARNING - Incomplete OHLCV for ORDER/USD: got 1 of 2
+2025-08-26 15:40:08,231 - WARNING - Incomplete OHLCV for GARI/USD: got 11 of 12
+2025-08-26 15:40:20,015 - WARNING - Incomplete OHLCV for PARTI/USD: got 2 of 3
+2025-08-26 15:40:21,521 - WARNING - Incomplete OHLCV for FIL/USD: got 11 of 12
+2025-08-26 15:40:34,428 - WARNING - Incomplete OHLCV for ETH/USDT: got 13 of 14
+2025-08-26 15:40:37,629 - WARNING - Incomplete OHLCV for PEAQ/USDC: got 75 of 700
+2025-08-26 15:40:48,218 - WARNING - Incomplete OHLCV for INIT/USD: got 8 of 9
+2025-08-26 15:40:57,433 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 15:40:58,707 - WARNING - Incomplete OHLCV for BONK/USD: got 17 of 18
+2025-08-26 15:40:59,838 - WARNING - Incomplete OHLCV for PEAQ/USDC: got 75 of 700
+2025-08-26 15:41:00,838 - WARNING - Skipping PEAQ/USDC: only 75/700 candles
+2025-08-26 15:41:00,845 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 15:41:00,847 - INFO - Finished update for timeframe 5m
+2025-08-26 15:41:00,847 - INFO - Starting update for timeframe 15m
+2025-08-26 15:41:00,847 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 15:41:00,847 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 15:41:07,045 - WARNING - Incomplete OHLCV for FIL/GBP: got 11 of 12
+2025-08-26 15:41:10,555 - WARNING - Incomplete OHLCV for ODOS/USD: got 7 of 8
+2025-08-26 15:41:19,836 - WARNING - Incomplete OHLCV for DEEP/USD: got 14 of 15
+2025-08-26 15:41:32,829 - WARNING - Incomplete OHLCV for FIL/EUR: got 11 of 12
+2025-08-26 15:41:38,617 - WARNING - Incomplete OHLCV for ORDER/USD: got 7 of 8
+2025-08-26 15:41:46,818 - WARNING - Incomplete OHLCV for FWOG/USD: got 11 of 12
+2025-08-26 15:41:55,024 - WARNING - Incomplete OHLCV for PARTI/USD: got 7 of 8
+2025-08-26 15:41:59,884 - WARNING - Incomplete OHLCV for GRIFFAIN/USD: got 9 of 10
+2025-08-26 15:42:11,496 - WARNING - Incomplete OHLCV for PEAQ/USDC: got 25 of 700
+2025-08-26 15:42:14,013 - WARNING - Incomplete OHLCV for GRIFFAIN/EUR: got 9 of 10
+2025-08-26 15:42:26,844 - WARNING - Incomplete OHLCV for GIGA/EUR: got 11 of 12
+2025-08-26 15:42:31,422 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 15:42:32,806 - WARNING - Incomplete OHLCV for PEAQ/USDC: got 25 of 700
+2025-08-26 15:42:33,806 - WARNING - Skipping PEAQ/USDC: only 25/700 candles
+2025-08-26 15:42:33,812 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 15:42:33,814 - INFO - Finished update for timeframe 15m
+2025-08-26 15:42:33,814 - INFO - Starting update for timeframe 1h
+2025-08-26 15:42:33,814 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 15:42:33,814 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 15:42:34,007 - WARNING - Incomplete OHLCV for BONK/EUR: got 17 of 18
+2025-08-26 15:42:44,478 - WARNING - Incomplete OHLCV for ODOS/USD: got 2 of 3
+2025-08-26 15:42:48,001 - WARNING - Incomplete OHLCV for GMT/USD: got 9 of 10
+2025-08-26 15:43:02,281 - WARNING - Incomplete OHLCV for GIGA/USD: got 9 of 10
+2025-08-26 15:43:12,670 - WARNING - Incomplete OHLCV for ORDER/USD: got 2 of 3
+2025-08-26 15:43:15,040 - WARNING - Incomplete OHLCV for EGLD/EUR: got 13 of 14
+2025-08-26 15:43:27,832 - WARNING - Incomplete OHLCV for JST/USD: got 8 of 9
+2025-08-26 15:43:29,311 - WARNING - Incomplete OHLCV for PARTI/USD: got 2 of 3
+2025-08-26 15:43:41,003 - WARNING - Incomplete OHLCV for DOGS/USD: got 14 of 15
+2025-08-26 15:43:45,416 - WARNING - Incomplete OHLCV for PEAQ/USDC: got 7 of 700
+2025-08-26 15:43:54,985 - WARNING - Incomplete OHLCV for DASH/USD: got 14 of 15
+2025-08-26 15:44:05,252 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 15:44:05,397 - WARNING - Incomplete OHLCV for ARKM/USD: got 20 of 21
+2025-08-26 15:44:07,645 - WARNING - Incomplete OHLCV for PEAQ/USDC: got 7 of 700
+2025-08-26 15:44:08,645 - WARNING - Skipping PEAQ/USDC: only 7/700 candles
+2025-08-26 15:44:08,651 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 15:44:08,653 - INFO - Finished update for timeframe 1h
+2025-08-26 15:44:08,653 - INFO - Starting update for timeframe 4h
+2025-08-26 15:44:08,653 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 15:44:08,653 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 15:44:14,820 - WARNING - Incomplete OHLCV for FWOG/EUR: got 11 of 12
+2025-08-26 15:44:18,427 - WARNING - Incomplete OHLCV for ODOS/USD: got 1 of 2
+2025-08-26 15:44:27,629 - WARNING - Incomplete OHLCV for BABY/USD: got 19 of 20
+2025-08-26 15:44:41,817 - WARNING - Incomplete OHLCV for CFG/EUR: got 16 of 17
+2025-08-26 15:44:46,420 - WARNING - Incomplete OHLCV for ORDER/USD: got 1 of 2
+2025-08-26 15:45:00,465 - WARNING - Incomplete OHLCV for PARTI/EUR: got 289 of 700
+2025-08-26 15:45:01,609 - WARNING - Incomplete OHLCV for PARTI/USD: got 1 of 2
+2025-08-26 15:45:03,040 - WARNING - Incomplete OHLCV for BEAM/USD: got 19 of 20
+2025-08-26 15:45:14,886 - WARNING - Incomplete OHLCV for PEAQ/EUR: got 333 of 700
+2025-08-26 15:45:15,890 - WARNING - Incomplete OHLCV for FIDA/USD: got 12 of 13
+2025-08-26 15:45:18,073 - WARNING - Incomplete OHLCV for PEAQ/USD: got 333 of 700
+2025-08-26 15:45:19,243 - WARNING - Incomplete OHLCV for PEAQ/USDC: got 3 of 700
+2025-08-26 15:45:30,016 - WARNING - Incomplete OHLCV for KAITO/USD: got 9 of 10
+2025-08-26 15:45:39,078 - INFO - Fetched OHLCV for 50/50 symbols on 4h
+2025-08-26 15:45:39,244 - WARNING - Incomplete OHLCV for FLOKI/USD: got 12 of 13
+2025-08-26 15:45:40,499 - WARNING - Incomplete OHLCV for PARTI/EUR: got 289 of 700
+2025-08-26 15:45:41,499 - WARNING - Skipping PARTI/EUR: only 289/700 candles
+2025-08-26 15:45:43,942 - WARNING - Incomplete OHLCV for PARTI/USD: got 1 of 2
+2025-08-26 15:45:45,082 - WARNING - Incomplete OHLCV for EGLD/USD: got 14 of 15
+2025-08-26 15:45:48,314 - WARNING - Skipping PARTI/USD: only 297/700 candles
+2025-08-26 15:45:49,912 - WARNING - Incomplete OHLCV for PEAQ/EUR: got 333 of 700
+2025-08-26 15:45:50,913 - WARNING - Skipping PEAQ/EUR: only 333/700 candles
+2025-08-26 15:45:51,100 - WARNING - Incomplete OHLCV for BLUR/USD: got 18 of 19
+2025-08-26 15:45:52,333 - WARNING - Incomplete OHLCV for PEAQ/USD: got 333 of 700
+2025-08-26 15:45:53,333 - WARNING - Skipping PEAQ/USD: only 333/700 candles
+2025-08-26 15:45:55,688 - WARNING - Incomplete OHLCV for PEAQ/USDC: got 3 of 700
+2025-08-26 15:45:56,688 - WARNING - Skipping PEAQ/USDC: only 3/700 candles
+2025-08-26 15:45:56,694 - INFO - Completed OHLCV update for timeframe 4h
+2025-08-26 15:45:56,696 - INFO - Finished update for timeframe 4h
+2025-08-26 15:45:56,696 - INFO - Updating regime cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 15:45:56,697 - INFO - Initial scan 61.1% complete
+2025-08-26 15:45:56,708 - INFO - Updating OHLCV cache for timeframes: ['1m', '5m', '15m', '1h', '4h']
+2025-08-26 15:45:56,708 - INFO - Starting update for timeframe 1m
+2025-08-26 15:45:56,708 - INFO - Starting OHLCV update for timeframe 1m
+2025-08-26 15:45:56,708 - INFO - Fetching 700 candles for 50 symbols on 1m
+2025-08-26 15:45:56,882 - WARNING - Incomplete OHLCV for HBAR/USD: got 10 of 11
+2025-08-26 15:46:02,784 - WARNING - Incomplete OHLCV for PHA/USD: got 58 of 59
+2025-08-26 15:46:07,479 - WARNING - Incomplete OHLCV for PNUT/EUR: got 83 of 84
+2025-08-26 15:46:10,897 - WARNING - Incomplete OHLCV for PNUT/USD: got 83 of 84
+2025-08-26 15:46:13,284 - WARNING - Incomplete OHLCV for POL/EUR: got 72 of 73
+2025-08-26 15:46:19,085 - WARNING - Incomplete OHLCV for ARKM/EUR: got 21 of 22
+2025-08-26 15:46:21,478 - WARNING - Incomplete OHLCV for POLIS/USD: got 80 of 81
+2025-08-26 15:46:27,398 - WARNING - Incomplete OHLCV for POL/USD: got 77 of 78
+2025-08-26 15:46:32,085 - WARNING - Incomplete OHLCV for GALA/USD: got 12 of 13
+2025-08-26 15:46:35,474 - WARNING - Incomplete OHLCV for PONKE/EUR: got 72 of 73
+2025-08-26 15:46:36,690 - WARNING - Incomplete OHLCV for PONKE/USD: got 74 of 75
+2025-08-26 15:46:37,907 - WARNING - Incomplete OHLCV for POPCAT/EUR: got 70 of 71
+2025-08-26 15:46:40,398 - WARNING - Incomplete OHLCV for POPCAT/GBP: got 60 of 61
+2025-08-26 15:46:46,088 - WARNING - Incomplete OHLCV for KAITO/EUR: got 9 of 10
+2025-08-26 15:46:48,478 - WARNING - Incomplete OHLCV for POPCAT/USD: got 79 of 80
+2025-08-26 15:46:49,690 - WARNING - Incomplete OHLCV for PORTAL/EUR: got 58 of 59
+2025-08-26 15:46:54,474 - WARNING - Incomplete OHLCV for POWR/EUR: got 57 of 58
+2025-08-26 15:46:57,879 - WARNING - Incomplete OHLCV for POWR/USD: got 64 of 65
+2025-08-26 15:46:59,082 - WARNING - Incomplete OHLCV for AXS/EUR: got 20 of 21
+2025-08-26 15:47:02,666 - WARNING - Incomplete OHLCV for PRCL/EUR: got 64 of 65
+2025-08-26 15:47:03,800 - WARNING - Incomplete OHLCV for PRCL/USD: got 77 of 78
+2025-08-26 15:47:07,431 - WARNING - Incomplete OHLCV for PRIME/EUR: got 83 of 84
+2025-08-26 15:47:11,876 - WARNING - Incomplete OHLCV for PRIME/USD: got 84 of 85
+2025-08-26 15:47:13,167 - WARNING - Incomplete OHLCV for JOE/USD: got 9 of 10
+2025-08-26 15:47:15,476 - WARNING - Incomplete OHLCV for PROMPT/EUR: got 53 of 54
+2025-08-26 15:47:18,019 - WARNING - Incomplete OHLCV for PROMPT/USD: got 52 of 53
+2025-08-26 15:47:23,807 - WARNING - Incomplete OHLCV for PSTAKE/USD: got 84 of 85
+2025-08-26 15:47:26,252 - WARNING - Incomplete OHLCV for GRASS/EUR: got 10 of 11
+2025-08-26 15:47:29,577 - WARNING - Incomplete OHLCV for PUFFER/USD: got 76 of 77
+2025-08-26 15:47:32,033 - WARNING - Incomplete OHLCV for PUMP/EUR: got 56 of 57
+2025-08-26 15:47:36,701 - WARNING - Incomplete OHLCV for PUMP/USD: got 54 of 55
+2025-08-26 15:47:44,879 - WARNING - Incomplete OHLCV for PYTH/EUR: got 73 of 74
+2025-08-26 15:47:47,254 - WARNING - Incomplete OHLCV for AXS/USD: got 20 of 21
+2025-08-26 15:47:48,420 - WARNING - Incomplete OHLCV for PYTH/USD: got 75 of 76
+2025-08-26 15:47:58,982 - WARNING - Incomplete OHLCV for QNT/EUR: got 69 of 70
+2025-08-26 15:48:00,094 - WARNING - Incomplete OHLCV for APE/USD: got 21 of 22
+2025-08-26 15:48:01,296 - WARNING - Incomplete OHLCV for QNT/USD: got 76 of 77
+2025-08-26 15:48:09,325 - INFO - Fetched OHLCV for 50/50 symbols on 1m
+2025-08-26 15:48:09,355 - INFO - Completed OHLCV update for timeframe 1m
+2025-08-26 15:48:09,355 - INFO - Finished update for timeframe 1m
+2025-08-26 15:48:09,355 - INFO - Starting update for timeframe 5m
+2025-08-26 15:48:09,355 - INFO - Starting OHLCV update for timeframe 5m
+2025-08-26 15:48:09,355 - INFO - Fetching 700 candles for 50 symbols on 5m
+2025-08-26 15:48:09,633 - WARNING - Incomplete OHLCV for INJ/EUR: got 9 of 10
+2025-08-26 15:48:21,133 - WARNING - Incomplete OHLCV for PNUT/EUR: got 8 of 9
+2025-08-26 15:48:22,490 - WARNING - Incomplete OHLCV for PNUT/USD: got 8 of 9
+2025-08-26 15:48:23,521 - WARNING - Incomplete OHLCV for INJ/USD: got 9 of 10
+2025-08-26 15:48:31,899 - WARNING - Incomplete OHLCV for POLIS/USD: got 8 of 9
+2025-08-26 15:48:35,292 - WARNING - Incomplete OHLCV for POL/USD: got 7 of 8
+2025-08-26 15:48:37,508 - WARNING - Incomplete OHLCV for BICO/USD: got 18 of 19
+2025-08-26 15:48:50,510 - WARNING - Incomplete OHLCV for GALA/EUR: got 12 of 13
+2025-08-26 15:48:51,740 - WARNING - Incomplete OHLCV for POPCAT/USD: got 7 of 8
+2025-08-26 15:49:02,471 - WARNING - Incomplete OHLCV for EUL/USD: got 14 of 15
+2025-08-26 15:49:03,500 - WARNING - Incomplete OHLCV for PRCL/USD: got 7 of 8
+2025-08-26 15:49:05,822 - WARNING - Incomplete OHLCV for PRIME/EUR: got 8 of 9
+2025-08-26 15:49:06,897 - WARNING - Incomplete OHLCV for PRIME/USD: got 8 of 9
+2025-08-26 15:49:08,156 - WARNING - Incomplete OHLCV for PROMPT/EUR: got 3 of 4
+2025-08-26 15:49:16,504 - WARNING - Incomplete OHLCV for ICX/EUR: got 9 of 10
+2025-08-26 15:49:17,527 - WARNING - Incomplete OHLCV for PROMPT/USD: got 3 of 4
+2025-08-26 15:49:19,928 - WARNING - Incomplete OHLCV for PSTAKE/USD: got 8 of 9
+2025-08-26 15:49:28,107 - WARNING - Incomplete OHLCV for PUMP/EUR: got 3 of 4
+2025-08-26 15:49:31,517 - WARNING - Incomplete OHLCV for PUMP/USD: got 3 of 4
+2025-08-26 15:49:51,401 - INFO - Fetched OHLCV for 50/50 symbols on 5m
+2025-08-26 15:49:51,426 - INFO - Completed OHLCV update for timeframe 5m
+2025-08-26 15:49:51,427 - INFO - Finished update for timeframe 5m
+2025-08-26 15:49:51,427 - INFO - Starting update for timeframe 15m
+2025-08-26 15:49:51,427 - INFO - Starting OHLCV update for timeframe 15m
+2025-08-26 15:49:51,427 - INFO - Fetching 700 candles for 50 symbols on 15m
+2025-08-26 15:50:23,363 - ERROR - WS OHLCV timeout for GMX/EUR on kraken (tf=5m limit=200 ws=True): 
+2025-08-26 15:50:23,364 - INFO - Falling back to REST fetch_ohlcv for GMX/EUR on 5m limit 200
+2025-08-26 15:50:33,598 - WARNING - Incomplete OHLCV for PROMPT/EUR: got 8 of 9
+2025-08-26 15:50:34,806 - WARNING - Incomplete OHLCV for ETH/CHF: got 15 of 16
+2025-08-26 15:50:36,001 - WARNING - Incomplete OHLCV for PROMPT/USD: got 8 of 9
+2025-08-26 15:50:47,580 - WARNING - Incomplete OHLCV for PUMP/EUR: got 8 of 9
+2025-08-26 15:50:48,789 - WARNING - Incomplete OHLCV for FHE/USD: got 13 of 14
+2025-08-26 15:50:51,391 - WARNING - Incomplete OHLCV for PUMP/USD: got 8 of 9
+2025-08-26 15:51:05,253 - WARNING - Incomplete OHLCV for QI/EUR: got 673 of 700
+2025-08-26 15:51:06,459 - WARNING - Incomplete OHLCV for QI/USD: got 673 of 700
+2025-08-26 15:51:13,270 - INFO - Fetched OHLCV for 50/50 symbols on 15m
+2025-08-26 15:51:13,292 - INFO - Completed OHLCV update for timeframe 15m
+2025-08-26 15:51:13,292 - INFO - Finished update for timeframe 15m
+2025-08-26 15:51:13,292 - INFO - Starting update for timeframe 1h
+2025-08-26 15:51:13,292 - INFO - Starting OHLCV update for timeframe 1h
+2025-08-26 15:51:13,292 - INFO - Fetching 700 candles for 50 symbols on 1h
+2025-08-26 15:51:54,268 - WARNING - Incomplete OHLCV for PROMPT/EUR: got 2 of 3
+2025-08-26 15:51:55,488 - WARNING - Incomplete OHLCV for PROMPT/USD: got 2 of 3
+2025-08-26 15:51:55,877 - ERROR - WS OHLCV timeout for INIT/EUR on kraken (tf=5m limit=200 ws=True): 
+2025-08-26 15:51:55,878 - INFO - Falling back to REST fetch_ohlcv for INIT/EUR on 5m limit 200
+2025-08-26 15:52:06,109 - WARNING - Incomplete OHLCV for PUMP/EUR: got 2 of 3
+2025-08-26 15:52:08,674 - WARNING - Incomplete OHLCV for BICO/EUR: got 19 of 20
+2025-08-26 15:52:10,647 - WARNING - Incomplete OHLCV for PUMP/USD: got 2 of 3
+2025-08-26 15:52:11,954 - WARNING - Incomplete OHLCV for PUPS/EUR: got 271 of 700
+2025-08-26 15:52:14,327 - WARNING - Incomplete OHLCV for PUPS/USD: got 271 of 700
+2025-08-26 15:52:22,471 - WARNING - Incomplete OHLCV for KAS/USD: got 10 of 11
+2025-08-26 15:52:34,121 - INFO - Fetched OHLCV for 50/50 symbols on 1h
+2025-08-26 15:52:35,284 - WARNING - Incomplete OHLCV for ALKIMI/USD: got 22 of 23
+2025-08-26 15:52:36,653 - WARNING - Incomplete OHLCV for PUPS/EUR: got 271 of 700
+2025-08-26 15:52:37,654 - WARNING - Skipping PUPS/EUR: only 271/700 candles
+2025-08-26 15:52:39,066 - WARNING - Incomplete OHLCV for PUPS/USD: got 271 of 700
+2025-08-26 15:52:40,067 - WARNING - Skipping PUPS/USD: only 271/700 candles
+2025-08-26 15:52:40,072 - INFO - Completed OHLCV update for timeframe 1h
+2025-08-26 15:52:40,075 - INFO - Finished update for timeframe 1h
+2025-08-26 15:52:40,075 - INFO - Starting update for timeframe 4h
+2025-08-26 15:52:40,075 - INFO - Starting OHLCV update for timeframe 4h
+2025-08-26 15:52:40,075 - INFO - Fetching 700 candles for 50 symbols on 4h
+2025-08-26 15:52:40,613 - WARNING - Incomplete OHLCV for CCD/EUR: got 18 of 19
+2025-08-26 15:52:54,408 - WARNING - Incomplete OHLCV for FLOKI/EUR: got 13 of 14
+2025-08-26 15:53:08,452 - WARNING - Incomplete OHLCV for BAT/USD: got 21 of 22
+2025-08-26 15:53:21,421 - WARNING - Incomplete OHLCV for ETH/AUD: got 15 of 16
+2025-08-26 15:53:30,811 - WARNING - Incomplete OHLCV for PROMPT/EUR: got 1 of 2
+2025-08-28 14:55:18,615 - INFO - Calculated trailing stop 114.0000 from high 120.0000
+2025-08-28 14:55:18,615 - INFO - Calculated short trailing stop 105.0000 from low 100.0000
+2025-08-28 14:55:18,620 - INFO - Calculated ATR trailing stop nan using high 120.0000 and ATR nan
+2025-08-28 14:55:18,623 - INFO - Calculated ATR short trailing stop nan using low 100.0000 and ATR nan
+2025-08-28 14:55:18,623 - INFO - Take profit hit at 113.0000 (target: 110.0000) for long position
+2025-08-28 14:55:18,625 - INFO - Price 110.0000 hit trailing stop 114.0000 for long position
+2025-08-28 14:55:18,625 - INFO - Take profit hit at 105.0000 (target: 108.0000) for short position
+2025-08-28 14:57:38,163 - INFO - Calculated trailing stop 114.0000 from high 120.0000
+2025-08-28 14:57:38,163 - INFO - Calculated short trailing stop 105.0000 from low 100.0000
+2025-08-28 14:57:38,168 - WARNING - Cached ATR failed, using fallback calculation
+2025-08-28 14:57:38,169 - WARNING - Fallback ATR also failed, using percentage-based stop
+2025-08-28 14:57:38,171 - WARNING - Cached ATR failed, using fallback calculation
+2025-08-28 14:57:38,171 - WARNING - Fallback ATR also failed, using percentage-based stop
+2025-08-28 14:57:38,172 - INFO - Take profit hit at 113.0000 (target: 110.0000) for long position
+2025-08-28 14:57:38,173 - INFO - Price 110.0000 hit trailing stop 114.0000 for long position
+2025-08-28 14:57:38,173 - INFO - Take profit hit at 105.0000 (target: 108.0000) for short position
+2025-08-28 15:20:34,886 - INFO - Paper trade force closed: buy 0.1 BTC/USDT @ $50000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:20:34,887 - INFO - Paper trade force closed: sell 1.0 ETH/USDT @ $3000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:21:33,599 - INFO - Paper trade force closed: buy 0.1 BTC/USDT @ $50000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:21:33,600 - INFO - Paper trade force closed: sell 1.0 ETH/USDT @ $3000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:22:17,256 - INFO - Paper trade force closed: buy 0.1 BTC/USDT @ $50000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:22:17,257 - INFO - Paper trade force closed: sell 1.0 ETH/USDT @ $3000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:24:45,299 - INFO - Paper trade force closed: buy 0.1 BTC/USDT @ $50000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:24:45,299 - INFO - Paper trade force closed: sell 1.0 ETH/USDT @ $3000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:25:10,980 - INFO - Paper trade force closed: buy 0.1 BTC/USDT @ $50000.000000, PnL: $0.00, balance: $10000.00
+2025-08-28 15:25:10,981 - INFO - Paper trade force closed: sell 1.0 ETH/USDT @ $3000.000000, PnL: $0.00, balance: $10000.00
