@@ -22,7 +22,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from telegram_ctl import _paginate, get_page, set_page
+from .telegram_ctl import _paginate
 
 from crypto_bot.portfolio_rotator import PortfolioRotator
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
@@ -609,21 +609,8 @@ class TelegramBotUI:
             return
         if not await self._check_admin(update):
             return
-        chat_id = self._get_chat_id(update)
-        page = get_page(chat_id, "trade_history")
-        if getattr(update, "callback_query", None):
-            if update.callback_query.data == "next":
-                page += 1
-            elif update.callback_query.data == "prev":
-                page = max(0, page - 1)
-            else:
-                page = 0
-            await update.callback_query.answer()
-        else:
-            page = 0
-        set_page(chat_id, "trade_history", page)
         lines: list[str] = []
         if TRADES_FILE.exists():
             lines = TRADES_FILE.read_text().splitlines()[-100:]
-        text, markup = _paginate(lines, page)
+        text, markup = _paginate(lines, 0)
         await self._reply(update, text, reply_markup=markup)

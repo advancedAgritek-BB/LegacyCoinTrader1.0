@@ -14,7 +14,10 @@ from .pair_cache import load_liquid_pairs
 # heavy async dependencies and some environments may not need it during
 # initialization. Import it lazily where required.
 from .symbol_utils import get_filtered_symbols, fix_symbol
+from .symbol_pre_filter import filter_symbols, has_enough_history
 from .strategy_analytics import compute_metrics, write_scores, write_stats
+from .regime_pnl_tracker import compute_weights
+from .market_analyzer import analyze_symbol, classify_regime_async, classify_regime_cached
 from .stats import zscore
 from .commit_lock import check_and_update
 from .telemetry import telemetry
@@ -24,3 +27,4 @@ except Exception:  # pragma: no cover - optional dependency
     utils_get_solana_new_tokens = None
 from .pyth import get_pyth_price
 from .pyth_utils import get_pyth_price
+from .telegram import TelegramNotifier, send_message, is_admin

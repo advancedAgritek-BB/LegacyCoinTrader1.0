@@ -8,18 +8,19 @@ from datetime import datetime
 import pandas as pd
 
 
-from crypto_bot.strategy import (
-    trend_bot,
-    grid_bot,
-    sniper_bot,
-    dex_scalper,
-    dca_bot,
-    mean_bot,
-    breakout_bot,
-    micro_scalp_bot,
-    bounce_scalper,
-    solana_scalping,
-)
+# Lazy imports to avoid circular dependencies
+# from crypto_bot.strategy import (
+#     trend_bot,
+#     grid_bot,
+#     sniper_bot,
+#     dex_scalper,
+#     dca_bot,
+#     mean_bot,
+#     breakout_bot,
+#     micro_scalp_bot,
+#     bounce_scalper,
+#     solana_scalping,
+# )
 
 LOG_FILE = LOG_DIR / "strategy_performance.json"
 MODEL_PATH = Path(__file__).resolve().parent / "models" / "meta_selector_lgbm.txt"
@@ -66,32 +67,75 @@ class MetaRegressor:
         return {k: float(v) for k, v in zip(df.index, preds)}
 
 
-_STRATEGY_FN_MAP = {
-    "trend": trend_bot.generate_signal,
-    "trend_bot": trend_bot.generate_signal,
-    "grid": grid_bot.generate_signal,
-    "grid_bot": grid_bot.generate_signal,
-    "sniper": sniper_bot.generate_signal,
-    "sniper_bot": sniper_bot.generate_signal,
-    "dex_scalper": dex_scalper.generate_signal,
-    "dex_scalper_bot": dex_scalper.generate_signal,
-    "mean_bot": mean_bot.generate_signal,
-    "breakout_bot": breakout_bot.generate_signal,
-    "micro_scalp": micro_scalp_bot.generate_signal,
-    "micro_scalp_bot": micro_scalp_bot.generate_signal,
-    "bounce_scalper": bounce_scalper.generate_signal,
-    "bounce_scalper_bot": bounce_scalper.generate_signal,
-    "solana_scalping": solana_scalping.generate_signal,
-    "solana_scalping_bot": solana_scalping.generate_signal,
-    "dca": dca_bot.generate_signal,
-    "dca_bot": dca_bot.generate_signal,
-}
+def _get_strategy_function(strategy_name: str):
+    """Lazy import strategy functions to avoid circular dependencies."""
+    try:
+        if strategy_name in ["trend", "trend_bot"]:
+            from crypto_bot.strategy import trend_bot
+            return trend_bot.generate_signal
+        elif strategy_name in ["grid", "grid_bot"]:
+            from crypto_bot.strategy import grid_bot
+            return grid_bot.generate_signal
+        elif strategy_name in ["sniper", "sniper_bot"]:
+            from crypto_bot.strategy import sniper_bot
+            return sniper_bot.generate_signal
+        elif strategy_name in ["dex_scalper", "dex_scalper_bot"]:
+            from crypto_bot.strategy import dex_scalper
+            return dex_scalper.generate_signal
+        elif strategy_name in ["mean_bot"]:
+            from crypto_bot.strategy import mean_bot
+            return mean_bot.generate_signal
+        elif strategy_name in ["breakout_bot"]:
+            from crypto_bot.strategy import breakout_bot
+            return breakout_bot.generate_signal
+        elif strategy_name in ["micro_scalp", "micro_scalp_bot"]:
+            from crypto_bot.strategy import micro_scalp_bot
+            return micro_scalp_bot.generate_signal
+        elif strategy_name in ["bounce_scalper", "bounce_scalper_bot"]:
+            from crypto_bot.strategy import bounce_scalper
+            return bounce_scalper.generate_signal
+        elif strategy_name in ["solana_scalping", "solana_scalping_bot"]:
+            from crypto_bot.strategy import solana_scalping
+            return solana_scalping.generate_signal
+        elif strategy_name in ["dca", "dca_bot"]:
+            from crypto_bot.strategy import dca_bot
+            return dca_bot.generate_signal
+        else:
+            return None
+    except ImportError:
+        return None
+
+# Strategy map will be populated lazily when needed
+_STRATEGY_FN_MAP = {}
 
 
 def get_strategy_by_name(
     name: str,
 ) -> Callable[[pd.DataFrame], tuple] | None:
     """Return the strategy function mapped to ``name`` if present."""
+    # Populate the strategy map lazily if it's empty
+    if not _STRATEGY_FN_MAP:
+        _STRATEGY_FN_MAP.update({
+            "trend": _get_strategy_function("trend"),
+            "trend_bot": _get_strategy_function("trend_bot"),
+            "grid": _get_strategy_function("grid"),
+            "grid_bot": _get_strategy_function("grid_bot"),
+            "sniper": _get_strategy_function("sniper"),
+            "sniper_bot": _get_strategy_function("sniper_bot"),
+            "dex_scalper": _get_strategy_function("dex_scalper"),
+            "dex_scalper_bot": _get_strategy_function("dex_scalper_bot"),
+            "mean_bot": _get_strategy_function("mean_bot"),
+            "breakout_bot": _get_strategy_function("breakout_bot"),
+            "micro_scalp": _get_strategy_function("micro_scalp"),
+            "micro_scalp_bot": _get_strategy_function("micro_scalp_bot"),
+            "bounce_scalper": _get_strategy_function("bounce_scalper"),
+            "bounce_scalper_bot": _get_strategy_function("bounce_scalper_bot"),
+            "solana_scalping": _get_strategy_function("solana_scalping"),
+            "solana_scalping_bot": _get_strategy_function("solana_scalping_bot"),
+            "dca": _get_strategy_function("dca"),
+            "dca_bot": _get_strategy_function("dca_bot"),
+        })
+    
     return _STRATEGY_FN_MAP.get(name)
 
 

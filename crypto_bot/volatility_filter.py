@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 import pandas as pd
+import numpy as np
 import requests
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger

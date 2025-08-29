@@ -17,7 +17,7 @@ from crypto_bot.utils.volatility import normalize_score_by_volatility, atr_perce
 from crypto_bot.volatility_filter import calc_atr
 
 DYNAMIC_THRESHOLD = 1.5
-from . import breakout_bot, micro_scalp_bot
+# from . import breakout_bot, micro_scalp_bot  # Removed circular import
 from crypto_bot.utils.regime_pnl_tracker import get_recent_win_rate
 
 

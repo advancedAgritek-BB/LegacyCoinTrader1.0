@@ -29,7 +29,7 @@ from crypto_bot.utils.rank_logger import log_second_place
 from crypto_bot.strategy import grid_bot
 from crypto_bot.volatility_filter import calc_atr
 from ta.volatility import BollingerBands
-from crypto_bot.utils import zscore
+from .stats import zscore
 from crypto_bot.utils.telemetry import telemetry
 
 
