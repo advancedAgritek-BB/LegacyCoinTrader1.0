@@ -1,6 +1,6 @@
-from typing import Union
 from __future__ import annotations
 
+from typing import Union, List, Dict, Tuple
 import argparse
 import asyncio
 import json
@@ -41,29 +41,40 @@ def _parse_interval(value: Union[str, int, float]) -> float:
 
 
 def load_config() -> dict:
-    """Load YAML configuration if available."""
-    if CONFIG_PATH.exists():
-        with open(CONFIG_PATH) as f:
-            data = yaml.safe_load(f) or {}
-    else:
+    """Load YAML configuration if available with better error handling."""
+    try:
+        if CONFIG_PATH.exists():
+            with open(CONFIG_PATH) as f:
+                data = yaml.safe_load(f) or {}
+        else:
+            data = {}
+    except Exception as exc:
+        logger.warning("Failed to load main config: %s", exc)
         data = {}
 
-    strat_dir = CONFIG_PATH.parent.parent / "config" / "strategies"
-    trend_file = strat_dir / "trend_bot.yaml"
-    if trend_file.exists():
-        with open(trend_file) as sf:
-            overrides = yaml.safe_load(sf) or {}
-        trend_cfg = data.get("trend", {})
-        if isinstance(trend_cfg, dict):
-            trend_cfg.update(overrides)
-        else:
-            trend_cfg = overrides
-        data["trend"] = trend_cfg
+    try:
+        strat_dir = CONFIG_PATH.parent.parent / "config" / "strategies"
+        trend_file = strat_dir / "trend_bot.yaml"
+        if trend_file.exists():
+            with open(trend_file) as sf:
+                overrides = yaml.safe_load(sf) or {}
+            trend_cfg = data.get("trend", {})
+            if isinstance(trend_cfg, dict):
+                trend_cfg.update(overrides)
+            else:
+                trend_cfg = overrides
+            data["trend"] = trend_cfg
+    except Exception as exc:
+        logger.warning("Failed to load trend config: %s", exc)
 
-    if "symbol" in data:
-        data["symbol"] = fix_symbol(data["symbol"])
-    if "symbols" in data:
-        data["symbols"] = [fix_symbol(s) for s in data.get("symbols", [])]
+    try:
+        if "symbol" in data:
+            data["symbol"] = fix_symbol(data["symbol"])
+        if "symbols" in data:
+            data["symbols"] = [fix_symbol(s) for s in data.get("symbols", [])]
+    except Exception as exc:
+        logger.warning("Failed to fix symbols: %s", exc)
+    
     return data
 
 
@@ -81,6 +92,7 @@ async def _fetch_tickers(exchange: ccxt.Exchange) -> dict:
 
 
 async def _close_exchange(exchange: ccxt.Exchange) -> None:
+    """Safely close exchange connection with better error handling."""
     close = getattr(exchange, "close", None)
     if close:
         try:
@@ -88,7 +100,8 @@ async def _close_exchange(exchange: ccxt.Exchange) -> None:
                 await close()
             else:
                 close()
-        except Exception:  # pragma: no cover - best effort
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.debug("Failed to close exchange gracefully: %s", exc)
             pass
 
 
@@ -238,34 +251,44 @@ def refresh_pairs(min_volume_usd: float, top_k: int, config: dict) -> List[str]:
 
 
 def main() -> None:
-    cfg = load_config()
-    rp_cfg = cfg.get("refresh_pairs", {})
+    """Main function with improved error handling."""
+    try:
+        cfg = load_config()
+        rp_cfg = cfg.get("refresh_pairs", {})
 
-    parser = argparse.ArgumentParser(description="Refresh liquid trading pairs")
-    parser.add_argument("--once", action="store_true", help="Run once and exit")
-    parser.add_argument(
-        "--min-quote-volume-usd",
-        type=float,
-        default=float(rp_cfg.get("min_quote_volume_usd", DEFAULT_MIN_VOLUME_USD)),
-    )
-    parser.add_argument("--top-k", type=int, default=int(rp_cfg.get("top_k", DEFAULT_TOP_K)))
-    parser.add_argument(
-        "--refresh-interval",
-        type=float,
-        default=_parse_interval(rp_cfg.get("refresh_interval", DEFAULT_REFRESH_INTERVAL)),
-        help="Refresh interval in seconds",
-    )
-    args = parser.parse_args()
+        parser = argparse.ArgumentParser(description="Refresh liquid trading pairs")
+        parser.add_argument("--once", action="store_true", help="Run once and exit")
+        parser.add_argument(
+            "--min-quote-volume-usd",
+            type=float,
+            default=float(rp_cfg.get("min_quote_volume_usd", DEFAULT_MIN_VOLUME_USD)),
+        )
+        parser.add_argument("--top-k", type=int, default=int(rp_cfg.get("top_k", DEFAULT_TOP_K)))
+        parser.add_argument(
+            "--refresh-interval",
+            type=float,
+            default=_parse_interval(rp_cfg.get("refresh_interval", DEFAULT_REFRESH_INTERVAL)),
+            help="Refresh interval in seconds",
+        )
+        args = parser.parse_args()
 
-    while True:
-        try:
-            pairs = refresh_pairs(args.min_quote_volume_usd, args.top_k, cfg)
-            print(f"Updated {PAIR_FILE} with {len(pairs)} pairs")
-        except Exception as exc:  # pragma: no cover - network failures
-            print(f"Failed to refresh pairs: {exc}")
-        if args.once:
-            break
-        time.sleep(args.refresh_interval)
+        while True:
+            try:
+                pairs = refresh_pairs(args.min_quote_volume_usd, args.top_k, cfg)
+                print(f"Updated {PAIR_FILE} with {len(pairs)} pairs")
+            except KeyboardInterrupt:
+                print("\nInterrupted by user")
+                break
+            except Exception as exc:  # pragma: no cover - network failures
+                print(f"Failed to refresh pairs: {exc}")
+                logger.error("Failed to refresh pairs: %s", exc)
+            if args.once:
+                break
+            time.sleep(args.refresh_interval)
+    except Exception as exc:
+        print(f"Fatal error: {exc}")
+        logger.error("Fatal error in main: %s", exc)
+        raise
 
 
 if __name__ == "__main__":

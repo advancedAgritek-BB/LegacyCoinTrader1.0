@@ -1,3 +1,5 @@
+from typing import Optional, Dict
+
 class CapitalTracker:
     """Track capital usage per strategy."""
 

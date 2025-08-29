@@ -8,9 +8,9 @@
 # lightgbm
 
 # Performance optimization for macOS
-mkl>=2023.0.0  # Intel Math Kernel Library (works on Intel Macs)
-openblas>=0.3.0  # OpenBLAS for linear algebra
-accelerate>=0.20.0  # Apple's performance framework
+# Note: mkl and openblas are not available on macOS via pip
+# Using numpy and scipy which include optimized BLAS implementations
+# accelerate>=0.20.0  # Apple's performance framework (removed - not available via pip)
 
 # Parallel processing
 joblib>=1.3.0  # Parallel processing
@@ -32,6 +32,7 @@ memory-profiler>=0.61.0  # Memory usage profiling
 pytest>=7.0.0  # Testing framework
 pytest-asyncio>=0.21.0  # Async testing support
 
-# macOS-specific optimizations
-pyobjc-framework-Accelerate>=9.0  # Apple's Accelerate framework
-pyobjc-framework-Metal>=9.0  # Metal framework for compute (if available)
+# macOS-specific optimizations (using conda-forge versions if needed)
+# Note: pyobjc packages are not available via pip on all macOS versions
+# These are optional and can be installed via conda if needed:
+# conda install -c conda-forge pyobjc-framework-accelerate pyobjc-framework-metal

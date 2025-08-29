@@ -1,5 +1,5 @@
-from typing import Optional
 from __future__ import annotations
+from typing import Optional, List
 
 import os
 from pydantic import BaseModel, Field, ValidationError, validator

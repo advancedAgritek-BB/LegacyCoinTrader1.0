@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import dataclasses
-from typing import Any, Optional, Mapping
+from typing import Any, Optional, Mapping, Tuple, Dict
 
 import pandas as pd
 from math import isnan

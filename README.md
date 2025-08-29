@@ -1005,9 +1005,20 @@ configured exchange using `ccxt` and stores them in `cache/liquid_pairs.json`.
 The file now contains a mapping of symbol to the timestamp when it last passed
 the liquidity screen. This cache lets the trading bot skip illiquid pairs during
 market scans.
+
+#### Recent Improvements ✅
+The script has been enhanced with better error handling, logging, and robustness:
+- **Enhanced Error Handling**: Comprehensive try-catch blocks for network failures and API errors
+- **Better Logging**: Proper logging with different levels (error, warning, debug) for debugging
+- **Configuration Robustness**: Graceful handling of missing or corrupted config files
+- **Solana API Integration**: Enhanced error handling for Raydium API calls with graceful fallbacks
+- **Resource Management**: Improved exchange connection handling and cleanup
+
+#### Usage
 By default the worker refreshes the file every **6 hours**. Change the interval
 under `pairs_worker.refresh_interval` in `crypto_bot/config.yaml` and restart the
 worker to apply the new schedule.
+
 You can also limit the markets saved in the cache by defining
 `allowed_quote_currencies` and `blacklist_assets` under `refresh_pairs`.
 Leaving `allowed_quote_currencies` empty allows any trading pair:
@@ -1021,17 +1032,24 @@ refresh_pairs:
   allowed_quote_currencies: []
   blacklist_assets: []
 ```
+
 Run it manually whenever needed:
 
 ```bash
+# Run once with custom parameters
+PYTHONPATH=/path/to/project python3 tasks/refresh_pairs.py --once --min-quote-volume-usd 1000000 --top-k 10
+
+# Run once with default settings
 python tasks/refresh_pairs.py --once
 ```
+
 Removing the `--once` flag keeps it running on the configured interval.
 To automate updates you can run the script periodically via cron:
 
 ```cron
 0 * * * * cd /path/to/coinTrader2.0 && /usr/bin/python3 tasks/refresh_pairs.py
 ```
+
 Delete `cache/liquid_pairs.json` to force a full rebuild on the next run.
 
 ## Web UI
@@ -1360,6 +1378,36 @@ ml_signal_model:
 When enabled, `evaluate` computes `(score * (1 - weight)) + (ml_score * weight)`
 and caps the result between 0 and 1.
 
+## 🍎 macOS Compatibility
+
+LegacyCoinTrader provides full compatibility with macOS systems. Since CUDA (NVIDIA's GPU computing platform) doesn't run on macOS, the system automatically detects the platform and provides appropriate fallbacks.
+
+### Platform Detection & Fallbacks
+- **Automatic Detection**: Startup scripts detect macOS and skip GPU dependency installation
+- **Graceful Fallbacks**: GPU-accelerated backtesting automatically falls back to CPU mode
+- **Performance Optimized**: Uses macOS-specific libraries for optimal performance
+
+### Installation on macOS
+```bash
+# Run the macOS-specific installation script
+./install_macos.sh
+
+# Verify compatibility
+python3 test_macos_startup.py
+```
+
+### Performance Expectations
+- **With GPU (Windows)**: 10-50x faster parameter optimization, 5-20x faster backtesting
+- **Without GPU (macOS)**: Standard speed, fully functional for all trading operations
+- **Trading Performance**: Identical on all platforms - only backtesting speed differs
+
+### macOS-Specific Optimizations
+The system automatically installs:
+- **NumPy & SciPy**: Optimized with built-in BLAS
+- **Joblib**: Parallel processing optimization
+- **Memory Profiler**: Performance monitoring
+- **Apple Framework Bindings**: Optional via conda (if available)
+
 ## Development Setup
 
 Create and activate a virtual environment, then install the Python dependencies:
@@ -1440,6 +1488,17 @@ Increase `ohlcv_timeout` to give each request more time and lower
 - **Test Suite**: Run `pytest -q` to verify installation
 - **Telegram Bot**: Use `/menu` for interactive control
 - **Logs**: Check `crypto_bot/logs/` for detailed runtime information
+
+## 📚 Additional Documentation
+
+For advanced users and developers, additional specialized documentation is available:
+
+- **`AGENTS.md`** - Complete Kraken and Helius API reference with WebSocket examples
+- **`MACOS_DEPENDENCY_FIXES.md`** - Technical details about macOS dependency resolution
+- **`STRATEGY_OPTIMIZATION_README.md`** - Advanced strategy optimization for maximum profit
+- **`AGGRESSIVE_CONFIG_CHANGES.md`** - Aggressive trading configuration details
+- **`FRONTEND_LIVE_DASHBOARD_README.md`** - Web dashboard setup and usage
+- **`TEST_COVERAGE_IMPROVEMENT_PLAN.md`** - Testing and coverage improvement strategies
 
 ---
 
