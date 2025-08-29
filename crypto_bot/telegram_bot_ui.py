@@ -39,6 +39,7 @@ def _paginate(items: List[str], page: int = 0, items_per_page: int = 10) -> tupl
 from crypto_bot.portfolio_rotator import PortfolioRotator
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 from crypto_bot.utils.telegram import TelegramNotifier, is_admin
+from crypto_bot.log_reader import trade_summary
 
 # Remove duplicate imports that cause circular dependencies
 # from crypto_bot import log_reader, console_monitor
@@ -331,7 +332,7 @@ class TelegramBotUI:
             await self._reply(update, "Rotation failed", reply_markup=_back_to_menu_markup())
 
     def send_daily_summary(self) -> None:
-        stats = log_reader.trade_summary(str(LOG_DIR / "trades.csv"))
+        stats = trade_summary(str(LOG_DIR / "trades.csv"))
         msg = (
             "Daily Summary\n"
             f"Trades: {stats['num_trades']}\n"
@@ -521,12 +522,8 @@ class TelegramBotUI:
             
             text = "\n".join(lines)
         else:
-            # Live trading mode - use existing trade stats
-            if TRADES_FILE.exists():
-                lines = await console_monitor.trade_stats_lines(self.exchange, TRADES_FILE)
-                text = "\n".join([f"💰 Live Trading", ""] + lines) if lines else "💰 Live Trading\n(no trades)"
-            else:
-                text = "💰 Live Trading\nNo trades found"
+            # Live trading mode - try to read trades from file
+            text = _process_trades_for_display(TRADES_FILE)
                 
         await self._reply(update, text, reply_markup=_back_to_menu_markup())
 
@@ -605,7 +602,7 @@ class TelegramBotUI:
         if not await self._check_admin(update):
             return
         if TRADES_FILE.exists():
-            stats = log_reader.trade_summary(TRADES_FILE)
+            stats = trade_summary(TRADES_FILE)
             text = (
                 f"Total PnL: {stats['total_pnl']:.2f}\n"
                 f"Win rate: {stats['win_rate']*100:.1f}%\n"
@@ -625,5 +622,73 @@ class TelegramBotUI:
         lines: list[str] = []
         if TRADES_FILE.exists():
             lines = TRADES_FILE.read_text().splitlines()[-100:]
-        text, markup = _paginate(lines, 0)
-        await self._reply(update, text, reply_markup=markup)
+        text, page, total_pages = _paginate(lines, 0)
+        # Join the lines into a string for display
+        display_text = "\n".join(text) if text else "No trades found"
+        await self._reply(update, display_text, reply_markup=_back_to_menu_markup())
+
+
+def _process_trades_for_display(trades_file: Path) -> str:
+    """Process trades file and return formatted display text with PnL."""
+    if not trades_file.exists():
+        return "No trades file found"
+    
+    try:
+        lines = trades_file.read_text().splitlines()
+        if not lines:
+            return "No trades found"
+        
+        # Simple trade processing - assume format: symbol,side,amount,price,timestamp
+        trades = []
+        for line in lines:
+            parts = line.split(',')
+            if len(parts) >= 4:
+                symbol = parts[0]
+                side = parts[1]
+                amount = float(parts[2]) if parts[2].replace('.', '').replace('-', '').isdigit() else 0
+                price = float(parts[3]) if parts[3].replace('.', '').replace('-', '').isdigit() else 0
+                trades.append((symbol, side, amount, price))
+        
+        if not trades:
+            return "No valid trades found"
+        
+        # Calculate simple PnL (this is a simplified version)
+        total_pnl = 0.0
+        formatted_trades = []
+        positions = {}  # Track open positions
+        
+        for symbol, side, amount, price in trades[-10:]:  # Show last 10 trades
+            if side == 'buy':
+                formatted_trades.append(f"📈 {symbol}: BUY {amount:.4f} @ ${price:.2f}")
+                # Track buy position
+                if symbol not in positions:
+                    positions[symbol] = {'amount': amount, 'avg_price': price}
+                else:
+                    # Update average price for existing position
+                    total_cost = positions[symbol]['amount'] * positions[symbol]['avg_price'] + amount * price
+                    total_amount = positions[symbol]['amount'] + amount
+                    positions[symbol]['avg_price'] = total_cost / total_amount
+                    positions[symbol]['amount'] += amount
+                    
+            elif side == 'sell':
+                formatted_trades.append(f"📉 {symbol}: SELL {amount:.4f} @ ${price:.2f}")
+                # Calculate PnL if we have a buy position
+                if symbol in positions and positions[symbol]['amount'] > 0:
+                    sell_amount = min(amount, positions[symbol]['amount'])
+                    pnl = (price - positions[symbol]['avg_price']) * sell_amount
+                    total_pnl += pnl
+                    
+                    # Update position
+                    positions[symbol]['amount'] -= sell_amount
+                    if positions[symbol]['amount'] <= 0:
+                        del positions[symbol]
+        
+        text = "💰 Live Trading\n\nRecent Trades:\n" + "\n".join(formatted_trades)
+        if total_pnl != 0:
+            pnl_text = f"+${total_pnl:.2f}" if total_pnl > 0 else f"-${abs(total_pnl):.2f}"
+            text += f"\n\nTotal PnL: {pnl_text}"
+        
+        return text
+        
+    except Exception as e:
+        return f"Error processing trades: {e}"

@@ -74,7 +74,7 @@ async def fake_fetch(_):
 
 def test_filter_symbols(monkeypatch):
     monkeypatch.setattr(
-        "crypto_bot.utils.symbol_pre_filter._fetch_ticker_async", fake_fetch
+        "sp._fetch_ticker_async", fake_fetch
     )
     symbols = asyncio.run(
         filter_symbols(DummyExchange(), ["ETH/USD", "BTC/USD"], CONFIG)
