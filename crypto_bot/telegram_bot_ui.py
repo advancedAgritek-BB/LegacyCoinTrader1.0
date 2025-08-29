@@ -79,6 +79,7 @@ class TelegramBotUI:
         exchange: object | None = None,
         wallet: str | None = None,
         command_cooldown: float = 5,
+        paper_wallet: object | None = None,
     ) -> None:
         self.notifier = notifier
         self.token = notifier.token
@@ -86,9 +87,10 @@ class TelegramBotUI:
         self.state = state
         self.log_file = Path(log_file)
         self.rotator = rotator
-        self.controller = BotController(state, exchange, log_file=self.log_file, trades_file=TRADES_FILE)
+        self.controller = BotController(state, exchange, log_file=self.log_file, trades_file=TRADES_FILE, paper_wallet=paper_wallet)
         self.exchange = exchange
         self.wallet = wallet
+        self.paper_wallet = paper_wallet
         self.command_cooldown = command_cooldown
         self._last_exec: Dict[tuple[str, str], float] = {}
         self.logger = setup_logger(__name__, LOG_DIR / "telegram_ui.log")
@@ -414,25 +416,55 @@ class TelegramBotUI:
             return
         if not await self._check_admin(update):
             return
-        if not self.exchange:
-            await self._reply(update, "Exchange not configured", reply_markup=_back_to_menu_markup())
-            return
+        
+        # Check if we're in paper trading mode by looking for paper wallet
+        paper_wallet = self.paper_wallet or getattr(self.controller, 'paper_wallet', None)
+        
         try:
-            if asyncio.iscoroutinefunction(getattr(self.exchange, "fetch_balance", None)):
-                bal = await self.exchange.fetch_balance()
+            # In paper trading mode, show paper wallet balance
+            if paper_wallet and hasattr(paper_wallet, 'balance'):
+                summary = paper_wallet.get_position_summary()
+                lines = [
+                    f"📄 Paper Trading Mode",
+                    f"Balance: ${summary['balance']:.2f}",
+                    f"Initial: ${summary['initial_balance']:.2f}",
+                    f"Realized PnL: ${summary['realized_pnl']:.2f}",
+                    f"Total Trades: {summary['total_trades']}",
+                    f"Winning Trades: {summary['winning_trades']}",
+                    f"Win Rate: {summary['win_rate']:.1f}%",
+                    f"Open Positions: {summary['open_positions']}"
+                ]
+                
+                # Add position details if any
+                if summary['positions']:
+                    lines.append("\n🔹 Open Positions:")
+                    for pid, pos in summary['positions'].items():
+                        lines.append(f"{pos['symbol'] or pid}: {pos['side']} {pos['size']:.4f} @ ${pos['entry_price']:.6f}")
+                
+                text = "\n".join(lines)
             else:
-                bal = await asyncio.to_thread(self.exchange.fetch_balance)
-            free_usdt = (
-                bal.get("USDT", {}).get("free")
-                if isinstance(bal.get("USDT"), dict)
-                else None
-            )
-            lines = [f"Free USDT: {free_usdt or 0}"]
-            lines += [
-                f"{k}: {v.get('total') if isinstance(v, dict) else v}"
-                for k, v in bal.items()
-            ]
-            text = "\n".join(lines) if lines else "(no balance)"
+                # Live trading mode - fetch from exchange
+                if not self.exchange:
+                    await self._reply(update, "Exchange not configured", reply_markup=_back_to_menu_markup())
+                    return
+                
+                if asyncio.iscoroutinefunction(getattr(self.exchange, "fetch_balance", None)):
+                    bal = await self.exchange.fetch_balance()
+                else:
+                    bal = await asyncio.to_thread(self.exchange.fetch_balance)
+                free_usdt = (
+                    bal.get("USDT", {}).get("free")
+                    if isinstance(bal.get("USDT"), dict)
+                    else None
+                )
+                lines = [f"💰 Live Trading Mode", f"Free USDT: {free_usdt or 0}"]
+                lines += [
+                    f"{k}: {v.get('total') if isinstance(v, dict) else v}"
+                    for k, v in bal.items()
+                    if k != "USDT"  # USDT already shown above
+                ]
+                text = "\n".join(lines) if lines else "(no balance)"
+                
         except Exception as exc:  # pragma: no cover - network
             self.logger.error("Balance fetch failed: %s", exc)
             text = "Balance fetch failed"
@@ -443,11 +475,46 @@ class TelegramBotUI:
             return
         if not await self._check_admin(update):
             return
-        if TRADES_FILE.exists():
-            lines = await console_monitor.trade_stats_lines(self.exchange, TRADES_FILE)
-            text = "\n".join(lines) if lines else "(no trades)"
+        
+        paper_wallet = self.paper_wallet or getattr(self.controller, 'paper_wallet', None)
+        
+        # For paper trading, show paper wallet positions and stats
+        if paper_wallet and hasattr(paper_wallet, 'balance'):
+            summary = paper_wallet.get_position_summary()
+            lines = [
+                f"📄 Paper Trading Positions",
+                f"Total Trades: {summary['total_trades']}",
+                f"Winning Trades: {summary['winning_trades']}",
+                f"Win Rate: {summary['win_rate']:.1f}%",
+                f"Realized PnL: ${summary['realized_pnl']:.2f}",
+                f"Current Balance: ${summary['balance']:.2f}",
+                ""
+            ]
+            
+            if summary['positions']:
+                lines.append("🔹 Active Positions:")
+                for pid, pos in summary['positions'].items():
+                    symbol = pos['symbol'] or pid
+                    entry_price = pos['entry_price']
+                    size = pos['size']
+                    side = pos['side']
+                    reserved = pos.get('reserved', 0.0)
+                    
+                    lines.append(f"{symbol}: {side.upper()} {size:.4f} @ ${entry_price:.6f}")
+                    if reserved > 0:
+                        lines.append(f"  Reserved: ${reserved:.2f}")
+            else:
+                lines.append("No active positions")
+            
+            text = "\n".join(lines)
         else:
-            text = "No trades found"
+            # Live trading mode - use existing trade stats
+            if TRADES_FILE.exists():
+                lines = await console_monitor.trade_stats_lines(self.exchange, TRADES_FILE)
+                text = "\n".join([f"💰 Live Trading", ""] + lines) if lines else "💰 Live Trading\n(no trades)"
+            else:
+                text = "💰 Live Trading\nNo trades found"
+                
         await self._reply(update, text, reply_markup=_back_to_menu_markup())
 
     async def show_config(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

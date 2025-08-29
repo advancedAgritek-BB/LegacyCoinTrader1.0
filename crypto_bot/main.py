@@ -241,10 +241,12 @@ def notify_balance_change(
     previous: float | None,
     new_balance: float,
     enabled: bool,
+    is_paper_trading: bool = False,
 ) -> float:
     """Send a notification if the balance changed."""
     if notifier and enabled and previous is not None and new_balance != previous:
-        notifier.notify(f"Balance changed: {new_balance:.2f} USDT")
+        prefix = "📄 Paper" if is_paper_trading else "💰 Live"
+        notifier.notify(f"{prefix} Balance changed: ${new_balance:.2f}")
     return new_balance
 
 
@@ -1043,9 +1045,15 @@ async def execute_signals(ctx: BotContext) -> None:
 
         if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
             try:
-                ctx.paper_wallet.open(sym, side, amount, price)
+                trade_id = ctx.paper_wallet.open(sym, side, amount, price)
                 ctx.balance = ctx.paper_wallet.balance
                 logger.info(f"Paper trade opened: {side} {amount} {sym} @ ${price:.6f}, balance: ${ctx.balance:.2f}")
+                
+                # Send Telegram notification for paper trade entry
+                if ctx.notifier and ctx.config.get("telegram", {}).get("trade_updates", True):
+                    paper_msg = f"📄 Paper Trade Opened\n{side.upper()} {amount:.4f} {sym}\nPrice: ${price:.6f}\nBalance: ${ctx.balance:.2f}\nStrategy: {strategy}"
+                    ctx.notifier.notify(paper_msg)
+                    
             except Exception as e:
                 logger.error(f"Failed to open paper trade: {e}")
                 continue
@@ -1137,6 +1145,13 @@ async def handle_exits(ctx: BotContext) -> None:
                     pnl = ctx.paper_wallet.close(sym, pos["size"], current_price)
                     ctx.balance = ctx.paper_wallet.balance
                     logger.info(f"Paper trade closed: {pos['side']} {pos['size']} {sym} @ ${current_price:.6f}, PnL: ${pnl:.2f}, balance: ${ctx.balance:.2f}")
+                    
+                    # Send Telegram notification for paper trade exit
+                    if ctx.notifier and ctx.config.get("telegram", {}).get("trade_updates", True):
+                        pnl_emoji = "💰" if pnl >= 0 else "📉"
+                        paper_exit_msg = f"📄 Paper Trade Closed {pnl_emoji}\n{pos['side'].upper()} {pos['size']:.4f} {sym}\nEntry: ${pos['entry_price']:.6f}\nExit: ${current_price:.6f}\nPnL: ${pnl:.2f}\nBalance: ${ctx.balance:.2f}"
+                        ctx.notifier.notify(paper_exit_msg)
+                        
                 except Exception as e:
                     logger.error(f"Failed to close paper trade: {e}")
                     # Continue with position closure even if paper wallet fails
@@ -1187,6 +1202,13 @@ async def force_exit_all(ctx: BotContext) -> None:
                 pnl = ctx.paper_wallet.close(sym, pos["size"], exit_price)
                 ctx.balance = ctx.paper_wallet.balance
                 logger.info(f"Paper trade force closed: {pos['side']} {pos['size']} {sym} @ ${exit_price:.6f}, PnL: ${pnl:.2f}, balance: ${ctx.balance:.2f}")
+                
+                # Send Telegram notification for paper trade force exit
+                if ctx.notifier and ctx.config.get("telegram", {}).get("trade_updates", True):
+                    pnl_emoji = "💰" if pnl >= 0 else "📉"
+                    paper_force_exit_msg = f"📄 Paper Trade FORCE CLOSED {pnl_emoji}\n{pos['side'].upper()} {pos['size']:.4f} {sym}\nEntry: ${pos['entry_price']:.6f}\nExit: ${exit_price:.6f}\nPnL: ${pnl:.2f}\nBalance: ${ctx.balance:.2f}"
+                    ctx.notifier.notify(paper_force_exit_msg)
+                    
             except Exception as e:
                 logger.error(f"Failed to force close paper trade: {e}")
                 # Continue with position closure even if paper wallet fails
@@ -1242,6 +1264,13 @@ async def _monitor_micro_scalp_exit(ctx: BotContext, sym: str) -> None:
             pnl = ctx.paper_wallet.close(sym, pos["size"], exit_price)
             ctx.balance = ctx.paper_wallet.balance
             logger.info(f"Paper trade micro-scalp closed: {pos['side']} {pos['size']} {sym} @ ${exit_price:.6f}, PnL: ${pnl:.2f}, balance: ${ctx.balance:.2f}")
+            
+            # Send Telegram notification for paper trade micro-scalp exit
+            if ctx.notifier and ctx.config.get("telegram", {}).get("trade_updates", True):
+                pnl_emoji = "💰" if pnl >= 0 else "📉"
+                paper_scalp_exit_msg = f"📄 Paper Micro-Scalp Closed {pnl_emoji}\n{pos['side'].upper()} {pos['size']:.4f} {sym}\nEntry: ${pos['entry_price']:.6f}\nExit: ${exit_price:.6f}\nPnL: ${pnl:.2f}\nBalance: ${ctx.balance:.2f}"
+                ctx.notifier.notify(paper_scalp_exit_msg)
+                
         except Exception as e:
             logger.error(f"Failed to close paper trade micro-scalp: {e}")
             # Continue with position closure even if paper wallet fails
@@ -1523,6 +1552,7 @@ async def _main_impl() -> TelegramNotifier:
             last_balance,
             float(paper_wallet.balance),
             balance_updates,
+            is_paper_trading=True,
         )
 
     monitor_task = asyncio.create_task(
@@ -1567,6 +1597,7 @@ async def _main_impl() -> TelegramNotifier:
             exchange,
             user.get("wallet_address", ""),
             command_cooldown=config.get("telegram", {}).get("command_cooldown", 5),
+            paper_wallet=paper_wallet,
         )
         if notifier.enabled
         else None

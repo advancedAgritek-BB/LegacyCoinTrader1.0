@@ -100,6 +100,7 @@ class BotController:
         trades_file: Path = TRADES_FILE,
         strategy_file: Path = STRATEGY_FILE,
         config_file: Path = CONFIG_FILE,
+        paper_wallet: Any = None,
     ) -> None:
         self.state = state
         self.exchange = exchange
@@ -107,6 +108,7 @@ class BotController:
         self.trades_file = Path(trades_file)
         self.strategy_file = Path(strategy_file)
         self.config_file = Path(config_file)
+        self.paper_wallet = paper_wallet
 
     async def start(self) -> str:
         self.state["running"] = True
@@ -119,7 +121,16 @@ class BotController:
     async def status(self) -> str:
         running = self.state.get("running", False)
         mode = self.state.get("mode")
-        return f"Running: {running}, mode: {mode}"
+        
+        # Add paper trading info if available
+        status_lines = [f"Running: {running}, mode: {mode}"]
+        
+        if self.paper_wallet and hasattr(self.paper_wallet, 'balance'):
+            status_lines.append(f"📄 Paper Trading: ${self.paper_wallet.balance:.2f}")
+            status_lines.append(f"Realized PnL: ${self.paper_wallet.realized_pnl:.2f}")
+            status_lines.append(f"Open positions: {len(self.paper_wallet.positions)}")
+        
+        return "\n".join(status_lines)
 
     async def strategies(self) -> str:
         if self.strategy_file.exists():
