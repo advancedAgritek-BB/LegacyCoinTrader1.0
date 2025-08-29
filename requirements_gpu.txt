@@ -1,0 +1,37 @@
+# GPU Acceleration Dependencies for Enhanced Backtesting
+# Install these packages for GPU-accelerated backtesting
+
+# Core GPU acceleration libraries
+cupy-cuda12x>=12.0.0  # For NVIDIA GPUs (CUDA 12.x)
+# cupy-rocm-5-7>=12.0.0  # For AMD GPUs (ROCm 5.7) - uncomment if using AMD
+
+# Alternative GPU acceleration
+numba>=0.58.0  # JIT compilation with CUDA support
+pyopencl>=2023.1.0  # OpenCL support for AMD/NVIDIA
+
+# AMD-specific libraries (if available)
+# rocm-pytorch>=2.0.0  # AMD ROCm PyTorch - uncomment if using AMD
+
+# Performance optimization
+mkl>=2023.0.0  # Intel Math Kernel Library
+openblas>=0.3.0  # OpenBLAS for linear algebra
+
+# Parallel processing
+joblib>=1.3.0  # Parallel processing
+multiprocessing-logging>=0.3.0  # Better multiprocessing logging
+
+# Data processing acceleration
+pandas>=2.0.0  # Latest pandas for better performance
+numpy>=1.24.0  # Latest numpy for better performance
+
+# Optional: Machine learning acceleration
+scikit-learn>=1.3.0  # ML algorithms with GPU support
+lightgbm>=4.0.0  # Gradient boosting with GPU support
+
+# Monitoring and profiling
+psutil>=5.9.0  # System monitoring
+memory-profiler>=0.61.0  # Memory usage profiling
+
+# Development and testing
+pytest>=7.0.0  # Testing framework
+pytest-asyncio>=0.21.0  # Async testing support

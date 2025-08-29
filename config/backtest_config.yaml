@@ -1,0 +1,130 @@
+# Enhanced Backtesting System Configuration
+# This file configures the continuous backtesting engine for top 20 token pairs
+
+# Token pair selection
+top_pairs_count: 20
+min_volume_usd: 1000000  # $1M minimum volume
+refresh_interval_hours: 6  # Refresh top pairs every 6 hours
+
+# Backtesting parameters
+lookback_days: 90  # Historical data to analyze
+timeframes:
+  - "1h"   # Hourly analysis
+  - "4h"   # 4-hour analysis  
+  - "1d"   # Daily analysis
+
+# GPU acceleration settings
+use_gpu: true
+gpu_memory_limit_gb: 8.0  # Limit GPU memory usage
+batch_size: 100  # Process backtests in batches
+
+# Parallel processing
+max_workers: 8  # Number of parallel workers
+use_process_pool: true  # Use process pool for CPU-intensive tasks
+
+# Continuous learning
+learning_enabled: true
+results_cache_dir: "crypto_bot/logs/backtest_results"
+model_update_interval_hours: 24
+
+# Risk management thresholds
+max_drawdown_threshold: 0.5    # Maximum acceptable drawdown
+min_sharpe_threshold: 0.5      # Minimum acceptable Sharpe ratio
+min_win_rate: 0.4              # Minimum acceptable win rate
+
+# Strategy-specific parameters
+strategies_to_test: []  # Empty = test all available strategies
+
+# Parameter optimization ranges
+parameter_ranges:
+  stop_loss:
+    - 0.01  # 1%
+    - 0.02  # 2%
+    - 0.03  # 3%
+    - 0.05  # 5%
+  
+  take_profit:
+    - 0.02  # 2%
+    - 0.04  # 4%
+    - 0.06  # 6%
+    - 0.08  # 8%
+    - 0.10  # 10%
+
+# Performance tracking
+performance_metrics:
+  - "sharpe_ratio"
+  - "sortino_ratio"
+  - "calmar_ratio"
+  - "max_drawdown"
+  - "win_rate"
+  - "profit_factor"
+  - "expectancy"
+  - "recovery_factor"
+
+# Data sources
+data_sources:
+  cex:
+    - "binance"
+    - "kraken"
+    - "coinbase"
+  
+  dex:
+    - "raydium"  # Solana
+    - "uniswap"  # Ethereum
+
+# Reporting and visualization
+reporting:
+  generate_charts: true
+  save_equity_curves: true
+  export_to_csv: true
+  email_reports: false
+  
+# Integration with main trading bot
+integration:
+  update_strategy_weights: true
+  auto_optimize_parameters: true
+  risk_adjustment: true
+  
+# Windows-specific optimizations
+windows_optimizations:
+  use_windows_process_pool: true
+  gpu_driver_check: true
+  memory_optimization: true
+  
+# AMD GPU specific settings
+amd_gpu:
+  enable_rocm: false  # Enable ROCm if available
+  memory_optimization: true
+  compute_units: "auto"  # Use all available compute units
+  
+# Performance monitoring
+monitoring:
+  log_performance_metrics: true
+  track_memory_usage: true
+  monitor_gpu_utilization: true
+  alert_on_failures: true
+
+# Machine Learning Integration with coinTrader_Trainer
+ml_integration:
+  enabled: true
+  auto_retrain: true
+  retrain_interval_hours: 24
+  cointrainer_path: "cointrainer"
+  
+  # Supabase configuration for model storage
+  supabase:
+    url: "https://your-project.supabase.co"
+    key: "your-service-role-key"
+    bucket: "models"
+    
+  # Feature engineering settings
+  features:
+    horizon_minutes: 15
+    hold_threshold: 0.0015
+    
+  # Training parameters
+  training:
+    device_type: "gpu"  # or "cpu"
+    max_bin: 63
+    n_jobs: 0
+    publish_models: true

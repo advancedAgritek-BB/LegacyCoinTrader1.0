@@ -1,0 +1,10 @@
+coinbase_api_key: ''
+coinbase_api_secret: ''
+coinbase_passphrase: ''
+exchange: kraken
+kraken_api_key: pTDIfRbVaP3Y7y8Ph8CHiAC5O/wlBkCX0so9N91iobqhnysguyX7o18/
+kraken_api_secret: 9mmck1Rpzs8skQhtgGg+6NpzkRP1HiXf+q0HfMQ9d447av7LkaFhBh/gCNdWaOaYZFUA0AWS30FDP1NVT+BeTQ==
+mode: cex
+telegram_chat_id: '827777274'
+telegram_token: 8126215032:AAEhQZLiXpssauKf0ktQsq1XqXl94QriCdE
+wallet_address: EoiVpzLA6b6JBKXTB5WRFor3mPkseM6UisLHt8qK9g1c

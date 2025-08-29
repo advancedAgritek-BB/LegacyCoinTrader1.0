@@ -1,0 +1,66 @@
+# LunarCrush Sentiment Analysis Configuration
+lunarcrush:
+  # API Configuration
+  api_key: "${LUNARCRUSH_API_KEY}"  # Set in environment variable
+  base_url: "https://lunarcrush.com/api4/public"
+  
+  # Sentiment Boost Settings
+  sentiment_boost:
+    enabled: true
+    min_galaxy_score: 60.0        # Minimum Galaxy Score for boost (0-100)
+    min_sentiment: 0.6            # Minimum sentiment score for boost (0-1)
+    max_boost: 0.5                # Maximum boost factor (50% increase)
+    
+  # Trade Direction Alignment
+  alignment:
+    require_alignment: false      # If true, block trades that oppose strong sentiment
+    bearish_threshold: 0.3        # Block bullish trades if sentiment < this when very bearish
+    
+  # Solana Token Scouting
+  solana_scouting:
+    enabled: true
+    min_galaxy_score: 70.0        # Higher threshold for new token discovery
+    min_sentiment: 0.65           # Higher sentiment requirement for scouting
+    max_tokens: 20                # Maximum tokens to scout
+    
+  # Scoring Weights for Solana Pools
+  pool_scoring:
+    weight_sentiment: 0.3         # How much sentiment affects pool scoring
+    galaxy_score_weight: 0.4      # Weight for Galaxy Score in composite score
+    sentiment_weight: 0.3         # Weight for sentiment in composite score
+    social_weight: 0.2            # Weight for social metrics
+    rank_weight: 0.1              # Weight for AltRank (inverted)
+    
+  # Cache Settings
+  cache:
+    ttl_seconds: 300              # Cache sentiment data for 5 minutes
+    max_entries: 1000             # Maximum cached entries
+    
+  # Failsafe Settings
+  failsafe:
+    timeout_seconds: 10           # API request timeout
+    max_retries: 2                # Maximum API retry attempts
+    fallback_to_neutral: true     # Use neutral sentiment if API fails
+    never_hinder_trades: true     # Always return 1.0+ boost factors, never < 1.0
+
+# Integration with existing systems
+sentiment_filter:
+  lunarcrush_enabled: true
+  combine_with_fng: true          # Combine LunarCrush with Fear & Greed Index
+  combine_with_twitter: true      # Combine with Twitter sentiment if available
+  
+# Strategy-specific overrides
+strategy_overrides:
+  meme_wave_bot:
+    sentiment_boost:
+      min_galaxy_score: 80.0      # Higher threshold for meme tokens
+      min_sentiment: 0.7
+  
+  sniper_bot:
+    sentiment_boost:
+      min_galaxy_score: 70.0
+      min_sentiment: 0.65
+      
+  grid_bot:
+    sentiment_boost:
+      enabled: false              # Grid bot doesn't use sentiment
