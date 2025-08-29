@@ -38,6 +38,22 @@ def optimize_strategies() -> Dict[str, Dict[str, float]]:
     bot_cfg = _load_config()
     results: Dict[str, Dict[str, float]] = {}
 
+    # Initialize exchange based on config
+    exchange = None
+    try:
+        import ccxt
+        exchange_name = bot_cfg.get("exchange", "kraken").lower()
+        if hasattr(ccxt, exchange_name):
+            exchange = getattr(ccxt, exchange_name)()
+            logger.info(f"Using {exchange_name} exchange for backtesting")
+        else:
+            logger.warning(f"Exchange {exchange_name} not found, using kraken as fallback")
+            exchange = ccxt.kraken()
+    except Exception as e:
+        logger.error(f"Failed to initialize exchange: {e}")
+        # Continue without exchange - will use simulated data
+        exchange = None
+
     for name, ranges in param_ranges.items():
         sl_range: Iterable[float] = ranges.get("stop_loss", [])
         tp_range: Iterable[float] = ranges.get("take_profit", [])
@@ -53,7 +69,7 @@ def optimize_strategies() -> Dict[str, Dict[str, float]]:
         )
 
         try:
-            df = BacktestRunner(config).run_grid()
+            df = BacktestRunner(config, exchange=exchange).run_grid()
         except Exception as exc:  # pragma: no cover - network
             logger.error("Backtest failed for %s: %s", name, exc)
             continue

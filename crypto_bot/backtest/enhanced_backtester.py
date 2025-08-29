@@ -360,7 +360,7 @@ class ContinuousBacktestingEngine:
             else:
                 # CEX pairs - use existing logic
                 import ccxt
-                exchange = ccxt.binance()
+                exchange = ccxt.kraken()  # Use Kraken instead of Binance
                 ohlcv = exchange.fetch_ohlcv(pair, timeframe=timeframe, limit=1000)
                 df = pd.DataFrame(
                     ohlcv,

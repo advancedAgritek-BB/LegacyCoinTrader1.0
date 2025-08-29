@@ -272,6 +272,36 @@ def sync_paper_wallet_balance(ctx):
     return ctx.balance
 
 
+def update_position_pnl(ctx):
+    """Update PnL for all positions based on current market prices."""
+    if not ctx.config.get("execution_mode") == "dry_run" or not ctx.paper_wallet:
+        return
+    
+    # Get current prices for all open positions
+    for sym, pos in ctx.positions.items():
+        try:
+            # Fetch current price
+            if hasattr(ctx, 'df_cache') and sym in ctx.df_cache:
+                df = ctx.df_cache[sym]
+                if not df.empty:
+                    current_price = float(df.iloc[-1]['close'])
+                    
+                    # Calculate unrealized PnL
+                    if ctx.paper_wallet and sym in ctx.paper_wallet.positions:
+                        unrealized_pnl = ctx.paper_wallet.unrealized(sym, current_price)
+                        pos["pnl"] = unrealized_pnl
+                        
+                        # Update highest/lowest price tracking for trailing stops
+                        if pos["side"] == "buy":
+                            pos["highest_price"] = max(pos.get("highest_price", current_price), current_price)
+                        else:  # short position
+                            pos["lowest_price"] = min(pos.get("lowest_price", current_price), current_price)
+                        
+                        logger.debug(f"Updated PnL for {sym}: ${unrealized_pnl:.2f} at price ${current_price:.6f}")
+        except Exception as e:
+            logger.warning(f"Failed to update PnL for {sym}: {e}")
+
+
 def validate_paper_wallet_consistency(ctx):
     """Validate that paper wallet state is consistent and log any issues."""
     if not ctx.config.get("execution_mode") == "dry_run" or not ctx.paper_wallet:
@@ -332,24 +362,48 @@ def get_paper_wallet_status(ctx):
         return None
     
     summary = ctx.paper_wallet.get_position_summary()
+    
+    # Calculate total unrealized PnL across all positions
+    total_unrealized_pnl = 0.0
+    for sym, pos_ctx in ctx.positions.items():
+        if sym in ctx.paper_wallet.positions and hasattr(ctx, 'df_cache') and sym in ctx.df_cache:
+            df = ctx.df_cache[sym]
+            if not df.empty:
+                current_price = float(df.iloc[-1]['close'])
+                unrealized = ctx.paper_wallet.unrealized(sym, current_price)
+                total_unrealized_pnl += unrealized
+    
     status = {
-        "balance": f"${summary['balance']:.2f}",
-        "initial_balance": f"${summary['initial_balance']:.2f}",
-        "realized_pnl": f"${summary['realized_pnl']:.2f}",
+        "balance": summary['balance'],
+        "initial_balance": summary['initial_balance'],
+        "realized_pnl": summary['realized_pnl'],
+        "unrealized_pnl": total_unrealized_pnl,
+        "total_pnl": summary['realized_pnl'] + total_unrealized_pnl,
         "total_trades": summary['total_trades'],
         "winning_trades": summary['winning_trades'],
-        "win_rate": f"{summary['win_rate']:.1f}%",
+        "win_rate": summary['win_rate'],
         "open_positions": summary['open_positions'],
         "positions": {}
     }
     
     for pid, pos in summary['positions'].items():
+        # Get current unrealized PnL for this position
+        unrealized_pnl = 0.0
+        current_price = None
+        if pid in ctx.df_cache:
+            df = ctx.df_cache[pid]
+            if not df.empty:
+                current_price = float(df.iloc[-1]['close'])
+                unrealized_pnl = ctx.paper_wallet.unrealized(pid, current_price)
+        
         status['positions'][pid] = {
             "symbol": pos.get("symbol", "Unknown"),
             "side": pos["side"],
             "size": pos["size"],
-            "entry_price": f"${pos['entry_price']:.6f}",
-            "reserved": f"${pos.get('reserved', 0.0):.2f}"
+            "entry_price": pos['entry_price'],
+            "current_price": current_price,
+            "unrealized_pnl": unrealized_pnl,
+            "reserved": pos.get('reserved', 0.0)
         }
     
     return status
@@ -910,8 +964,243 @@ async def analyse_batch(ctx: BotContext) -> None:
             UNKNOWN_COUNT += 1
 
 
+async def execute_solana_trade(
+    ctx: BotContext,
+    candidate: dict,
+    sym: str,
+    size: float,
+    price: float,
+    strategy: str,
+    side: str,
+    sentiment_boost: float = 1.0,
+) -> bool:
+    """Execute a Solana trade asynchronously."""
+    try:
+        from crypto_bot.solana import sniper_solana
+        from crypto_bot.solana_trading import sniper_trade
+
+        sol_score, _ = sniper_solana.generate_signal(candidate["df"])
+        if sol_score > 0.7:
+            base, quote = sym.split("/")
+
+            # Apply sentiment boost to size
+            adjusted_size = size * sentiment_boost
+
+            await sniper_trade(
+                ctx.config.get("wallet_address", ""),
+                quote,
+                base,
+                adjusted_size,
+                dry_run=ctx.config.get("execution_mode") == "dry_run",
+                slippage_bps=ctx.config.get("solana_slippage_bps", 50),
+                notifier=ctx.notifier,
+                paper_wallet=ctx.paper_wallet if ctx.config.get("execution_mode") == "dry_run" else None,
+            )
+
+            # Update context for successful trade
+            ctx.risk_manager.allocate_capital(strategy, size)
+            amount = size / price if price > 0 else 0.0
+            ctx.positions[sym] = {
+                "side": side,
+                "entry_price": price,
+                "entry_time": datetime.utcnow().isoformat(),
+                "regime": candidate.get("regime"),
+                "strategy": strategy,
+                "confidence": candidate.get("score", 0.0),
+                "pnl": 0.0,
+                "size": amount,
+                "trailing_stop": 0.0,
+                "highest_price": price,
+                "lowest_price": price,
+            }
+
+            # Handle paper wallet updates
+            if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
+                try:
+                    trade_id = ctx.paper_wallet.open(sym, side, amount, price)
+                    ctx.balance = ctx.paper_wallet.balance
+                    logger.info(f"Paper Solana trade opened: {side} {amount} {sym} @ ${price:.6f}, balance: ${ctx.balance:.2f}")
+
+                    if ctx.notifier and ctx.config.get("telegram", {}).get("trade_updates", True):
+                        paper_msg = f"📄 Paper Solana Trade Opened\n{side.upper()} {amount:.4f} {sym}\nPrice: ${price:.6f}\nBalance: ${ctx.balance:.2f}\nStrategy: {strategy}"
+                        ctx.notifier.notify(paper_msg)
+
+                except Exception as e:
+                    logger.error(f"Failed to open paper Solana trade: {e}")
+                    return False
+
+            sync_paper_wallet_balance(ctx)
+            update_position_pnl(ctx)
+
+            try:
+                log_position(sym, side, amount, price, price, ctx.balance)
+            except Exception:
+                pass
+
+            logger.info(f"Solana trade executed successfully: {side} {amount} {sym}")
+            return True
+        else:
+            logger.debug(f"Solana sniper score too low ({sol_score:.2f}) for {sym}")
+            return False
+
+    except Exception as e:
+        logger.error(f"Error executing Solana trade for {sym}: {e}")
+        return False
+
+
+async def execute_cex_trade(
+    ctx: BotContext,
+    candidate: dict,
+    sym: str,
+    size: float,
+    price: float,
+    strategy: str,
+    side: str,
+    sentiment_boost: float = 1.0,
+) -> bool:
+    """Execute a CEX trade asynchronously."""
+    try:
+        # Apply sentiment boost to size
+        adjusted_size = size * sentiment_boost
+        amount = adjusted_size / price if price > 0 else 0.0
+
+        order = await cex_trade_async(
+            ctx.exchange,
+            ctx.ws_client,
+            sym,
+            side,
+            amount,
+            ctx.notifier,
+            dry_run=ctx.config.get("execution_mode") == "dry_run",
+            use_websocket=ctx.config.get("use_websocket", False),
+            config=ctx.config,
+        )
+
+        if order:
+            # Handle take profit for bounce scalper strategy
+            take_profit = None
+            if strategy == "bounce_scalper":
+                depth = int(ctx.config.get("liquidity_depth", 10))
+                book = await fetch_order_book_async(ctx.exchange, sym, depth)
+                dist = _closest_wall_distance(book, price, side)
+                if dist is not None:
+                    take_profit = dist * 0.8
+
+            ctx.risk_manager.register_stop_order(
+                order,
+                strategy=strategy,
+                symbol=sym,
+                entry_price=price,
+                confidence=candidate.get("score", 0.0),
+                direction=side,
+                take_profit=take_profit,
+            )
+
+            # Update context for successful trade
+            ctx.risk_manager.allocate_capital(strategy, size)
+            ctx.positions[sym] = {
+                "side": side,
+                "entry_price": price,
+                "entry_time": datetime.utcnow().isoformat(),
+                "regime": candidate.get("regime"),
+                "strategy": strategy,
+                "confidence": candidate.get("score", 0.0),
+                "pnl": 0.0,
+                "size": amount,
+                "trailing_stop": 0.0,
+                "highest_price": price,
+                "lowest_price": price,
+            }
+
+            # Handle paper wallet updates
+            if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
+                try:
+                    trade_id = ctx.paper_wallet.open(sym, side, amount, price)
+                    ctx.balance = ctx.paper_wallet.balance
+                    logger.info(f"Paper CEX trade opened: {side} {amount} {sym} @ ${price:.6f}, balance: ${ctx.balance:.2f}")
+
+                    if ctx.notifier and ctx.config.get("telegram", {}).get("trade_updates", True):
+                        paper_msg = f"📄 Paper CEX Trade Opened\n{side.upper()} {amount:.4f} {sym}\nPrice: ${price:.6f}\nBalance: ${ctx.balance:.2f}\nStrategy: {strategy}"
+                        ctx.notifier.notify(paper_msg)
+
+                except Exception as e:
+                    logger.error(f"Failed to open paper CEX trade: {e}")
+                    return False
+
+            sync_paper_wallet_balance(ctx)
+            update_position_pnl(ctx)
+
+            try:
+                log_position(sym, side, amount, price, price, ctx.balance)
+            except Exception:
+                pass
+
+            logger.info(f"CEX trade executed successfully: {side} {amount} {sym}")
+            return True
+        else:
+            logger.warning(f"CEX trade failed for {sym}")
+            return False
+
+    except Exception as e:
+        logger.error(f"Error executing CEX trade for {sym}: {e}")
+        return False
+
+
+class AsyncTradeManager:
+    """Manages asynchronous trading tasks to ensure Solana and CEX trading run independently."""
+
+    def __init__(self):
+        self.active_tasks: set[asyncio.Task] = set()
+        self.task_lock = asyncio.Lock()
+
+    async def execute_trade_async(self, coro) -> None:
+        """Execute a trade coroutine as a background task."""
+        async with self.task_lock:
+            task = asyncio.create_task(coro)
+            self.active_tasks.add(task)
+
+            # Remove task from active set when it completes
+            def cleanup_task(task_ref):
+                self.active_tasks.discard(task_ref)
+
+            task.add_done_callback(cleanup_task)
+
+    async def wait_for_completion(self, timeout: float = 30.0) -> None:
+        """Wait for all active trading tasks to complete or timeout."""
+        if not self.active_tasks:
+            return
+
+        try:
+            await asyncio.wait(self.active_tasks, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"Some trading tasks timed out after {timeout}s")
+        except Exception as e:
+            logger.error(f"Error waiting for trading tasks: {e}")
+
+    def cancel_all(self) -> None:
+        """Cancel all active trading tasks."""
+        for task in self.active_tasks:
+            if not task.done():
+                task.cancel()
+
+    async def cleanup_completed(self) -> None:
+        """Clean up any completed tasks from the active set."""
+        async with self.task_lock:
+            completed_tasks = {task for task in self.active_tasks if task.done()}
+            self.active_tasks -= completed_tasks
+
+            # Log any exceptions from completed tasks
+            for task in completed_tasks:
+                if task.exception():
+                    logger.error(f"Trading task failed: {task.exception()}")
+
+
+# Global trade manager instance
+trade_manager = AsyncTradeManager()
+
+
 async def execute_signals(ctx: BotContext) -> None:
-    """Open trades for qualified analysis results."""
+    """Open trades for qualified analysis results using async execution."""
     results = getattr(ctx, "analysis_results", [])
     if not results:
         logger.info("No analysis results to act on")
@@ -947,7 +1236,7 @@ async def execute_signals(ctx: BotContext) -> None:
 
         probs = candidate.get("probabilities", {})
         reg_prob = float(probs.get(candidate.get("regime"), 0.0))
-        
+
         # Get LunarCrush sentiment boost if available
         sentiment_boost = 1.0
         try:
@@ -955,7 +1244,7 @@ async def execute_signals(ctx: BotContext) -> None:
             sentiment_boost = await get_lunarcrush_sentiment_boost(sym, candidate["direction"])
         except Exception as exc:
             logger.debug(f"Failed to get sentiment boost for {sym}: {exc}")
-        
+
         base_size = ctx.risk_manager.position_size(
             reg_prob,
             ctx.balance,
@@ -963,7 +1252,7 @@ async def execute_signals(ctx: BotContext) -> None:
             atr=candidate.get("atr"),
             price=price,
         )
-        
+
         # Apply sentiment boost
         size = base_size * sentiment_boost
         if size <= 0:
@@ -979,115 +1268,62 @@ async def execute_signals(ctx: BotContext) -> None:
             )
             continue
 
-        amount = size / price if price > 0 else 0.0
         side = direction_to_side(candidate["direction"])
         if side == "sell" and not ctx.config.get("allow_short", False):
             logger.info("Short selling disabled; skipping signal for %s", sym)
             continue
+
+        # Execute trades asynchronously based on symbol type
         start_exec = time.perf_counter()
-        executed_via_sniper = False
+
         if sym.endswith("/USDC"):
-            from crypto_bot.solana import sniper_solana
-
-            sol_score, _ = sniper_solana.generate_signal(df)
-            if sol_score > 0.7:
-                from crypto_bot.solana_trading import sniper_trade
-
-                base, quote = sym.split("/")
-                await sniper_trade(
-                    ctx.config.get("wallet_address", ""),
-                    quote,
-                    base,
+            # Solana trade - execute asynchronously
+            logger.info(f"Queueing Solana trade for {sym}")
+            await trade_manager.execute_trade_async(
+                execute_solana_trade(
+                    ctx,
+                    candidate,
+                    sym,
                     size,
-                    dry_run=ctx.config.get("execution_mode") == "dry_run",
-                    slippage_bps=ctx.config.get("solana_slippage_bps", 50),
-                    notifier=ctx.notifier,
-                    paper_wallet=ctx.paper_wallet if ctx.config.get("execution_mode") == "dry_run" else None,
+                    price,
+                    strategy,
+                    side,
+                    sentiment_boost,
                 )
-                executed_via_sniper = True
-
-        if not executed_via_sniper:
-            order = await cex_trade_async(
-                ctx.exchange,
-                ctx.ws_client,
-                sym,
-                side,
-                amount,
-                ctx.notifier,
-                dry_run=ctx.config.get("execution_mode") == "dry_run",
-                use_websocket=ctx.config.get("use_websocket", False),
-                config=ctx.config,
             )
-            if order:
-                executed += 1
-                take_profit = None
-                if strategy == "bounce_scalper":
-                    depth = int(ctx.config.get("liquidity_depth", 10))
-                    book = await fetch_order_book_async(ctx.exchange, sym, depth)
-                    dist = _closest_wall_distance(book, price, side)
-                    if dist is not None:
-                        take_profit = dist * 0.8
-                ctx.risk_manager.register_stop_order(
-                    order,
-                    strategy=strategy,
-                    symbol=sym,
-                    entry_price=price,
-                    confidence=score,
-                    direction=side,
-                    take_profit=take_profit,
-                )
-        else:
             executed += 1
+        else:
+            # CEX trade - execute asynchronously
+            logger.info(f"Queueing CEX trade for {sym}")
+            await trade_manager.execute_trade_async(
+                execute_cex_trade(
+                    ctx,
+                    candidate,
+                    sym,
+                    size,
+                    price,
+                    strategy,
+                    side,
+                    sentiment_boost,
+                )
+            )
+            executed += 1
+
         ctx.timing["execution_latency"] = max(
             ctx.timing.get("execution_latency", 0.0),
             time.perf_counter() - start_exec,
         )
 
-        if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
-            try:
-                trade_id = ctx.paper_wallet.open(sym, side, amount, price)
-                ctx.balance = ctx.paper_wallet.balance
-                logger.info(f"Paper trade opened: {side} {amount} {sym} @ ${price:.6f}, balance: ${ctx.balance:.2f}")
-                
-                # Send Telegram notification for paper trade entry
-                if ctx.notifier and ctx.config.get("telegram", {}).get("trade_updates", True):
-                    paper_msg = f"📄 Paper Trade Opened\n{side.upper()} {amount:.4f} {sym}\nPrice: ${price:.6f}\nBalance: ${ctx.balance:.2f}\nStrategy: {strategy}"
-                    ctx.notifier.notify(paper_msg)
-                    
-            except Exception as e:
-                logger.error(f"Failed to open paper trade: {e}")
-                continue
-        
-        # Ensure balance is synchronized
-        sync_paper_wallet_balance(ctx)
-        ctx.risk_manager.allocate_capital(strategy, size)
-        ctx.positions[sym] = {
-            "side": side,
-            "entry_price": price,
-            "entry_time": datetime.utcnow().isoformat(),
-            "regime": candidate.get("regime"),
-            "strategy": strategy,
-            "confidence": score,
-            "pnl": 0.0,
-            "size": amount,
-            "trailing_stop": 0.0,
-            "highest_price": price,
-            "lowest_price": price,  # Track lowest price for short positions
-        }
-        try:
-            log_position(
-                sym,
-                side,
-                amount,
-                price,
-                price,
-                ctx.balance,
-            )
-        except Exception:
-            pass
-
+        # Handle micro-scalp monitoring
         if strategy == "micro_scalp":
             asyncio.create_task(_monitor_micro_scalp_exit(ctx, sym))
+
+    # Wait for all trading tasks to complete or timeout
+    if executed > 0:
+        logger.info(f"Waiting for {executed} trading tasks to complete...")
+        await trade_manager.wait_for_completion(timeout=30.0)
+        await trade_manager.cleanup_completed()
+        logger.info("All trading tasks completed or timed out")
 
     if executed == 0:
         logger.info(
@@ -1155,6 +1391,14 @@ async def handle_exits(ctx: BotContext) -> None:
                 except Exception as e:
                     logger.error(f"Failed to close paper trade: {e}")
                     # Continue with position closure even if paper wallet fails
+            
+            # Update position PnL before removing from ctx.positions
+            if sym in ctx.positions:
+                pos = ctx.positions[sym]
+                if ctx.paper_wallet and sym in ctx.paper_wallet.positions:
+                    final_pnl = ctx.paper_wallet.unrealized(sym, current_price)
+                    pos["pnl"] = final_pnl
+                    logger.info(f"Final PnL for {sym}: ${final_pnl:.2f}")
             
             # Ensure balance is synchronized
             sync_paper_wallet_balance(ctx)
@@ -1606,6 +1850,7 @@ async def _main_impl() -> TelegramNotifier:
     if telegram_bot:
         telegram_bot.run_async()
 
+    # Legacy meme wave sniper (keeping for backward compatibility)
     meme_wave_task = None
     if config.get("meme_wave_sniper", {}).get("enabled"):
         from crypto_bot.solana import start_runner
@@ -1617,6 +1862,20 @@ async def _main_impl() -> TelegramNotifier:
         from crypto_bot.solana.runner import run as sniper_run
 
         sniper_task = asyncio.create_task(sniper_run(sniper_cfg))
+
+    # Advanced Pump Sniper System
+    pump_sniper_task = None
+    if config.get("pump_sniper_orchestrator", {}).get("enabled"):
+        from crypto_bot.solana.pump_sniper_integration import start_pump_sniper_system
+
+        try:
+            pump_sniper_started = await start_pump_sniper_system(config)
+            if pump_sniper_started:
+                logger.info("Advanced Pump Sniper System started successfully")
+            else:
+                logger.warning("Advanced Pump Sniper System failed to start")
+        except Exception as exc:
+            logger.error(f"Failed to start Advanced Pump Sniper System: {exc}")
 
     if config.get("scan_in_background", True):
         session_state.scan_task = asyncio.create_task(
@@ -1691,6 +1950,13 @@ async def _main_impl() -> TelegramNotifier:
 
             cycle_start = time.perf_counter()
             ctx.timing = await runner.run(ctx)
+
+            # Clean up any completed trading tasks from previous cycle
+            await trade_manager.cleanup_completed()
+
+            # Update PnL for all positions after each trading cycle
+            update_position_pnl(ctx)
+            
             loop_count += 1
 
             if time.time() - last_weight_update >= 86400:
@@ -1863,6 +2129,13 @@ async def _main_impl() -> TelegramNotifier:
                 await meme_wave_task
             except asyncio.CancelledError:
                 pass
+        # Cancel and cleanup any remaining trading tasks
+        trade_manager.cancel_all()
+        try:
+            await trade_manager.wait_for_completion(timeout=5.0)
+        except Exception as e:
+            logger.warning(f"Error during trading task cleanup: {e}")
+
         if telegram_bot:
             telegram_bot.stop()
         try:

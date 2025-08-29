@@ -68,6 +68,22 @@ def positions() -> list[dict]:
     return entries
 
 
+@app.get("/wallet-status")
+def wallet_status() -> dict:
+    """Return comprehensive paper wallet status including real-time PnL."""
+    try:
+        controller = get_controller()
+        if hasattr(controller, '_ctx') and controller._ctx:
+            from crypto_bot.main import get_paper_wallet_status
+            status = get_paper_wallet_status(controller._ctx)
+            if status:
+                return status
+    except Exception as e:
+        return {"error": f"Failed to get wallet status: {e}"}
+    
+    return {"error": "No wallet status available"}
+
+
 @app.get("/strategy-performance")
 def strategy_performance() -> dict:
     """Return raw strategy performance data grouped by regime and strategy."""

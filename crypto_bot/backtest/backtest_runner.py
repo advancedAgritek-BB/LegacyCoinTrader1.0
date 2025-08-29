@@ -119,7 +119,7 @@ class BacktestRunner:
             if not df.empty:
                 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
             return df
-        exch = ccxt.binance()
+        exch = self.exchange if self.exchange else ccxt.kraken()
         ohlcv = exch.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=limit)
         df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
