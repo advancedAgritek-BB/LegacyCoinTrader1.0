@@ -83,50 +83,162 @@ needed.
 
 ## Quick Start
 
-1. Install the dependencies:
+### 🚀 Automated Setup (Recommended)
+
+The easiest way to get started is using the provided startup script:
+
+```bash
+# Make the script executable
+chmod +x startup.sh
+
+# Run full setup and start
+./startup.sh
+
+# Or run setup steps individually:
+./startup.sh setup    # Install dependencies and setup environment
+./startup.sh test     # Run test suite
+./startup.sh start    # Start the application (assumes setup is complete)
+```
+
+The startup script will:
+- ✅ Detect your operating system (macOS/Linux)
+- ✅ Install system dependencies (Python, Git, etc.)
+- ✅ Create and activate a Python virtual environment
+- ✅ Install all required Python packages
+- ✅ Create a `.env` template file for configuration
+- ✅ Run the test suite to verify installation
+- ✅ Launch all services (trading bot, web dashboard, Telegram bot)
+
+### 🔧 Manual Setup
+
+If you prefer to set up manually:
+
+1. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
    The optional `rich` package is included and provides colorized
    console output when viewing live positions.
-   Exchange connectivity relies on [ccxt](https://github.com/ccxt/ccxt) which is installed with these requirements. Make sure the `ccxt` package is available when running the trading bot.
-2. Run `python crypto_bot/wallet_manager.py` to create `user_config.yaml` and enter your API credentials.
-3. Adjust `crypto_bot/config.yaml` to select the exchange and execution mode.
-4. Start the trading bot:
+   Exchange connectivity relies on [ccxt](https://github.com/ccxt/ccxt) which is installed with these requirements.
+
+2. **Configure API credentials:**
+   ```bash
+   python crypto_bot/wallet_manager.py
+   ```
+   This creates `user_config.yaml` and prompts for your exchange API credentials.
+
+3. **Edit configuration:**
+   Adjust `crypto_bot/config.yaml` to select the exchange and execution mode.
+
+4. **Start the trading bot:**
    ```bash
    python -m crypto_bot.main
    ```
    When dry-run mode is selected you will be prompted for the starting USDT balance.
-   The console now refreshes with your wallet balance and any active
-   trades in real time. Profitable positions are shown in green while
-   losing ones appear in red. The monitor lists open trades on a single
-   line formatted as `Symbol -- entry -- unrealized PnL`.
-   The program prints "Bot running..." before the [Monitor] lines.
-   Before trading begins the bot performs a full market scan to populate
-   its caches. Progress is logged and, when `telegram.status_updates` is
-   enabled, sent to your Telegram chat.
-   Type `start`, `stop`, `reload` or `quit` in the terminal to control the bot.
-   Or launch the web dashboard with:
+
+5. **Launch web dashboard (optional):**
    ```bash
    python -m frontend.app
    ```
-5. Run the meme-wave sniper separately with Raydium v3 integration.
-   Profits are automatically converted to BTC. Set `SOLANA_PRIVATE_KEY` and
-   `HELIUS_KEY` or provide a custom `SOLANA_RPC_URL` before launching:
+   Access the dashboard at `http://localhost:5000`
+
+6. **Run Solana sniper (optional):**
    ```bash
    python -m crypto_bot.solana.runner
    ```
+   Requires `SOLANA_PRIVATE_KEY` and `HELIUS_KEY` in your environment.
 
-6. Edit `crypto_bot/config.yaml` and reload the settings without restarting the
-   bot:
+### 🎯 Quick Launch
 
-   ```yaml
-   risk:
-     trade_size_pct: 1.5  # new value
-   ```
+After initial setup, use the quick launcher:
 
-   Save the file and type `reload` in the console or send `/reload` via Telegram
-   to apply the changes immediately.
+```bash
+chmod +x launch.sh
+./launch.sh
+```
+
+This starts all services (trading bot, web dashboard, Telegram bot) in one command.
+
+### 📱 First Run Experience
+
+- **Dry-run mode**: The bot starts in simulation mode by default - no real trades
+- **Market scan**: Initial startup performs a full market scan to populate caches
+- **Real-time monitoring**: Console shows wallet balance and active trades
+- **Web dashboard**: Monitor performance at `http://localhost:5000`
+- **Telegram control**: Use `/menu` for interactive bot control
+
+### 🔄 Configuration Reload
+
+Edit `crypto_bot/config.yaml` and reload without restarting:
+
+```yaml
+risk:
+  trade_size_pct: 1.5  # new value
+```
+
+Save the file and type `reload` in the console or send `/reload` via Telegram.
+
+## 🚀 Startup Scripts
+
+The project includes two convenient startup scripts to simplify the setup and launch process:
+
+### `startup.sh` - Full Setup and Launch
+
+This comprehensive script handles the entire setup process:
+
+```bash
+# Make executable and run
+chmod +x startup.sh
+./startup.sh
+
+# Available options:
+./startup.sh setup    # Install dependencies only
+./startup.sh test     # Run tests only  
+./startup.sh start    # Start services only
+./startup.sh full     # Complete setup and start (default)
+./startup.sh help     # Show usage information
+```
+
+**Features:**
+- 🖥️ **OS Detection**: Automatically detects macOS or Linux
+- 📦 **Dependency Management**: Installs Python, Git, and system packages
+- 🐍 **Virtual Environment**: Creates and manages Python venv
+- 🔧 **Package Installation**: Installs all required Python dependencies
+- 📝 **Environment Setup**: Creates `.env` template file
+- ✅ **Testing**: Runs test suite to verify installation
+- 🚀 **Service Launch**: Starts trading bot, web dashboard, and Telegram bot
+
+### `launch.sh` - Quick Launch
+
+For users who have already completed setup:
+
+```bash
+chmod +x launch.sh
+./launch.sh
+```
+
+**Features:**
+- ⚡ **Fast Launch**: Starts all services in one command
+- 🔒 **Safety Checks**: Verifies environment is ready
+- 🛑 **Graceful Shutdown**: Handles Ctrl+C to stop all services
+- 📊 **Process Management**: Shows PIDs for easy monitoring
+
+### Script Requirements
+
+- **macOS**: Requires Homebrew (installed automatically if missing)
+- **Linux**: Supports apt-get and yum package managers
+- **Permissions**: Scripts must be made executable with `chmod +x`
+
+### Troubleshooting
+
+If you encounter issues:
+
+1. **Permission Denied**: Run `chmod +x startup.sh launch.sh`
+2. **Virtual Environment Missing**: Run `./startup.sh setup` first
+3. **Dependencies Failed**: Check your internet connection and try again
+4. **OS Not Supported**: The scripts support macOS and Linux only
+
+---
 
 Run `wallet_manager.py` to create `user_config.yaml` and enter your exchange credentials. Values from `crypto_bot/.env` override those stored in `user_config.yaml`. Setting `SECRETS_PROVIDER` (`aws` or `vault`) with `SECRETS_PATH` loads credentials automatically. Provide a `FERNET_KEY` to encrypt sensitive values in `user_config.yaml`.
 
@@ -1300,9 +1412,10 @@ Increase `ohlcv_timeout` to give each request more time and lower
 ## 📚 Quick Reference
 
 ### **Getting Started**
-- **Setup**: Run `python crypto_bot/wallet_manager.py` to configure API credentials
+- **Quick Setup**: Run `./startup.sh` for automated installation and launch
+- **Manual Setup**: Run `python crypto_bot/wallet_manager.py` to configure API credentials
 - **Configuration**: Edit `crypto_bot/config.yaml` for trading parameters
-- **Launch**: Start with `python -m crypto_bot.main` (dry-run mode recommended first)
+- **Launch**: Use `./launch.sh` or start with `python -m crypto_bot.main` (dry-run mode recommended first)
 - **Web UI**: Access dashboard at `http://localhost:5000` via `python -m frontend.app`
 
 ### **Key Features**
