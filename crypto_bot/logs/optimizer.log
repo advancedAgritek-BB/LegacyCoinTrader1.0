@@ -1,5 +1,0 @@
-2025-08-26 14:02:01,623 - ERROR - Backtest failed for trend: binance GET https://api.binance.com/api/v3/exchangeInfo 451  {
-  "code": 0,
-  "msg": "Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error."
-}
-2025-08-26 14:02:01,626 - INFO - Wrote optimized params to /Users/brandonburnette/Downloads/coinTrader2.0-codex-modify-execute_signals-for-short-selling/crypto_bot/logs/optimized_params.json

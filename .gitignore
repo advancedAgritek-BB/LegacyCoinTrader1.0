@@ -137,6 +137,24 @@ config.yaml.backup
 *.json
 !sample_solana_trades.json
 
+# Additional patterns to prevent tracking of temporary files
+*.backup
+*.bak
+*.tmp
+*.temp
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.manifest
+*.spec
+
 # IDE
 .vscode/
 .idea/
