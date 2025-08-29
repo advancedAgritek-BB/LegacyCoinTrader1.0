@@ -7,8 +7,8 @@ import os
 import pandas as pd
 import requests
 
-from crypto_bot.utils.logger import LOG_DIR, setup_logger
-from crypto_bot.utils.indicator_cache import cache_series
+from utils.logger import LOG_DIR, setup_logger
+from utils.indicator_cache import cache_series
 from pathlib import Path
 
 

@@ -47,6 +47,10 @@ from crypto_bot.strategy import (
     range_arb_bot,
     stat_arb_bot,
     meme_wave_bot,
+    # Ultra-aggressive strategies
+    ultra_scalp_bot,
+    momentum_exploiter,
+    volatility_harvester,
 )
 
 logger = setup_logger(__name__, LOG_DIR / "bot.log")

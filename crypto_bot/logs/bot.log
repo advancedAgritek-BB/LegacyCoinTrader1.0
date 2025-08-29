@@ -1695,3 +1695,10 @@
 2025-08-28 15:24:45,299 - INFO - Paper trade force closed: sell 1.0 ETH/USDT @ $3000.000000, PnL: $0.00, balance: $10000.00
 2025-08-28 15:25:10,980 - INFO - Paper trade force closed: buy 0.1 BTC/USDT @ $50000.000000, PnL: $0.00, balance: $10000.00
 2025-08-28 15:25:10,981 - INFO - Paper trade force closed: sell 1.0 ETH/USDT @ $3000.000000, PnL: $0.00, balance: $10000.00
+2025-08-29 13:19:13,565 - INFO - Momentum Position Manager initialized
+2025-08-29 13:19:13,565 - INFO - Momentum-scaled take profit: 0.0400 -> 0.0400 (multiplier: 1.00)
+2025-08-29 13:19:13,565 - INFO - Set initial exit levels for SOL/USD: TP=104.0000, Trail=99.2000
+2025-08-29 13:19:13,565 - INFO - Added position test_001 for SOL/USD with momentum-aware management
+2025-08-29 13:19:13,577 - INFO - Closing position test_001 for SOL/USD: test_complete
+2025-08-29 13:19:13,577 - INFO - Final PnL: 5.0000 (5.00%)
+2025-08-29 13:19:13,577 - INFO - Partial exits taken: 0
