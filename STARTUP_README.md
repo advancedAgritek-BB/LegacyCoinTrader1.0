@@ -198,6 +198,21 @@ kill $MAIN_PID $FRONTEND_PID $TELEGRAM_PID
    
    # Kill conflicting process
    kill -9 <PID>
+   
+   # Or use a different port by setting environment variable
+   export FLASK_RUN_PORT=8000
+   ```
+
+5. **Web Dashboard Port Configuration**
+   The web dashboard defaults to port 8000 to avoid conflicts with macOS ControlCenter on port 5000.
+   You can customize the port by setting the `FLASK_RUN_PORT` environment variable:
+   
+   ```bash
+   # Set custom port
+   export FLASK_RUN_PORT=3000
+   
+   # Or add to your .env file
+   echo "FLASK_RUN_PORT=3000" >> .env
    ```
 
 ### Dependency Issues
