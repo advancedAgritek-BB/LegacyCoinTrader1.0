@@ -57,8 +57,10 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
 
     bb_full = ta.volatility.BollingerBands(df["close"], window=14)
     bb_width_full = bb_full.bollinger_wband()
-    median_bw_20_full = bb_width_full.rolling(14).median()
-    bb_width = bb_width_full.iloc[-(lookback + 1) :]
+    # Convert numpy array to pandas Series for rolling operations
+    bb_width_full_series = pd.Series(bb_width_full, index=df.index)
+    median_bw_20_full = bb_width_full_series.rolling(14).median()
+    bb_width = bb_width_full_series.iloc[-(lookback + 1) :]
     median_bw_20 = median_bw_20_full.iloc[-(lookback + 1) :]
 
     vwap = ta.volume.VolumeWeightedAveragePrice(
