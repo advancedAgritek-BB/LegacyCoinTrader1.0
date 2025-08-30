@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import AsyncGenerator, Optional
 import os
 
-import aiohttp
+try:  # optional for unit tests
+    import aiohttp  # type: ignore
+except Exception:  # pragma: no cover - allow import without aiohttp
+    aiohttp = None  # type: ignore
 import logging
 import yaml
 
@@ -92,6 +95,8 @@ class PoolWatcher:
             return
 
         self._running = True
+        if aiohttp is None:
+            raise RuntimeError("aiohttp is required for PoolWatcher")
         async with aiohttp.ClientSession() as session:
             while self._running:
                 try:
@@ -163,6 +168,8 @@ class PoolWatcher:
     async def _watch_ws(self) -> AsyncGenerator[NewPoolEvent, None]:
         """Yield events from a websocket subscription."""
         self._running = True
+        if aiohttp is None:
+            raise RuntimeError("aiohttp is required for websocket monitoring")
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.ws_connect(self.websocket_url) as ws:
