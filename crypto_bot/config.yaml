@@ -84,15 +84,6 @@ exec:
   allow_market_orders: true
   order_retry_interval: 0.5
 execution_mode: dry_run
-
-# Paper Wallet Configuration for Dry Run Mode
-paper_wallet:
-  enabled: true
-  initial_balance: 10000.0
-  max_open_trades: 10
-  allow_short: true
-  config_file: "crypto_bot/paper_wallet_config.yaml"
-
 exit_strategy:
   adaptive_trailing:
     base_trailing_pct: 0.008
@@ -298,6 +289,12 @@ optimization:
       - 0.08
       - 0.12
       - 0.15
+paper_wallet:
+  allow_short: true
+  config_file: crypto_bot/paper_wallet_config.yaml
+  enabled: true
+  initial_balance: 10000.0
+  max_open_trades: 10
 portfolio_rotation:
   enabled: true
   interval_days: 0.25

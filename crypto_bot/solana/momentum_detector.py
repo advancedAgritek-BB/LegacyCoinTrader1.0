@@ -11,7 +11,7 @@ import logging
 import time
 import json
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Deque
+from typing import Dict, List, Optional, Tuple, Deque, Set, Any
 from collections import deque
 import numpy as np
 import pandas as pd
@@ -786,3 +786,67 @@ class MomentumDetector:
             stats["signal_accuracy"] = 0.0
             
         return stats
+
+
+def calculate_momentum_score(pool_data: Dict[str, Any]) -> float:
+    """Compute a simple momentum score in [0,1] based on volume and price change.
+
+    Expects keys: 'volume_5m', 'price_history'. Robust to missing/invalid data.
+    """
+    try:
+        volume_5m = float(pool_data.get("volume_5m", 0) or 0)
+        prices = pool_data.get("price_history") or []
+        if not isinstance(prices, (list, tuple)) or len(prices) < 2:
+            return 0.0
+        try:
+            price_change = (float(prices[-1]) - float(prices[0])) / max(abs(float(prices[0])), 1e-9)
+        except Exception:
+            return 0.0
+        # Normalize heuristically
+        vol_component = min(max(volume_5m / 100000.0, 0.0), 1.0)
+        price_component = min(max(price_change / 0.2, 0.0), 1.0)
+        score = 0.6 * price_component + 0.4 * vol_component
+        return float(min(max(score, 0.0), 1.0))
+    except Exception:
+        return 0.0
+
+
+def detect_volume_spike(current_volume: float, historical_volumes: List[float]) -> bool:
+    """Return True if current_volume is a significant spike over history.
+
+    A spike is detected if there's insufficient history (>=1) and the ratio to
+    average is >= 2x.
+    """
+    try:
+        if not historical_volumes:
+            return False
+        if len(historical_volumes) == 1:
+            return True
+        avg = float(sum(historical_volumes)) / max(len(historical_volumes), 1)
+        if avg <= 0:
+            return False
+        return float(current_volume) / avg >= 2.0
+    except Exception:
+        return False
+
+
+def analyze_price_action(price_history: List[float]) -> Dict[str, Any]:
+    """Analyze trend direction and strength from price history.
+
+    Returns dict with keys: 'trend' in {'bullish','bearish','sideways','unknown'} and 'strength' in [0,1].
+    """
+    try:
+        if not price_history or len(price_history) < 2:
+            return {"trend": "unknown", "strength": 0.0}
+        start = float(price_history[0])
+        end = float(price_history[-1])
+        if start == 0:
+            return {"trend": "unknown", "strength": 0.0}
+        change = (end - start) / abs(start)
+        # Strength based on absolute change; 20% -> strength 1.0
+        strength = min(max(abs(change) / 0.2, 0.0), 1.0)
+        if abs(change) < 0.01:
+            return {"trend": "sideways", "strength": 0.0}
+        return {"trend": "bullish" if change > 0 else "bearish", "strength": strength}
+    except Exception:
+        return {"trend": "unknown", "strength": 0.0}

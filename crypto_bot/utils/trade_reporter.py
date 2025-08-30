@@ -11,6 +11,19 @@ from .logger import LOG_DIR, setup_logger
 logger = setup_logger(__name__, LOG_DIR / "bot.log")
 
 
+class TradeReporter:
+    """Minimal reporter wrapper used by tests to ensure interface exists."""
+
+    def __init__(self, notifier: TelegramNotifier):
+        self.notifier = notifier
+
+    def report_entry(self, symbol: str, strategy: str, score: float, direction: str) -> Optional[str]:
+        return report_entry(self.notifier, symbol, strategy, score, direction)
+
+    def report_exit(self, symbol: str, strategy: str, pnl: float, direction: str) -> Optional[str]:
+        return report_exit(self.notifier, symbol, strategy, pnl, direction)
+
+
 def entry_summary(symbol: str, strategy: str, score: float, direction: str) -> str:
     """Return a summary of a trade entry."""
     return (
@@ -51,3 +64,13 @@ def report_exit(*args) -> Optional[str]:
     if err:
         logger.error("Failed to report exit: %s", err)
     return err
+
+
+__all__ = [
+    "TelegramNotifier",
+    "TradeReporter",
+    "entry_summary",
+    "exit_summary",
+    "report_entry",
+    "report_exit",
+]

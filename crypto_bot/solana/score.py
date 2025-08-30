@@ -90,3 +90,14 @@ async def get_token_sentiment_score(symbol: str) -> Optional[float]:
         logger.warning(f"Failed to get sentiment score for {symbol}: {exc}")
     
     return None
+
+
+def calculate_token_score(event: NewPoolEvent, cfg: Mapping[str, float]) -> float:
+    """Backward-compatible wrapper used by callers expecting calculate_token_score.
+
+    Falls back to simple heuristic scoring.
+    """
+    try:
+        return float(score_event(event, cfg))
+    except Exception:
+        return 0.0

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 import json
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional
 
 from crypto_bot.utils.logger import LOG_DIR
 

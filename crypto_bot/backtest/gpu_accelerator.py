@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 class GPUAccelerator:
     """GPU acceleration for backtesting operations."""
     
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = config or {}
         self.gpu_available = False
         self.gpu_type = "none"
         self.gpu_memory_gb = 0
@@ -359,6 +359,9 @@ class GPUAccelerator:
         """Optimize NVIDIA GPU memory usage."""
         # NVIDIA-specific memory optimization
         pass
+
+    def is_available(self) -> bool:
+        return bool(self.gpu_available)
 
 def create_gpu_accelerator(config: Dict[str, Any]) -> GPUAccelerator:
     """Factory function to create GPU accelerator."""
