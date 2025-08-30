@@ -69,8 +69,11 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     vwap_series = vwap.volume_weighted_average_price()
     atr_full = ta.volatility.average_true_range(df["high"], df["low"], df["close"], window=14)
     adx_full = ADXIndicator(df["high"], df["low"], df["close"], window=14).adx()
-    atr = atr_full.iloc[-(lookback + 1) :]
-    adx = adx_full.iloc[-(lookback + 1) :]
+    # Convert numpy arrays to pandas Series
+    atr_full_series = pd.Series(atr_full, index=df.index)
+    adx_full_series = pd.Series(adx_full, index=df.index)
+    atr = atr_full_series.iloc[-(lookback + 1) :]
+    adx = adx_full_series.iloc[-(lookback + 1) :]
 
     rsi = cache_series("rsi", df, rsi, lookback)
     rsi_z = cache_series("rsi_z", df, rsi_z, lookback)
