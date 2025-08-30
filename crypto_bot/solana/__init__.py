@@ -5,5 +5,7 @@ specific symbols from submodules directly as needed.
 """
 
 from .scanner import get_solana_new_tokens
+from .exit import monitor_price
+from .prices import fetch_solana_prices
 
-__all__ = ["get_solana_new_tokens"]
+__all__ = ["get_solana_new_tokens", "monitor_price", "fetch_solana_prices"]

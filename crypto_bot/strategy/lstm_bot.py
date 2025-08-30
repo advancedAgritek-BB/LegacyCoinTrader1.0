@@ -2,6 +2,7 @@ from typing import Optional, Tuple
 
 import logging
 import pandas as pd
+import numpy as np
 
 logger = logging.getLogger(__name__)
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
@@ -43,8 +44,30 @@ def generate_signal(
     score = 0.0
     if MODEL is not None:
         try:  # pragma: no cover - best effort
-            score = float(MODEL.predict(df.tail(seq_len)))
-        except Exception:
+            # Ensure DataFrame is still valid before ML call
+            if not isinstance(df, pd.DataFrame) or not hasattr(df, 'empty'):
+                logger.warning("DataFrame corrupted before ML prediction, skipping ML score")
+                score = 0.0
+            else:
+                # Get the tail of the DataFrame for LSTM prediction
+                df_tail = df.tail(seq_len)
+                if not isinstance(df_tail, pd.DataFrame) or not hasattr(df_tail, 'empty'):
+                    logger.warning("DataFrame tail corrupted before ML prediction, skipping ML score")
+                    score = 0.0
+                else:
+                    prediction = MODEL.predict(df_tail)
+                    # Validate that DataFrame is still intact after ML call
+                    if not isinstance(df, pd.DataFrame) or not hasattr(df, 'empty'):
+                        logger.warning("DataFrame corrupted after ML prediction, using default score")
+                        score = 0.0
+                    else:
+                        # Ensure prediction is a valid number
+                        if isinstance(prediction, (list, np.ndarray)):
+                            score = float(prediction[0]) if len(prediction) > 0 else 0.0
+                        else:
+                            score = float(prediction)
+        except Exception as e:
+            logger.warning(f"ML prediction failed, using default score: {e}")
             score = 0.0
 
     direction = "none"

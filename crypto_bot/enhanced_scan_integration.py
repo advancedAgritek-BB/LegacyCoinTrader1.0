@@ -50,6 +50,10 @@ class EnhancedScanIntegration:
         self.strategy_integration = self.enhanced_config.get("integration", {}).get("enable_strategy_router_integration", True)
         self.risk_integration = self.enhanced_config.get("integration", {}).get("enable_risk_manager_integration", True)
         
+        # Test compatibility attributes
+        self.enabled = self.enhanced_config.get("enhanced_scanning", {}).get("enabled", True)
+        self.scan_interval = self.enhanced_config.get("enhanced_scanning", {}).get("scan_interval", 30)
+        
         # Performance tracking
         self.performance_stats = {
             "cache_hits": 0,

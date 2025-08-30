@@ -180,9 +180,26 @@ def generate_signal(
     if score > 0:
         if MODEL is not None:
             try:  # pragma: no cover - best effort
-                ml_score = MODEL.predict(df)
+                # Ensure DataFrame is still valid before ML call
+                if not isinstance(df, pd.DataFrame) or not hasattr(df, 'empty'):
+                    logger.warning("DataFrame corrupted before ML prediction, skipping ML score")
+                    ml_score = 0.5  # Default neutral score
+                else:
+                    ml_score = MODEL.predict(df)
+                    # Validate that DataFrame is still intact after ML call
+                    if not isinstance(df, pd.DataFrame) or not hasattr(df, 'empty'):
+                        logger.warning("DataFrame corrupted after ML prediction, using default ML score")
+                        ml_score = 0.5  # Default neutral score
+                    else:
+                        # Ensure ml_score is a valid number
+                        if isinstance(ml_score, (list, np.ndarray)):
+                            ml_score = float(ml_score[0]) if len(ml_score) > 0 else 0.5
+                        else:
+                            ml_score = float(ml_score)
                 score = (score + ml_score) / 2
-            except Exception:
+            except Exception as e:
+                logger.warning(f"ML prediction failed, using base score: {e}")
+                # Continue with base score if ML fails
                 pass
         if atr_normalization:
             score = normalize_score_by_volatility(df, score)

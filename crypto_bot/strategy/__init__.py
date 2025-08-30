@@ -10,7 +10,8 @@ def _optional_import(name: str):
 
     try:  # pragma: no cover - optional dependencies
         return importlib.import_module(f".{name}", __name__)
-    except Exception:  # pragma: no cover - ignore any import errors
+    except Exception as e:  # pragma: no cover - ignore any import errors
+        print(f"Warning: Failed to import {name}: {e}")
         return None
 
 
@@ -37,13 +38,20 @@ range_arb_bot = _optional_import("range_arb_bot")
 stat_arb_bot = _optional_import("stat_arb_bot")
 meme_wave_bot = _optional_import("meme_wave_bot")
 
+# Ultra-aggressive strategies
+ultra_scalp_bot = _optional_import("ultra_scalp_bot")
+momentum_exploiter = _optional_import("momentum_exploiter")
+volatility_harvester = _optional_import("volatility_harvester")
+
 try:  # Export Solana sniper strategy if available
     sniper_solana = importlib.import_module("crypto_bot.strategies.sniper_solana")
-except Exception:  # pragma: no cover - optional during tests
+except Exception as e:  # pragma: no cover - optional during tests
+    print(f"Warning: Failed to import sniper_solana: {e}")
     sniper_solana = None
 try:
     solana_scalping = importlib.import_module("crypto_bot.solana.scalping")
-except Exception:  # pragma: no cover - optional during tests
+except Exception as e:  # pragma: no cover - optional during tests
+    print(f"Warning: Failed to import solana_scalping: {e}")
     solana_scalping = None
 
 __all__ = [
@@ -72,6 +80,10 @@ __all__ = [
         "range_arb_bot",
         "stat_arb_bot",
         "meme_wave_bot",
+        # Ultra-aggressive strategies
+        "ultra_scalp_bot",
+        "momentum_exploiter",
+        "volatility_harvester",
     ]
     if globals().get(name) is not None
 ]

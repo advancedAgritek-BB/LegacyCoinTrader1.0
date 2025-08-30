@@ -89,8 +89,10 @@ def _calculate_volatility_indicators(df: pd.DataFrame, config: VolatilityHarvest
     bb = ta.volatility.BollingerBands(
         df['close'], window=config.bb_window, window_dev=config.bb_std_dev
     )
-    indicators['bb_upper'] = bb.bollinger_hband()
-    indicators['bb_lower'] = bb.bollinger_lband()
+    bb_width = bb.bollinger_wband()
+    bb_mid = df['close'].rolling(config.bb_window).mean()
+    indicators['bb_upper'] = bb_mid + (bb_width / 2)
+    indicators['bb_lower'] = bb_mid - (bb_width / 2)
     indicators['bb_width'] = (indicators['bb_upper'] - indicators['bb_lower']) / df['close']
     indicators['bb_position'] = (df['close'] - indicators['bb_lower']) / (indicators['bb_upper'] - indicators['bb_lower'])
     
@@ -120,7 +122,7 @@ def _detect_volatility_signals(
     """Detect volatility harvesting trading signals."""
     
     if len(df) < max(config.atr_window, config.volatility_lookback, config.volume_window):
-        return 0.0, "none", {}
+        return 0.0, "none"
     
     # Get latest values
     current = {k: v.iloc[-1] for k, v in indicators.items()}
@@ -246,7 +248,7 @@ def _detect_volatility_signals(
     
     # Ensure we have a direction
     if signal_direction == "none":
-        return 0.0, "none", {}
+        return 0.0, "none"
     
     # Add additional metadata
     signal_metadata.update({
@@ -266,7 +268,7 @@ def generate_signal(
     df: pd.DataFrame,
     config: Optional[Dict[str, Any]] = None,
     **kwargs
-) -> Tuple[float, str, Dict[str, Any]]:
+) -> Tuple[float, str]:
     """
     Generate volatility harvesting trading signals.
     
@@ -281,8 +283,8 @@ def generate_signal(
         
     Returns
     -------
-    Tuple[float, str, Dict[str, Any]]
-        (signal_score, direction, metadata)
+    Tuple[float, str]
+        (signal_score, direction)
     """
     
     # Create configuration
@@ -294,17 +296,17 @@ def generate_signal(
     
     # Validate data
     if df.empty or len(df) < volatility_config.atr_window:
-        return 0.0, "none", {}
+        return 0.0, "none"
     
     required_columns = ['open', 'high', 'low', 'close', 'volume']
     if not all(col in df.columns for col in required_columns):
-        return 0.0, "none", {}
+        return 0.0, "none"
     
     # Calculate indicators
     try:
         indicators = _calculate_volatility_indicators(df, volatility_config)
     except Exception as e:
-        return 0.0, "none", {"error": str(e)}
+        return 0.0, "none"
     
     # Detect signals
     try:
@@ -312,7 +314,7 @@ def generate_signal(
             df, indicators, volatility_config
         )
     except Exception as e:
-        return 0.0, "none", {"error": str(e)}
+        return 0.0, "none"
     
     # Apply volatility normalization if enabled
     if 'atr_pct' in metadata:
@@ -326,7 +328,7 @@ def generate_signal(
     # Ensure signal score is within bounds
     signal_score = max(0.0, min(1.0, signal_score))
     
-    return signal_score, direction, metadata
+    return signal_score, direction
 
 
 def get_strategy_info() -> Dict[str, Any]:

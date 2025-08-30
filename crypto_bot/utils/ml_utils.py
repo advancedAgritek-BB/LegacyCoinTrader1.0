@@ -44,11 +44,58 @@ def load_model(model_name: str) -> Optional[object]:
         # Return a dummy model object that has a predict method
         class DummyModel:
             def predict(self, data):
-                """Return a dummy prediction."""
+                """Return a dummy prediction.
+                
+                Ensures that the input data remains unchanged and returns
+                appropriate predictions based on the data type.
+                """
                 import numpy as np
-                if hasattr(data, 'shape'):
+                import pandas as pd
+                
+                # Ensure we don't modify the input data
+                if isinstance(data, pd.DataFrame):
+                    # For DataFrames, return predictions for each row
+                    if len(data) == 0:
+                        return np.array([])
+                    return np.random.random(len(data))
+                elif hasattr(data, 'shape'):
+                    # For numpy arrays or similar
+                    if len(data.shape) == 0:
+                        return np.random.random(1)
                     return np.random.random(data.shape[0] if len(data.shape) > 0 else 1)
-                return np.random.random(1)
+                elif isinstance(data, (list, tuple)):
+                    # For lists or tuples
+                    return np.random.random(len(data))
+                else:
+                    # For single values
+                    return np.random.random(1)
+            
+            def predict_proba(self, data):
+                """Return dummy probability predictions.
+                
+                Ensures that the input data remains unchanged and returns
+                appropriate probability predictions based on the data type.
+                """
+                import numpy as np
+                import pandas as pd
+                
+                # Ensure we don't modify the input data
+                if isinstance(data, pd.DataFrame):
+                    # For DataFrames, return 2-class probabilities for each row
+                    if len(data) == 0:
+                        return np.array([]).reshape(0, 2)
+                    return np.random.random((len(data), 2))
+                elif hasattr(data, 'shape'):
+                    # For numpy arrays or similar
+                    if len(data.shape) == 0:
+                        return np.random.random((1, 2))
+                    return np.random.random((data.shape[0] if len(data.shape) > 0 else 1, 2))
+                elif isinstance(data, (list, tuple)):
+                    # For lists or tuples
+                    return np.random.random((len(data), 2))
+                else:
+                    # For single values
+                    return np.random.random((1, 2))
         
         return DummyModel()
         

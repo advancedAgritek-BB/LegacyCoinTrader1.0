@@ -153,6 +153,17 @@ class EnhancedOHLCVFetcher:
             
             if not data:
                 logger.warning(f"No OHLCV data returned for {symbol} on {supported_tf}")
+                # Return empty list to indicate no data rather than raising exception
+                return []
+
+            # Validate data structure
+            if not isinstance(data, list) or len(data) == 0:
+                logger.warning(f"Invalid OHLCV data format for {symbol} on {supported_tf}: {type(data)}")
+                return []
+
+            # Validate first candle structure
+            if len(data) > 0 and (not isinstance(data[0], list) or len(data[0]) < 6):
+                logger.warning(f"Invalid OHLCV candle format for {symbol} on {supported_tf}: {data[0]}")
                 return []
             
             # If we used a fallback timeframe, we might need to resample

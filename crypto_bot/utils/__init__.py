@@ -79,7 +79,28 @@ try:
 except Exception:  # pragma: no cover - optional during tests when module mocked
     def compute_weights(*_a, **_k):  # type: ignore
         return {}
-from .market_analyzer import analyze_symbol, classify_regime_async, classify_regime_cached
+
+# Lazy import to avoid circular dependency with strategy_router
+def _get_market_analyzer_imports():
+    """Lazy import function for market_analyzer to avoid circular imports."""
+    from .market_analyzer import analyze_symbol, classify_regime_async, classify_regime_cached
+    return analyze_symbol, classify_regime_async, classify_regime_cached
+
+# Create lazy accessor functions
+def analyze_symbol(*args, **kwargs):
+    """Lazy wrapper for analyze_symbol function."""
+    func, _, _ = _get_market_analyzer_imports()
+    return func(*args, **kwargs)
+
+def classify_regime_async(*args, **kwargs):
+    """Lazy wrapper for classify_regime_async function."""
+    _, func, _ = _get_market_analyzer_imports()
+    return func(*args, **kwargs)
+
+def classify_regime_cached(*args, **kwargs):
+    """Lazy wrapper for classify_regime_cached function."""
+    _, _, func = _get_market_analyzer_imports()
+    return func(*args, **kwargs)
 from .stats import zscore
 from .commit_lock import check_and_update
 commit_lock = check_and_update  # backward-compat alias used in some tests

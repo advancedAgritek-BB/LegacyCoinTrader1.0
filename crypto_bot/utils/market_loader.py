@@ -14,6 +14,7 @@ import base58
 import warnings
 import contextlib
 from collections import deque
+from typing import Dict, Any
 
 from .telegram import TelegramNotifier
 from .logger import LOG_DIR, setup_logger
@@ -224,6 +225,50 @@ WS_OHLCV_TIMEOUT = 60
 REST_OHLCV_TIMEOUT = 90
 # Number of consecutive failures allowed before disabling a symbol
 MAX_OHLCV_FAILURES = 10
+# Additional retryable error patterns
+RETRYABLE_ERROR_PATTERNS = [
+    "too many requests",
+    "missing client certificate",
+    "rate limit",
+    "temporary",
+    "unavailable",
+    "timeout",
+    "connection",
+    "network",
+    "dns",
+    "resolve",
+    "nodename"
+]
+
+# API error handling configuration
+API_ERROR_CONFIG: Optional[Dict[str, Any]] = None
+
+def load_api_error_config() -> Dict[str, Any]:
+    """Load API error handling configuration."""
+    global API_ERROR_CONFIG
+    if API_ERROR_CONFIG is None:
+        config_path = Path(__file__).resolve().parents[2] / "config" / "api_error_handling.yaml"
+        try:
+            with open(config_path, 'r') as f:
+                API_ERROR_CONFIG = yaml.safe_load(f) or {}
+            logger.info("Loaded API error handling configuration")
+        except Exception as exc:
+            logger.warning(f"Failed to load API error config: {exc}. Using defaults.")
+            API_ERROR_CONFIG = {}
+    return API_ERROR_CONFIG
+
+def get_api_config_value(key_path: str, default=None):
+    """Get a value from the API error configuration using dot notation."""
+    config = load_api_error_config()
+    keys = key_path.split('.')
+    value = config
+
+    try:
+        for key in keys:
+            value = value[key]
+        return value
+    except (KeyError, TypeError):
+        return default
 MAX_WS_LIMIT = 500
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
 UNSUPPORTED_SYMBOL = object()
@@ -443,9 +488,13 @@ def timeframe_seconds(exchange, timeframe: str) -> int:
 
 
 async def _call_with_retry(func, *args, timeout=None, **kwargs):
-    """Call ``func`` with exponential back-off on 520/522 errors."""
+    """Call ``func`` with exponential back-off on various errors."""
 
-    attempts = 3
+    # Use configuration values if available
+    attempts = get_api_config_value('kraken.max_retries', 5)
+    base_delay = get_api_config_value('kraken.base_retry_delay', 1.0)
+    max_delay = get_api_config_value('kraken.max_retry_delay', 30.0)
+
     for attempt in range(attempts):
         try:
             if timeout is not None:
@@ -455,14 +504,33 @@ async def _call_with_retry(func, *args, timeout=None, **kwargs):
             return await func(*args, **kwargs)
         except asyncio.CancelledError:
             raise
-        except (ccxt.ExchangeError, ccxt.NetworkError) as exc:
-            if (
-                getattr(exc, "http_status", None) in (520, 522)
-                and attempt < attempts - 1
-            ):
-                await asyncio.sleep(2**attempt)
+        except (ccxt.ExchangeError, ccxt.NetworkError, ccxt.BadRequest) as exc:
+            # Handle various Kraken-specific errors
+            error_msg = str(exc).lower()
+
+            # Get retryable status codes and patterns from config
+            retryable_status_codes = get_api_config_value('kraken.retryable_status_codes', [520, 522, 429, 400])
+            retryable_patterns = get_api_config_value('kraken.retryable_error_patterns', RETRYABLE_ERROR_PATTERNS)
+
+            is_retryable_error = (
+                getattr(exc, "http_status", None) in retryable_status_codes or
+                any(pattern in error_msg for pattern in retryable_patterns)
+            )
+
+            if is_retryable_error and attempt < attempts - 1:
+                delay = min(max_delay, base_delay * (2 ** attempt))
+                logger.warning(
+                    f"Retryable error on attempt {attempt + 1}/{attempts}: {exc}. "
+                    f"Retrying in {delay:.1f}s"
+                )
+                await asyncio.sleep(delay)
                 continue
-            raise
+            elif not is_retryable_error:
+                logger.error(f"Non-retryable error: {exc}")
+                raise
+            else:
+                logger.error(f"Max retries ({attempts}) exceeded for: {exc}")
+                raise
 
 
 async def load_kraken_symbols(
@@ -1592,10 +1660,21 @@ async def update_ohlcv_cache(
             if data:
                 failed_symbols.pop(sym, None)
         if data is None:
+            # Skip this symbol but don't break the cache structure
             continue
-        df_new = pd.DataFrame(
-            data, columns=["timestamp", "open", "high", "low", "close", "volume"]
-        )
+
+        # Ensure data is a list of lists before creating DataFrame
+        if not isinstance(data, list) or not data:
+            logger.warning(f"Invalid data format for {sym}: {type(data)}")
+            continue
+
+        try:
+            df_new = pd.DataFrame(
+                data, columns=["timestamp", "open", "high", "low", "close", "volume"]
+            )
+        except Exception as e:
+            logger.error(f"Failed to create DataFrame for {sym}: {e}")
+            continue
         min_candles_required = int(limit * 0.5)
         if len(df_new) < min_candles_required:
             since_val = since_map.get(sym)

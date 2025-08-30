@@ -11,6 +11,16 @@ from .logger import setup_logger
 
 
 @dataclass
+class ScanResult:
+    """Represents a scan result with metadata."""
+    symbol: str
+    data: Any
+    timestamp: float
+    score: float = 0.0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class CacheEntry:
     """Represents a single cache entry with metadata."""
     data: Any
@@ -71,7 +81,7 @@ class AdaptiveCacheManager:
             "compression_enabled": enable_compression
         }
         
-        self.logger = setup_logger("adaptive_cache_manager")
+        self.logger = setup_logger("adaptive_cache_manager", "logs/adaptive_cache_manager.log")
         
     def get_cache_size(self, cache_type: str) -> int:
         """
@@ -349,6 +359,20 @@ class AdaptiveCacheManager:
 
 # Global cache manager instance
 _global_cache_manager: Optional[AdaptiveCacheManager] = None
+
+
+def get_scan_cache_manager(config: Optional[Dict[str, Any]] = None) -> AdaptiveCacheManager:
+    """
+    Get or create the global scan cache manager instance.
+    Alias for get_cache_manager for backward compatibility.
+    
+    Args:
+        config: Optional configuration dictionary (currently unused, kept for compatibility)
+        
+    Returns:
+        AdaptiveCacheManager instance
+    """
+    return get_cache_manager()
 
 
 def get_cache_manager() -> AdaptiveCacheManager:

@@ -150,6 +150,12 @@ async def analyze_symbol(
         telemetry.inc("analysis.skipped_no_df")
         return {"symbol": symbol, "skip": "no_ohlcv"}
 
+    # Check if df is actually a pandas DataFrame
+    if not isinstance(df, pd.DataFrame):
+        telemetry.inc("analysis.skipped_invalid_df")
+        analysis_logger.warning("Skipping %s: invalid data type for %s (%s)", symbol, base_tf, type(df))
+        return {"symbol": symbol, "skip": "invalid_df_type"}
+
     if df.empty:
         telemetry.inc("analysis.skipped_no_df")
         analysis_logger.info("Skipping %s: no data for %s", symbol, base_tf)
@@ -297,7 +303,45 @@ async def analyze_symbol(
         def wrap(fn):
             if fn is grid_bot.generate_signal:
                 return functools.partial(fn, higher_df=higher_df_1h)
-            return fn
+            # For other strategies, ensure they receive the DataFrame for the base timeframe
+            def wrapped_strategy(df_or_map, config=None):
+                if isinstance(df_or_map, dict):
+                    # Extract DataFrame for the base timeframe
+                    base_tf = router_cfg.timeframe
+                    df = df_or_map.get(base_tf)
+                    if df is None:
+                        # Fallback to any available DataFrame
+                        for tf in ['15m', '1h', '4h', '1d']:
+                            df = df_or_map.get(tf)
+                            if df is not None and isinstance(df, pd.DataFrame) and not df.empty:
+                                break
+                    if df is None or not isinstance(df, pd.DataFrame):
+                        # Return no signal if no valid DataFrame available
+                        return 0.0, "none"
+                else:
+                    df = df_or_map
+
+                # Ensure df is a valid DataFrame
+                if not isinstance(df, pd.DataFrame):
+                    logger.warning(f"Strategy {fn.__name__} received invalid data type: {type(df)}")
+                    return 0.0, "none"
+
+                if df.empty:
+                    logger.debug(f"Strategy {fn.__name__} received empty DataFrame")
+                    return 0.0, "none"
+
+                # Call the strategy with the DataFrame
+                try:
+                    if config is not None:
+                        return fn(df, config)
+                    else:
+                        return fn(df)
+                except TypeError:
+                    # Fallback if strategy doesn't accept config
+                    return fn(df)
+
+            wrapped_strategy.__name__ = getattr(fn, "__name__", "wrapped_strategy")
+            return wrapped_strategy
 
         if eval_mode == "best":
             strategies = [
@@ -349,9 +393,22 @@ async def analyze_symbol(
         else:
             strategy_fn = wrap(route(regime, env, router_cfg, notifier, df_map=df_map))
             name = strategy_name(regime, env)
-            score, direction, atr = (await evaluate_async([strategy_fn], df_map, cfg))[
-                0
-            ]
+            # Extract the DataFrame for the base timeframe before calling evaluate_async
+            base_tf = router_cfg.timeframe
+            df_for_strategy = df_map.get(base_tf)
+            if df_for_strategy is None or (isinstance(df_for_strategy, pd.DataFrame) and df_for_strategy.empty):
+                # Fallback to any available DataFrame
+                for tf in ['15m', '1h', '4h', '1d']:
+                    df_for_strategy = df_map.get(tf)
+                    if df_for_strategy is not None and isinstance(df_for_strategy, pd.DataFrame) and not df_for_strategy.empty:
+                        break
+                if df_for_strategy is None or (isinstance(df_for_strategy, pd.DataFrame) and df_for_strategy.empty):
+                    # No data available, return no signal
+                    score, direction, atr = 0.0, "none", None
+                else:
+                    score, direction, atr = (await evaluate_async([strategy_fn], df_for_strategy, cfg))[0]
+            else:
+                score, direction, atr = (await evaluate_async([strategy_fn], df_for_strategy, cfg))[0]
 
         atr_period = int(config.get("risk", {}).get("atr_period", 14))
         if direction != "none" and {"high", "low", "close"}.issubset(df.columns):

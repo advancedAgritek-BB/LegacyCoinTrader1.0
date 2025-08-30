@@ -115,7 +115,7 @@ def _detect_ultra_scalp_signals(
     """Detect ultra-scalp trading signals."""
     
     if len(df) < max(config.ema_slow, config.rsi_window, config.volume_window):
-        return 0.0, "none", {}
+        return 0.0, "none"
     
     # Get latest values
     current = {k: v.iloc[-1] for k, v in indicators.items()}
@@ -198,7 +198,7 @@ def _detect_ultra_scalp_signals(
     
     # Apply minimum score filter
     if signal_strength < config.min_score:
-        return 0.0, "none", {}
+        return 0.0, "none"
     
     # Add additional metadata
     signal_metadata.update({
@@ -215,7 +215,7 @@ def generate_signal(
     df: pd.DataFrame,
     config: Optional[Dict[str, Any]] = None,
     **kwargs
-) -> Tuple[float, str, Dict[str, Any]]:
+) -> Tuple[float, str]:
     """
     Generate ultra-aggressive scalping signals.
     
@@ -230,8 +230,8 @@ def generate_signal(
         
     Returns
     -------
-    Tuple[float, str, Dict[str, Any]]
-        (signal_score, direction, metadata)
+    Tuple[float, str]
+        (signal_score, direction)
     """
     
     # Create configuration
@@ -243,17 +243,17 @@ def generate_signal(
     
     # Validate data
     if df.empty or len(df) < ultra_config.ema_slow:
-        return 0.0, "none", {}
+        return 0.0, "none"
     
     required_columns = ['open', 'high', 'low', 'close', 'volume']
     if not all(col in df.columns for col in required_columns):
-        return 0.0, "none", {}
+        return 0.0, "none"
     
     # Calculate indicators
     try:
         indicators = _calculate_ultra_fast_indicators(df, ultra_config)
     except Exception as e:
-        return 0.0, "none", {"error": str(e)}
+        return 0.0, "none"
     
     # Detect signals
     try:
@@ -261,7 +261,7 @@ def generate_signal(
             df, indicators, ultra_config
         )
     except Exception as e:
-        return 0.0, "none", {"error": str(e)}
+        return 0.0, "none"
     
     # Apply volatility normalization if enabled
     if 'atr_pct' in metadata:
@@ -275,7 +275,7 @@ def generate_signal(
     # Ensure signal score is within bounds
     signal_score = max(0.0, min(1.0, signal_score))
     
-    return signal_score, direction, metadata
+    return signal_score, direction
 
 
 def get_strategy_info() -> Dict[str, Any]:

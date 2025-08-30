@@ -1,41 +1,14 @@
-from __future__ import annotations
+"""Meme wave bot strategy for detecting and trading meme coin pumps."""
 
-import inspect
-from typing import Mapping, Optional, Tuple
+import logging
+from typing import Dict, Optional, Tuple
 
 import pandas as pd
 import ta
 
-from crypto_bot.execution.solana_mempool import SolanaMempoolMonitor
-from crypto_bot.sentiment_filter import fetch_twitter_sentiment
-from crypto_bot.solana.exit import monitor_price
-from crypto_bot.solana_trading import sniper_trade
-from crypto_bot.utils.logger import LOG_DIR, setup_logger
-NAME = "meme_wave_bot"
+from ..sentiment_filter import get_lunarcrush_sentiment_boost, get_sentiment_score
 
-logger = setup_logger(__name__, LOG_DIR / "bot.log")
-
-
-async def trade(symbol: str, amount: float, cfg: Mapping[str, object]) -> dict:
-    """Execute a meme-wave trade using :func:`sniper_trade`."""
-    wallet = str(cfg.get("wallet_address", ""))
-    base, quote = symbol.split("/")
-    return await sniper_trade(
-        wallet,
-        quote,
-        base,
-        amount,
-        dry_run=bool(cfg.get("dry_run", True)),
-        slippage_bps=int(cfg.get("slippage_bps", 50)),
-        notifier=cfg.get("notifier"),
-        mempool_monitor=cfg.get("mempool_monitor"),
-        mempool_cfg=cfg.get("mempool_cfg"),
-    )
-
-
-async def exit_trade(price_feed, entry_price: float, cfg: Mapping[str, float]) -> dict:
-    """Exit a meme-wave trade using :func:`monitor_price`."""
-    return await monitor_price(price_feed, entry_price, cfg)
+logger = logging.getLogger(__name__)
 
 
 async def generate_signal(
@@ -44,65 +17,68 @@ async def generate_signal(
     timeframe: Optional[str] = None,
     **kwargs,
 ) -> Tuple[float, str]:
-    """Return a meme wave score and direction using volume and sentiment."""
-
-    if isinstance(symbol, dict) and timeframe is None:
-        kwargs.setdefault("config", symbol)
-        symbol = None
-    if isinstance(timeframe, dict):
-        kwargs.setdefault("config", timeframe)
-        timeframe = None
-    config = kwargs.get("config")
-    mempool_monitor: Optional[SolanaMempoolMonitor] = kwargs.get("mempool_monitor")
-    mempool_cfg: Optional[dict] = kwargs.get("mempool_cfg")
-
-    if mempool_monitor is None:
-        return 0.0, "none"
-
-    params = config.get("meme_wave_bot", {}) if config else {}
-    vol_threshold = float(params.get("volume_threshold", 1.0))
-    sentiment_thr = float(params.get("sentiment_threshold", 0.0))
-    query = params.get("twitter_query") or ""
-    atr_window = int(params.get("atr_window", 14))
-    vol_window = int(params.get("volume_window", 20))
-    jump_mult = float(params.get("jump_mult", 3.0))
-    vol_mult = float(params.get("volume_mult", 3.0))
-    vol_spike_thr = params.get("vol_spike_thr")
-
-    recent_vol_val = mempool_monitor.get_recent_volume()
-    avg_vol_val = mempool_monitor.get_average_volume()
-    recent_vol = (
-        await recent_vol_val if inspect.isawaitable(recent_vol_val) else recent_vol_val
-    )
-    avg_vol = (
-        await avg_vol_val if inspect.isawaitable(avg_vol_val) else avg_vol_val
-    )
-    price_change = df["close"].iloc[-1] - df["close"].iloc[-2]
-    vol = float(df["volume"].iloc[-1])
-    atr = ta.volatility.average_true_range(
-        df["high"], df["low"], df["close"], window=atr_window
-    )
-
-    recent_vol = mempool_monitor.get_recent_volume()
-    avg_vol = mempool_monitor.get_average_volume()
-
-    vol = float(df["volume"].iloc[-1])
-    price_change = float(df["close"].iloc[-1] - df["close"].iloc[-2]) if len(df) > 1 else 0.0
-    atr = ta.volatility.AverageTrueRange(
-        df["high"], df["low"], df["close"], window=atr_window
-    ).average_true_range()
-
+    """
+    Generate trading signal based on meme wave patterns.
+    
+    Args:
+        df: OHLCV dataframe
+        symbol: Trading symbol
+        timeframe: Timeframe string
+        **kwargs: Additional parameters including config
+    
+    Returns:
+        Tuple of (signal_strength, signal_type)
+    """
+    config = kwargs.get("config", {})
+    
+    # Strategy parameters
+    vol_threshold = config.get("vol_threshold", 2.0)
+    vol_mult = config.get("vol_mult", 3.0)
+    jump_mult = config.get("jump_mult", 2.0)
+    sentiment_thr = config.get("sentiment_threshold", 0.6)
+    vol_spike_thr = config.get("vol_spike_threshold", 5.0)
+    atr_window = config.get("atr_window", 14)
+    
+    # Get query for sentiment (use symbol if available)
+    query = symbol or config.get("symbol", "bitcoin")
+    
+    # Get mempool volume data if available
     try:
-        sentiment = fetch_twitter_sentiment(query) / 100.0
+        recent_vol = float(config.get("recent_mempool_volume", 0.0))
+        avg_vol = float(config.get("avg_mempool_volume", 0.0))
+    except Exception as e:
+        logger.warning(f"Failed to get mempool volume data: {e}")
+        recent_vol = 0.0
+        avg_vol = 0.0
+
+    # Calculate price and volume metrics
+    price_change = float(df["close"].iloc[-1] - df["close"].iloc[-2]) if len(df) > 1 else 0.0
+    vol = float(df["volume"].iloc[-1])
+    
+    # Calculate ATR
+    try:
+        atr = ta.volatility.AverageTrueRange(
+            df["high"], df["low"], df["close"], window=atr_window
+        ).average_true_range()
+        atr_value = atr.iloc[-1] if not atr.empty else 0.0
+    except Exception as e:
+        logger.warning(f"Failed to calculate ATR: {e}")
+        atr_value = 0.0
+
+    # Get sentiment using LunarCrush instead of Twitter
+    try:
+        sentiment = await get_sentiment_score(query)
     except Exception:
         sentiment = 0.5  # Default neutral sentiment
     logger.info("Meme-wave sentiment: %.2f for query '%s'", sentiment, query)
 
+    # Check basic volume and sentiment conditions
     if avg_vol and recent_vol >= avg_vol * vol_threshold and sentiment >= sentiment_thr:
         return 1.0, "long"
 
+    # Check for price spike
     spike = (
-        abs(price_change) >= atr.iloc[-1] * jump_mult
+        abs(price_change) >= atr_value * jump_mult
         and avg_vol > 0
         and vol >= avg_vol * vol_mult
     )
@@ -110,46 +86,72 @@ async def generate_signal(
     if not spike:
         return 0.0, "none"
 
+    # Check mempool conditions
     mempool_ok = True
-    if mempool_monitor is not None and vol_spike_thr is not None:
+    if vol_spike_thr is not None:
         try:
-            recent_vol_val = mempool_monitor.get_recent_volume()
-            avg_mempool_val = mempool_monitor.get_average_volume()
-            recent_vol = (
-                await recent_vol_val
-                if inspect.isawaitable(recent_vol_val)
-                else recent_vol_val
-            )
-            avg_mempool = (
-                await avg_mempool_val
-                if inspect.isawaitable(avg_mempool_val)
-                else avg_mempool_val
-            )
-        except Exception:
-            recent_vol = 0.0
-            avg_mempool = 0.0
-
-        if avg_mempool <= 0 or recent_vol < float(vol_spike_thr) * avg_mempool:
+            if avg_vol <= 0 or recent_vol < float(vol_spike_thr) * avg_vol:
+                mempool_ok = False
+        except Exception as e:
+            logger.warning(f"Failed to check mempool conditions: {e}")
             mempool_ok = False
 
+    # Check sentiment conditions using LunarCrush
     sentiment_ok = True
     if sentiment_thr is not None:
         try:
             q = query
             if not q:
                 q = config.get("symbol") if isinstance(config, dict) else None
-            sentiment = fetch_twitter_sentiment(q or "") / 100.0
+            sentiment = await get_sentiment_score(q or "")
             if sentiment < float(sentiment_thr):
                 sentiment_ok = False
-        except Exception:
-            sentiment = fetch_twitter_sentiment(q or "") / 100.0
-            if sentiment < float(sentiment_thr):
-                sentiment_ok = False
+        except Exception as e:
+            logger.warning(f"Failed to check sentiment conditions: {e}")
+            sentiment_ok = False
 
+    # Check if all conditions are met
     if mempool_ok and sentiment_ok:
-        return 1.0, "long" if price_change > 0 else "short"
+        # Calculate signal strength based on volume and sentiment
+        vol_strength = min(1.0, recent_vol / (avg_vol * vol_threshold))
+        sentiment_strength = min(1.0, sentiment / sentiment_thr)
+        
+        # Combine strengths with volume having more weight
+        signal_strength = (vol_strength * 0.7) + (sentiment_strength * 0.3)
+        
+        logger.info(
+            f"Meme wave signal generated: strength={signal_strength:.2f}, "
+            f"vol_strength={vol_strength:.2f}, sentiment_strength={sentiment_strength:.2f}"
+        )
+        
+        return signal_strength, "long"
 
     return 0.0, "none"
+
+
+async def get_sentiment_boost(symbol: str, trade_direction: str = "long") -> float:
+    """
+    Get sentiment boost factor for meme wave trades.
+    
+    Args:
+        symbol: Trading symbol
+        trade_direction: Trade direction ('long' or 'short')
+    
+    Returns:
+        Boost factor multiplier
+    """
+    try:
+        # Use LunarCrush sentiment boost
+        boost = await get_lunarcrush_sentiment_boost(
+            symbol=symbol,
+            trade_direction=trade_direction,
+            min_galaxy_score=60.0,
+            min_sentiment=0.6
+        )
+        return boost
+    except Exception as e:
+        logger.warning(f"Failed to get sentiment boost for {symbol}: {e}")
+        return 1.0  # Default no boost
 
 
 class regime_filter:

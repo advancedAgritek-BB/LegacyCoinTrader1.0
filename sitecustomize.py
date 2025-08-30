@@ -22,12 +22,13 @@ except Exception:  # pragma: no cover - fallback stub
     except Exception:
         pass
 
-try:  # prefer real pandas
-    import pandas  # type: ignore
-except Exception:  # pragma: no cover - fallback stub
-    try:
-        from pandas_stub import *  # type: ignore
-        import pandas_stub as _pd_stub  # type: ignore
-        sys.modules.setdefault('pandas', _pd_stub)
-    except Exception:
-        pass
+# Remove pandas stub import since pandas is available and the stub causes DataFrame conversion issues
+# try:  # prefer real pandas
+#     import pandas  # type: ignore
+# except Exception:  # pragma: no cover - fallback stub
+#     try:
+#         from pandas_stub import *  # type: ignore
+#         import pandas_stub as _pd_stub  # type: ignore
+#         sys.modules.setdefault('pandas', _pd_stub)
+#     except Exception:
+#         pass

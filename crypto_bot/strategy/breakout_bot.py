@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 import pandas as pd
 import ta
@@ -20,6 +20,9 @@ except Exception:  # pragma: no cover - fallback
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils import stats
+from crypto_bot.utils.logger import LOG_DIR, setup_logger
+
+logger = setup_logger(__name__, LOG_DIR / "breakout_bot.log")
 
 
 def _squeeze(
@@ -71,7 +74,7 @@ def generate_signal(
     df: pd.DataFrame,
     config: Optional[dict] = None,
     higher_df: Optional[pd.DataFrame] = None,
-) -> Tuple[float, str] | Tuple[float, str, float]:
+) -> Union[Tuple[float, str], Tuple[float, str, float]]:
     """Breakout strategy using Bollinger/Keltner squeeze confirmation.
 
     Returns

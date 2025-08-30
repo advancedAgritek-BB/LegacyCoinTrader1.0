@@ -35,84 +35,151 @@ def compute_performance(df: pd.DataFrame) -> Dict[str, float]:
             'total_trades': 0,
             'win_rate': 0.0,
             'total_pnl': 0.0,
-            'avg_trade_size': 0.0
+            'avg_trade_size': 0.0,
+            'per_symbol': {},
+            'total_volume': 0.0,
+            'max_drawdown': 0.0,
+            'sharpe_ratio': 0.0
         }
     
-    # Calculate basic metrics
-    total_trades = len(df)
-    
-    # Calculate PnL per symbol
-    perf: Dict[str, float] = {}
-    open_pos: dict[str, list[Tuple[float, float]]] = {}
-
-    for _, row in df.iterrows():
-        symbol = row["symbol"] if "symbol" in row else "Unknown"
-        side = row["side"] if "side" in row else "buy"
-        try:
-            price = float(row["price"]) if "price" in row else 0.0
-        except (ValueError, TypeError):
-            price = 0.0
-        try:
-            amount = float(row["amount"]) if "amount" in row else 0.0
-        except (ValueError, TypeError):
-            amount = 0.0
-
-        if side == "buy":
-            # Buys first close any existing short positions
-            while amount > 0 and open_pos.get(symbol, []) and open_pos[symbol][0][1] < 0:
-                entry_price, qty = open_pos[symbol].pop(0)
-                qty = -qty  # convert short quantity to positive
-                traded = min(qty, amount)
-                perf[symbol] = perf.get(symbol, 0.0) + (entry_price - price) * traded
-                if qty > traded:
-                    open_pos[symbol].insert(0, (entry_price, -(qty - traded)))
-                amount -= traded
-            # Remaining amount opens a new long position
-            if amount > 0:
-                if symbol not in open_pos:
-                    open_pos[symbol] = []
-                open_pos[symbol].append((price, amount))
-
-        elif side == "sell":
-            # Sells first close existing long positions
-            while amount > 0 and open_pos.get(symbol, []) and open_pos[symbol][0][1] > 0:
-                entry_price, qty = open_pos[symbol].pop(0)
-                traded = min(qty, amount)
-                perf[symbol] = perf.get(symbol, 0.0) + (price - entry_price) * traded
-                if qty > traded:
-                    open_pos[symbol].insert(0, (entry_price, qty - traded))
-                amount -= traded
-            # Excess amount starts a short position
-            if amount > 0:
-                if symbol not in open_pos:
-                    open_pos[symbol] = []
-                open_pos[symbol].append((price, -amount))
-
-    # Calculate win rate (simplified - positive PnL trades)
-    winning_trades = sum(1 for pnl in perf.values() if pnl > 0)
-    win_rate = winning_trades / len(perf) if perf else 0.0
-    
-    # Calculate total PnL
-    total_pnl = sum(perf.values())
-    
-    # Calculate average trade size
     try:
-        if 'amount' in df.columns and not df.empty:
-            # Check if the amount column contains numeric data
-            numeric_amounts = pd.to_numeric(df['amount'], errors='coerce')
-            avg_trade_size = numeric_amounts.mean() if not numeric_amounts.isna().all() else 0.0
+        # Calculate basic metrics
+        total_trades = len(df)
+        
+        # Calculate PnL per symbol with improved logic
+        perf: Dict[str, float] = {}
+        open_pos: dict[str, list[Tuple[float, float]]] = {}
+        total_volume = 0.0
+        trade_pnls = []  # Track individual trade PnLs for statistics
+        
+        for _, row in df.iterrows():
+            try:
+                symbol = str(row.get("symbol", "")).strip()
+                side = str(row.get("side", "")).strip().lower()
+                price = float(row.get("price", 0))
+                amount = float(row.get("amount", 0))
+                
+                # Skip invalid data
+                if not symbol or price <= 0 or amount <= 0:
+                    continue
+                
+                # Calculate trade volume
+                trade_volume = price * amount
+                total_volume += trade_volume
+                
+                if side == "buy":
+                    # Buys first close any existing short positions
+                    while amount > 0 and open_pos.get(symbol, []) and open_pos[symbol][0][1] < 0:
+                        entry_price, qty = open_pos[symbol].pop(0)
+                        qty = -qty  # convert short quantity to positive
+                        traded = min(qty, amount)
+                        trade_pnl = (entry_price - price) * traded
+                        perf[symbol] = perf.get(symbol, 0.0) + trade_pnl
+                        trade_pnls.append(trade_pnl)
+                        
+                        if qty > traded:
+                            open_pos[symbol].insert(0, (entry_price, -(qty - traded)))
+                        amount -= traded
+                    
+                    # Remaining amount opens a new long position
+                    if amount > 0:
+                        if symbol not in open_pos:
+                            open_pos[symbol] = []
+                        open_pos[symbol].append((price, amount))
+
+                elif side == "sell":
+                    # Sells first close existing long positions
+                    while amount > 0 and open_pos.get(symbol, []) and open_pos[symbol][0][1] > 0:
+                        entry_price, qty = open_pos[symbol].pop(0)
+                        traded = min(qty, amount)
+                        trade_pnl = (price - entry_price) * traded
+                        perf[symbol] = perf.get(symbol, 0.0) + trade_pnl
+                        trade_pnls.append(trade_pnl)
+                        
+                        if qty > traded:
+                            open_pos[symbol].insert(0, (entry_price, qty - traded))
+                        amount -= traded
+                    
+                    # Excess amount starts a short position
+                    if amount > 0:
+                        if symbol not in open_pos:
+                            open_pos[symbol] = []
+                        open_pos[symbol].append((price, -amount))
+                        
+            except (ValueError, TypeError, AttributeError) as e:
+                print(f"Error processing trade row: {e}, row: {row}")
+                continue
+        
+        # Calculate win rate from completed trades
+        if trade_pnls:
+            winning_trades = sum(1 for pnl in trade_pnls if pnl > 0)
+            win_rate = winning_trades / len(trade_pnls)
         else:
+            win_rate = 0.0
+        
+        # Calculate total PnL
+        total_pnl = sum(perf.values())
+        
+        # Calculate average trade size
+        try:
+            if 'amount' in df.columns and not df.empty:
+                numeric_amounts = pd.to_numeric(df['amount'], errors='coerce')
+                avg_trade_size = numeric_amounts.mean() if not numeric_amounts.isna().all() else 0.0
+            else:
+                avg_trade_size = 0.0
+        except Exception:
             avg_trade_size = 0.0
-    except Exception:
-        avg_trade_size = 0.0
-    
-    return {
-        'total_trades': total_trades,
-        'win_rate': win_rate,
-        'total_pnl': total_pnl,
-        'avg_trade_size': avg_trade_size,
-        'per_symbol': perf
-    }
+        
+        # Calculate additional metrics
+        max_drawdown = 0.0
+        if trade_pnls:
+            cumulative_pnl = 0
+            peak = 0
+            for pnl in trade_pnls:
+                cumulative_pnl += pnl
+                if cumulative_pnl > peak:
+                    peak = cumulative_pnl
+                drawdown = peak - cumulative_pnl
+                if drawdown > max_drawdown:
+                    max_drawdown = drawdown
+        
+        # Calculate Sharpe ratio (simplified)
+        sharpe_ratio = 0.0
+        if trade_pnls and len(trade_pnls) > 1:
+            try:
+                import numpy as np
+                returns = np.array(trade_pnls)
+                if returns.std() > 0:
+                    sharpe_ratio = returns.mean() / returns.std()
+            except ImportError:
+                pass
+        
+        return {
+            'total_trades': total_trades,
+            'win_rate': win_rate,
+            'total_pnl': total_pnl,
+            'avg_trade_size': avg_trade_size,
+            'per_symbol': perf,
+            'total_volume': total_volume,
+            'max_drawdown': max_drawdown,
+            'sharpe_ratio': sharpe_ratio,
+            'completed_trades': len(trade_pnls),
+            'open_positions': len([pos for pos in open_pos.values() if pos])
+        }
+        
+    except Exception as e:
+        print(f"Error computing performance: {e}")
+        return {
+            'total_trades': 0,
+            'win_rate': 0.0,
+            'total_pnl': 0.0,
+            'avg_trade_size': 0.0,
+            'per_symbol': {},
+            'total_volume': 0.0,
+            'max_drawdown': 0.0,
+            'sharpe_ratio': 0.0,
+            'error': str(e)
+        }
 
 
 def is_running(proc: Optional[subprocess.Popen]) -> bool:

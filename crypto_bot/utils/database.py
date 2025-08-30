@@ -1,11 +1,18 @@
 """Database management utilities for the trading bot."""
 
 import asyncio
-import asyncpg
 from typing import Optional, Dict, Any, List, Union
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import logging
+
+# Optional asyncpg dependency
+try:
+    import asyncpg
+    ASYNCPG_AVAILABLE = True
+except ImportError:
+    ASYNCPG_AVAILABLE = False
+    asyncpg = None
 
 from .logger import setup_logger
 
@@ -86,8 +93,16 @@ class DatabaseManager:
         
         self.logger = setup_logger("database_manager")
     
+    def is_available(self) -> bool:
+        """Check if database operations are available."""
+        return ASYNCPG_AVAILABLE and self.pool is not None
+    
     async def initialize(self) -> None:
         """Initialize the connection pool."""
+        if not ASYNCPG_AVAILABLE:
+            self.logger.warning("asyncpg not available, database operations will be disabled")
+            return
+            
         try:
             self.pool = await asyncpg.create_pool(
                 host=self.host,
@@ -147,6 +162,9 @@ class DatabaseManager:
         Returns:
             Query result
         """
+        if not self.is_available():
+            raise RuntimeError("Database not available - asyncpg not installed or pool not initialized")
+            
         start_time = asyncio.get_event_loop().time()
         
         try:
@@ -170,7 +188,7 @@ class DatabaseManager:
             self.logger.error(f"Database query error: {e}")
             raise
     
-    async def fetch(self, query: str, *args, **kwargs) -> List[asyncpg.Record]:
+    async def fetch(self, query: str, *args, **kwargs) -> List[Any]:
         """
         Fetch rows from a query.
         
@@ -182,6 +200,9 @@ class DatabaseManager:
         Returns:
             List of records
         """
+        if not self.is_available():
+            raise RuntimeError("Database not available - asyncpg not installed or pool not initialized")
+            
         start_time = asyncio.get_event_loop().time()
         
         try:
@@ -205,7 +226,7 @@ class DatabaseManager:
             self.logger.error(f"Database fetch error: {e}")
             raise
     
-    async def fetchrow(self, query: str, *args, **kwargs) -> Optional[asyncpg.Record]:
+    async def fetchrow(self, query: str, *args, **kwargs) -> Optional[Any]:
         """
         Fetch a single row from a query.
         

@@ -63,15 +63,18 @@ class RLStrategySelector:
                 }
 
     def select(self, regime: str) -> Callable[[pd.DataFrame], tuple]:
-        from ..strategy_router import strategy_for
+        # Lazy import to avoid circular dependency
+        def _get_strategy_for():
+            from ..strategy_router import strategy_for
+            return strategy_for
 
         scores = self.regime_scores.get(regime)
         if not scores:
-            return strategy_for(regime)
+            return _get_strategy_for()(regime)
         best = max(
             scores.items(), key=lambda x: x[1]["mean"] * x[1]["count"]
         )[0]
-        return _STRATEGY_FN_MAP.get(best, strategy_for(regime))
+        return _STRATEGY_FN_MAP.get(best, _get_strategy_for()(regime))
 
 
 _selector = RLStrategySelector()

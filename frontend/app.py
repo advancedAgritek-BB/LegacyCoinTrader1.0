@@ -33,6 +33,7 @@ import requests
 from crypto_bot import log_reader
 from crypto_bot import ml_signal_model as ml
 import frontend.utils as utils
+from typing import Dict
 
 app = Flask(__name__)
 
@@ -148,58 +149,98 @@ def load_execution_mode() -> str:
 
 
 def get_paper_wallet_balance() -> float:
-    """Get paper wallet balance from config."""
-    # Try multiple possible paths for the paper wallet config (same as main bot)
-    possible_paths = [
-        Path("crypto_bot/paper_wallet_config.yaml"),  # Relative to current directory
-        Path(__file__).parent.parent / "paper_wallet_config.yaml",  # Relative to frontend/app.py
-        Path.cwd() / "crypto_bot" / "paper_wallet_config.yaml",  # Relative to working directory
-        LOG_DIR / 'paper_wallet.yaml',  # Legacy location (fallback)
-    ]
-    
-    for config_path in possible_paths:
-        if config_path.exists():
+    """Get paper wallet balance from multiple sources, prioritizing the most recent."""
+    try:
+        # Priority 1: Check positions.log for most recent balance
+        if POSITIONS_FILE.exists():
+            with open(POSITIONS_FILE, 'r') as f:
+                lines = f.readlines()
+                
+            # Look for the most recent balance entry
+            for line in reversed(lines):
+                if 'balance $' in line:
+                    import re
+                    balance_match = re.search(r'balance \$?([0-9.]+)', line)
+                    if balance_match:
+                        balance = float(balance_match.group(1))
+                        print(f"Frontend got paper wallet balance from positions.log: ${balance:.2f}")
+                        return balance
+        
+        # Priority 2: Check paper_wallet.yaml
+        paper_wallet_file = LOG_DIR / 'paper_wallet.yaml'
+        if paper_wallet_file.exists():
             try:
-                with open(config_path, 'r') as f:
+                with open(paper_wallet_file) as f:
                     config = yaml.safe_load(f) or {}
-                    balance = config.get('initial_balance', 10000.0)
-                    print(f"Frontend loaded paper wallet balance from {config_path}: ${balance:.2f}")
+                    balance = float(config.get('initial_balance', 10000.0))
+                    print(f"Frontend got paper wallet balance from paper_wallet.yaml: ${balance:.2f}")
                     return balance
             except Exception as e:
-                print(f"Frontend failed to read paper wallet config {config_path}: {e}")
-                continue
-    
-    print("Frontend: No paper wallet config found, using default balance: $10000.0")
-    return 10000.0  # Default balance
+                print(f"Error reading paper_wallet.yaml: {e}")
+        
+        # Priority 3: Check user_config.yaml
+        user_config_file = Path('crypto_bot/user_config.yaml')
+        if user_config_file.exists():
+            try:
+                with open(user_config_file) as f:
+                    config = yaml.safe_load(f) or {}
+                    balance = float(config.get('paper_wallet_balance', 10000.0))
+                    print(f"Frontend got paper wallet balance from user_config.yaml: ${balance:.2f}")
+                    return balance
+            except Exception as e:
+                print(f"Error reading user_config.yaml: {e}")
+        
+        # Fallback: Default balance
+        default_balance = 10000.0
+        print(f"Frontend using default paper wallet balance: ${default_balance:.2f}")
+        return default_balance
+        
+    except Exception as e:
+        print(f"Error getting paper wallet balance: {e}")
+        return 10000.0
 
 
 def set_paper_wallet_balance(balance: float) -> None:
-    """Set paper wallet balance in config."""
-    # Write to the same config file that the main bot reads from
-    primary_config_path = Path("crypto_bot/paper_wallet_config.yaml")
-    
-    # Also write to the legacy location for backward compatibility
-    legacy_config_path = LOG_DIR / 'paper_wallet.yaml'
-    
-    config = {'initial_balance': balance}
-    
-    # Write to primary location
+    """Set paper wallet balance in multiple locations for consistency."""
     try:
-        primary_config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(primary_config_path, 'w') as f:
-            yaml.dump(config, f)
-        print(f"Frontend wrote paper wallet balance to {primary_config_path}: ${balance:.2f}")
+        # Update paper_wallet.yaml
+        paper_wallet_file = LOG_DIR / 'paper_wallet.yaml'
+        paper_config = {'initial_balance': balance}
+        with open(paper_wallet_file, 'w') as f:
+            yaml.dump(paper_config, f, default_flow_style=False)
+        print(f"Frontend updated paper_wallet.yaml: ${balance:.2f}")
+        
+        # Update user_config.yaml
+        user_config_file = Path('crypto_bot/user_config.yaml')
+        if user_config_file.exists():
+            with open(user_config_file) as f:
+                config = yaml.safe_load(f) or {}
+        else:
+            config = {}
+        
+        config['paper_wallet_balance'] = balance
+        with open(user_config_file, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False)
+        print(f"Frontend updated user_config.yaml: ${balance:.2f}")
+        
+        # Update legacy config if it exists
+        legacy_config_path = Path('crypto_bot/paper_wallet_config.yaml')
+        if legacy_config_path.exists():
+            try:
+                with open(legacy_config_path) as f:
+                    legacy_config = yaml.safe_load(f) or {}
+                legacy_config['initial_balance'] = balance
+                with open(legacy_config_path, 'w') as f:
+                    yaml.dump(legacy_config, f, default_flow_style=False)
+                print(f"Frontend updated legacy config {legacy_config_path}: ${balance:.2f}")
+            except Exception as e:
+                print(f"Frontend failed to update legacy config {legacy_config_path}: {e}")
+        
+        print(f"Frontend successfully updated paper wallet balance to: ${balance:.2f}")
+        
     except Exception as e:
-        print(f"Frontend failed to write to primary config {primary_config_path}: {e}")
-    
-    # Write to legacy location for backward compatibility
-    try:
-        legacy_config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(legacy_config_path, 'w') as f:
-            yaml.dump(config, f)
-        print(f"Frontend wrote paper wallet balance to legacy config {legacy_config_path}: ${balance:.2f}")
-    except Exception as e:
-        print(f"Frontend failed to write to legacy config {legacy_config_path}: {e}")
+        print(f"Error setting paper wallet balance: {e}")
+        raise
 
 
 def get_open_positions() -> list:
@@ -211,11 +252,26 @@ def get_open_positions() -> list:
         return []
     
     positions = []
-    pos_pattern = re.compile(
-        r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
-        r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+) "
-        r"pnl \$?(?P<pnl>[0-9.+-]+).*balance \$?(?P<balance>[0-9.]+)"
-    )
+    # Updated regex pattern to handle more position formats
+    pos_patterns = [
+        # Pattern 1: Standard format with pnl calculation
+        re.compile(
+            r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
+            r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+) "
+            r"pnl \$?(?P<pnl>[0-9.+-]+).*balance \$?(?P<balance>[0-9.]+)"
+        ),
+        # Pattern 2: Format without pnl calculation
+        re.compile(
+            r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
+            r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+)"
+        ),
+        # Pattern 3: Alternative format
+        re.compile(
+            r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
+            r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+) "
+            r"pnl \$?(?P<pnl>[0-9.+-]+)"
+        )
+    ]
     
     try:
         with open(POSITIONS_FILE) as f:
@@ -235,26 +291,53 @@ def get_open_positions() -> list:
                     
                     # Only include positions from the last 24 hours
                     if line_timestamp >= cutoff_time:
-                        match = pos_pattern.search(line)
-                        if match:
-                            # Check if this is a real position (not just a balance update)
-                            symbol = match.group('symbol')
-                            side = match.group('side')
-                            amount = float(match.group('amount'))
+                        # Try each pattern
+                        position_data = None
+                        for pattern in pos_patterns:
+                            match = pattern.search(line)
+                            if match:
+                                # Check if this is a real position (not just a balance update)
+                                symbol = match.group('symbol')
+                                side = match.group('side')
+                                amount = float(match.group('amount'))
+                                
+                                # Filter out positions with zero amounts or very small amounts
+                                if amount > 0.0001:  # Minimum threshold
+                                    entry_price = float(match.group('entry'))
+                                    current_price = float(match.group('current'))
+                                    
+                                    # Calculate PnL if not provided
+                                    if 'pnl' in match.groupdict() and match.group('pnl'):
+                                        pnl = float(match.group('pnl'))
+                                    else:
+                                        # Calculate PnL manually
+                                        if side == 'buy':
+                                            pnl = (current_price - entry_price) * amount
+                                        else:  # sell/short
+                                            pnl = (entry_price - current_price) * amount
+                                    
+                                    # Get balance if available
+                                    balance = 0.0
+                                    if 'balance' in match.groupdict() and match.group('balance'):
+                                        balance = float(match.group('balance'))
+                                    
+                                    position_data = {
+                                        'symbol': symbol,
+                                        'side': side,
+                                        'amount': amount,
+                                        'entry_price': entry_price,
+                                        'current_price': current_price,
+                                        'pnl': pnl,
+                                        'balance': balance,
+                                        'timestamp': timestamp_str
+                                    }
+                                    break
+                        
+                        if position_data:
+                            recent_positions.append(position_data)
                             
-                            # Filter out positions with zero amounts or very small amounts
-                            if amount > 0.0001:  # Minimum threshold
-                                recent_positions.append({
-                                    'symbol': symbol,
-                                    'side': side,
-                                    'amount': amount,
-                                    'entry_price': float(match.group('entry')),
-                                    'current_price': float(match.group('current')),
-                                    'pnl': float(match.group('pnl')),
-                                    'balance': float(match.group('balance')),
-                                    'timestamp': timestamp_str
-                                })
-                except ValueError:
+                except ValueError as e:
+                    print(f"Error parsing timestamp in line: {line.strip()}, error: {e}")
                     continue
         
         # Remove duplicates based on symbol and side, keeping the most recent
@@ -323,6 +406,77 @@ def get_uptime() -> str:
     return utils.get_uptime(bot_start_time)
 
 
+def calculate_wallet_pnl() -> Dict[str, float]:
+    """Calculate current wallet PnL based on open positions and paper wallet balance."""
+    try:
+        # Get initial balance
+        initial_balance = get_paper_wallet_balance()
+        
+        # Get open positions
+        open_positions = get_open_positions()
+        
+        # Calculate unrealized PnL from open positions
+        unrealized_pnl = 0.0
+        position_details = []
+        
+        for position in open_positions:
+            symbol = position['symbol']
+            side = position['side']
+            amount = position['amount']
+            entry_price = position['entry_price']
+            current_price = position['current_price']
+            
+            # Calculate position PnL
+            if side == 'buy':  # Long position
+                position_pnl = (current_price - entry_price) * amount
+            else:  # Short position
+                position_pnl = (entry_price - current_price) * amount
+            
+            unrealized_pnl += position_pnl
+            
+            position_details.append({
+                'symbol': symbol,
+                'side': side,
+                'amount': amount,
+                'entry_price': entry_price,
+                'current_price': current_price,
+                'pnl': position_pnl,
+                'pnl_percentage': (position_pnl / (entry_price * amount)) * 100 if entry_price > 0 else 0
+            })
+        
+        # Calculate current balance
+        current_balance = initial_balance + unrealized_pnl
+        
+        return {
+            'initial_balance': initial_balance,
+            'current_balance': current_balance,
+            'unrealized_pnl': unrealized_pnl,
+            'pnl_percentage': (unrealized_pnl / initial_balance) * 100 if initial_balance > 0 else 0,
+            'open_positions': position_details,
+            'position_count': len(open_positions)
+        }
+        
+    except Exception as e:
+        print(f"Error calculating wallet PnL: {e}")
+        return {
+            'initial_balance': 0.0,
+            'current_balance': 0.0,
+            'unrealized_pnl': 0.0,
+            'pnl_percentage': 0.0,
+            'open_positions': [],
+            'position_count': 0,
+            'error': str(e)
+        }
+
+
+@app.route('/api/wallet-pnl')
+def api_wallet_pnl():
+    """Return current wallet PnL calculation."""
+    try:
+        pnl_data = calculate_wallet_pnl()
+        return jsonify(pnl_data)
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 
 @app.route('/')
@@ -850,45 +1004,111 @@ def api_current_prices():
 
 def get_current_price_for_symbol(symbol: str) -> float:
     """Get current price for a symbol using available price sources."""
-    try:
-        # Try Pyth network first
-        from crypto_bot.utils.pyth import get_pyth_price
-        price = get_pyth_price(symbol)
-        if price and price > 0:
-            return price
-    except Exception:
-        pass
+    if not symbol or symbol.strip() == '':
+        return 0.0
+    
+    symbol = symbol.strip().upper()
     
     try:
-        # Try Jupiter API for Solana tokens
-        import requests
-        
-        base = symbol.split('/')[0] if '/' in symbol else symbol
-        response = requests.get(
-            "https://price.jup.ag/v4/price",
-            params={"ids[]": base},
-            timeout=5
-        )
-        if response.status_code == 200:
-            data = response.json()
-            price = float(data.get("data", {}).get(base, {}).get("price", 0.0))
-            if price > 0:
+        # Try Pyth network first for Solana tokens
+        try:
+            from crypto_bot.utils.pyth import get_pyth_price
+            price = get_pyth_price(symbol)
+            if price and price > 0:
+                print(f"Got price for {symbol} from Pyth: ${price}")
                 return price
-    except Exception:
-        pass
-    
-    # Fallback: try to get from cached data if available
-    try:
-        scan_file = LOG_DIR / 'asset_scores.json'
-        if scan_file.exists():
-            with open(scan_file) as f:
-                data = json.load(f)
-                if symbol in data and 'price' in data[symbol]:
-                    return float(data[symbol]['price'])
-    except Exception:
-        pass
-    
-    return 0.0
+        except Exception as e:
+            print(f"Pyth price fetch failed for {symbol}: {e}")
+            pass
+        
+        # Try Jupiter API for Solana tokens
+        try:
+            import requests
+            
+            # Clean symbol for Jupiter API
+            base = symbol.split('/')[0] if '/' in symbol else symbol
+            # Remove common prefixes/suffixes
+            base = base.replace('USDT', '').replace('USDC', '').replace('USD', '')
+            
+            if base and len(base) > 0:
+                response = requests.get(
+                    "https://price.jup.ag/v4/price",
+                    params={"ids[]": base},
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    price = float(data.get("data", {}).get(base, {}).get("price", 0.0))
+                    if price > 0:
+                        print(f"Got price for {symbol} from Jupiter: ${price}")
+                        return price
+        except Exception as e:
+            print(f"Jupiter price fetch failed for {symbol}: {e}")
+            pass
+        
+        # Try Kraken API for major pairs
+        try:
+            import requests
+            
+            # Convert symbol format for Kraken
+            kraken_symbol = symbol.replace('/', '')
+            if kraken_symbol in ['BTCUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD']:
+                response = requests.get(
+                    f"https://api.kraken.com/0/public/Ticker?pair={kraken_symbol}",
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if 'result' in data and kraken_symbol in data['result']:
+                        price = float(data['result'][kraken_symbol]['c'][0])  # Current price
+                        if price > 0:
+                            print(f"Got price for {symbol} from Kraken: ${price}")
+                            return price
+        except Exception as e:
+            print(f"Kraken price fetch failed for {symbol}: {e}")
+            pass
+        
+        # Fallback: try to get from cached data if available
+        try:
+            scan_file = LOG_DIR / 'asset_scores.json'
+            if scan_file.exists():
+                with open(scan_file) as f:
+                    data = json.load(f)
+                    if symbol in data and 'price' in data[symbol]:
+                        price = float(data[symbol]['price'])
+                        if price > 0:
+                            print(f"Got cached price for {symbol}: ${price}")
+                            return price
+        except Exception as e:
+            print(f"Cached price fetch failed for {symbol}: {e}")
+            pass
+        
+        # Final fallback: try to get from positions.log if it's a recent position
+        try:
+            if POSITIONS_FILE.exists():
+                with open(POSITIONS_FILE, 'r') as f:
+                    lines = f.readlines()
+                
+                # Look for recent position with this symbol
+                for line in reversed(lines[-50:]):  # Check last 50 lines
+                    if symbol in line and 'current' in line:
+                        import re
+                        current_match = re.search(r'current ([0-9.]+)', line)
+                        if current_match:
+                            price = float(current_match.group(1))
+                            if price > 0:
+                                print(f"Got recent position price for {symbol}: ${price}")
+                                return price
+        except Exception as e:
+            print(f"Recent position price fetch failed for {symbol}: {e}")
+            pass
+        
+        print(f"No price source available for {symbol}")
+        return 0.0
+        
+    except Exception as e:
+        print(f"Error getting price for {symbol}: {e}")
+        return 0.0
 
 
 @app.route('/trades_data')
@@ -1313,6 +1533,127 @@ def api_clear_old_positions():
         return jsonify({'success': True, 'message': 'Old positions cleared successfully'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/generate_sample_trades', methods=['POST'])
+def api_generate_sample_trades():
+    """Generate sample trade data for testing and demonstration."""
+    try:
+        import csv
+        from datetime import datetime, timedelta
+        import random
+        
+        # Create sample trade data
+        symbols = ['BTC/USD', 'ETH/USD', 'SOL/USD', 'ADA/USD', 'MATIC/USD']
+        sample_trades = []
+        
+        # Generate trades over the last 7 days
+        end_time = datetime.now()
+        start_time = end_time - timedelta(days=7)
+        
+        current_time = start_time
+        while current_time <= end_time:
+            # Generate 1-3 trades per day
+            trades_per_day = random.randint(1, 3)
+            
+            for _ in range(trades_per_day):
+                symbol = random.choice(symbols)
+                side = random.choice(['buy', 'sell'])
+                
+                # Generate realistic prices based on symbol
+                base_prices = {
+                    'BTC/USD': 50000,
+                    'ETH/USD': 3000,
+                    'SOL/USD': 100,
+                    'ADA/USD': 0.5,
+                    'MATIC/USD': 0.8
+                }
+                
+                base_price = base_prices.get(symbol, 100)
+                price_variation = random.uniform(0.95, 1.05)
+                price = base_price * price_variation
+                
+                # Generate realistic amounts
+                if symbol == 'BTC/USD':
+                    amount = random.uniform(0.001, 0.01)
+                elif symbol == 'ETH/USD':
+                    amount = random.uniform(0.01, 0.1)
+                else:
+                    amount = random.uniform(1, 100)
+                
+                # Add some time variation within the day
+                trade_time = current_time + timedelta(
+                    hours=random.randint(0, 23),
+                    minutes=random.randint(0, 59)
+                )
+                
+                sample_trades.append([
+                    symbol,
+                    side,
+                    f"{amount:.6f}",
+                    f"{price:.6f}",
+                    trade_time.strftime("%Y-%m-%d %H:%M:%S")
+                ])
+            
+            current_time += timedelta(days=1)
+        
+        # Sort by timestamp
+        sample_trades.sort(key=lambda x: x[4])
+        
+        # Write to trades.csv
+        with open(TRADE_FILE, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['symbol', 'side', 'amount', 'price', 'timestamp'])
+            writer.writerows(sample_trades)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Generated {len(sample_trades)} sample trades',
+            'count': len(sample_trades),
+            'file': str(TRADE_FILE)
+        })
+        
+    except Exception as e:
+        print(f"Error generating sample trades: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+
+@app.route('/api/generate_scores', methods=['POST'])
+def api_generate_scores():
+    """Generate sample asset scores for the Scans page."""
+    try:
+        # Import the score generator
+        import sys
+        from pathlib import Path
+        
+        # Add tools directory to path
+        tools_dir = Path(__file__).parent.parent / 'tools'
+        sys.path.insert(0, str(tools_dir))
+        
+        # Import and run the score generator
+        from generate_asset_scores import generate_sample_scores, save_asset_scores
+        
+        # Generate scores
+        scores = generate_sample_scores()
+        
+        # Save to file
+        save_asset_scores(scores)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Generated {len(scores)} asset scores',
+            'count': len(scores)
+        })
+        
+    except Exception as e:
+        print(f"Error generating scores: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
 
 
 @app.route('/test')

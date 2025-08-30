@@ -168,21 +168,8 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
         score = min((latest["rsi"] - dynamic_overbought) / (100 - dynamic_overbought), 1.0)
         direction = "short"
     else:
-        # Debug: log why no signal was generated
-        print(
-            f"No signal generated. Conditions: close>=ema_fast={latest['close'] >= latest['ema_fast']}, "
-            f"ema_fast>=ema_slow={latest['ema_fast'] >= latest['ema_slow']}, "
-            f"overbought_cond={overbought_cond}, adx>=threshold={latest['adx'] >= adx_threshold}, "
-            f"volume_ok={volume_ok}"
-        )
-        print(
-            f"RSI details: latest_rsi={latest['rsi']}, dynamic_overbought={dynamic_overbought}, "
-            f"rsi_overbought_pct={rsi_overbought_pct}, rsi_oversold_pct={rsi_oversold_pct}"
-        )
-        print(
-            f"Data details: recent_length={len(recent)}, close_range={recent['close'].min()}-{recent['close'].max()}, "
-            f"volume_range={recent['volume'].min()}-{recent['volume'].max()}"
-        )
+        # No signal conditions met
+        pass
 
     if score > 0 and (config is None or config.get("atr_normalization", True)):
         score = normalize_score_by_volatility(df, score)

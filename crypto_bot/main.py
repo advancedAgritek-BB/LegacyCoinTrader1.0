@@ -99,6 +99,118 @@ from crypto_bot.regime.regime_classifier import CONFIG, classify_regime_async
 from crypto_bot.volatility_filter import calc_atr
 from crypto_bot.solana.exit import monitor_price
 
+# Memory management utilities
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    psutil = None
+
+import gc
+
+
+class MemoryManager:
+    """Memory management utilities for the trading bot."""
+    
+    def __init__(self, memory_threshold: float = 0.8):
+        """
+        Initialize the memory manager.
+        
+        Args:
+            memory_threshold: Memory usage threshold (0.0-1.0) above which optimization is triggered
+        """
+        self.memory_threshold = memory_threshold
+        self.optimization_count = 0
+        self.last_optimization = time.time()
+        
+    def check_memory_pressure(self) -> bool:
+        """
+        Check if memory usage is above the threshold.
+        
+        Returns:
+            True if memory pressure is high, False otherwise
+        """
+        if not PSUTIL_AVAILABLE:
+            return False
+            
+        try:
+            memory = psutil.virtual_memory()
+            return memory.percent / 100.0 > self.memory_threshold
+        except Exception:
+            return False
+    
+    def optimize_cache_sizes(self, df_cache: dict, regime_cache: dict) -> None:
+        """
+        Optimize cache sizes to reduce memory usage.
+        
+        Args:
+            df_cache: DataFrame cache dictionary
+            regime_cache: Regime cache dictionary
+        """
+        if not self.check_memory_pressure():
+            return
+            
+        self.optimization_count += 1
+        self.last_optimization = time.time()
+        
+        # Reduce cache sizes by 20%
+        for tf, cache in df_cache.items():
+            if hasattr(cache, 'maxlen') and cache.maxlen > 100:
+                new_maxlen = max(100, int(cache.maxlen * 0.8))
+                # Create new deque with reduced maxlen
+                new_cache = deque(list(cache)[-new_maxlen:], maxlen=new_maxlen)
+                df_cache[tf] = new_cache
+                
+        for tf, cache in regime_cache.items():
+            if hasattr(cache, 'maxlen') and cache.maxlen > 100:
+                new_maxlen = max(100, int(cache.maxlen * 0.8))
+                new_cache = deque(list(cache)[-new_maxlen:], maxlen=new_maxlen)
+                regime_cache[tf] = new_cache
+    
+    def force_garbage_collection(self) -> int:
+        """
+        Force garbage collection and return the number of collected objects.
+        
+        Returns:
+            Number of objects collected
+        """
+        collected = gc.collect()
+        return collected
+    
+    def get_memory_stats(self) -> dict:
+        """
+        Get current memory statistics.
+        
+        Returns:
+            Dictionary with memory statistics
+        """
+        stats = {
+            "optimization_count": self.optimization_count,
+            "last_optimization": self.last_optimization
+        }
+        
+        if PSUTIL_AVAILABLE:
+            try:
+                memory = psutil.virtual_memory()
+                stats.update({
+                    "total_mb": memory.total // (1024 * 1024),
+                    "available_mb": memory.available // (1024 * 1024),
+                    "used_mb": memory.used // (1024 * 1024),
+                    "percent": memory.percent
+                })
+            except Exception:
+                pass
+        else:
+            stats.update({
+                "total_mb": 0,
+                "available_mb": 0,
+                "used_mb": 0,
+                "percent": 0
+            })
+            
+        return stats
+
 
 def _fix_symbol(sym: str) -> str:
     """Internal wrapper for tests to normalize symbols."""
@@ -950,9 +1062,23 @@ async def analyse_batch(ctx: BotContext) -> None:
     tasks = []
     mode = ctx.config.get("mode", "cex")
     for sym in batch:
-        df_map = {tf: c.get(sym) for tf, c in ctx.df_cache.items()}
+        # Check if we have data for this symbol in the main timeframe
+        main_tf = ctx.config.get("timeframe", "15m")
+        main_df = ctx.df_cache.get(main_tf, {}).get(sym)
+        if main_df is None:
+            logger.debug(f"Skipping {sym}: no data available for timeframe {main_tf}")
+            continue
+
+        df_map = {}
+        for tf, c in ctx.df_cache.items():
+            df = c.get(sym)
+            if df is not None:
+                df_map[tf] = df
+
         for tf, cache in ctx.regime_cache.items():
-            df_map[tf] = cache.get(sym)
+            df = cache.get(sym)
+            if df is not None:
+                df_map[tf] = df
         tasks.append(analyze_symbol(sym, df_map, mode, ctx.config, ctx.notifier))
 
     ctx.analysis_results = await asyncio.gather(*tasks)
@@ -1559,6 +1685,11 @@ async def _rotation_loop(
     while True:
         try:
             if state.get("running") and rotator.config.get("enabled"):
+                # Temporarily disable rotation to prevent nonce errors
+                logger.debug("Rotation temporarily disabled to prevent nonce errors")
+                await asyncio.sleep(300)  # Sleep for 5 minutes and continue
+                continue
+
                 if asyncio.iscoroutinefunction(
                     getattr(exchange, "fetch_balance", None)
                 ):

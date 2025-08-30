@@ -80,64 +80,9 @@ exchange: kraken
 exchange_market_types:
 - spot
 - futures
-symbol: BTC/USD  # Fallback symbol for when filtering fails
 excluded_symbols:
 - So11111111111111111111111111111111111111112/USDC
 - So11111111111111111111111111111111111111112/USDT
-# Performance optimization settings
-performance:
-  # Memory management settings
-  memory:
-    max_memory_usage_pct: 80.0  # Increased threshold to allow more processing
-    adaptive_cache_sizing: true  # Enable adaptive cache sizing
-    memory_pressure_threshold: 80.0  # Memory pressure threshold for alerts
-    gc_threshold: 70.0  # Garbage collection threshold
-  
-  # Concurrency management settings
-  concurrency:
-    adaptive_concurrency: true  # Enable adaptive concurrency control
-    min_concurrent_requests: 1  # Minimum concurrent requests
-    max_concurrent_requests: 10  # Reduced from 25 to prevent rate limiting
-    success_rate_threshold: 0.8  # Success rate threshold for adjustments
-    response_time_threshold: 1.0  # Response time threshold in seconds
-  
-  # Rate limiting settings
-  rate_limiting:
-    adaptive_rate_limiting: true  # Enable adaptive rate limiting
-    base_request_delay: 1.0  # Base delay between requests in seconds
-    max_request_delay: 10.0  # Maximum delay between requests
-    error_backoff_multiplier: 2.0  # Exponential backoff multiplier
-    max_requests_per_minute: 10  # Maximum requests per minute
-  
-  # Caching settings
-  caching:
-    adaptive_cache_ttl: true  # Enable adaptive cache TTL
-    min_cache_ttl: 60  # Minimum cache TTL in seconds
-    max_cache_ttl: 3600  # Maximum cache TTL in seconds
-    cache_hit_rate_threshold: 0.7  # Cache hit rate threshold
-    cache_size_multiplier: 2.0  # Cache size multiplier for high hit rates
-  
-  # Monitoring settings
-  monitoring:
-    enable_performance_monitoring: true  # Enable performance monitoring
-    metrics_export_interval: 300  # Metrics export interval in seconds
-    alert_enabled: true  # Enable performance alerts
-    performance_log_level: "INFO"  # Performance logging level
-  
-  # Database settings
-  database:
-    enabled: false  # Enable database storage for metrics
-    host: "localhost"  # Database host
-    port: 5432  # Database port
-    database: "crypto_bot"  # Database name
-    user: "postgres"  # Database user
-    password: ""  # Database password
-    min_connections: 5  # Minimum connection pool size
-    max_connections: 20  # Maximum connection pool size
-    command_timeout: 30  # Command timeout in seconds
-
-# Loop and execution settings
-loop_interval_minutes: 10     # Increased to reduce rate limiting
 exec:
   allow_market_orders: true
   order_retry_interval: 0.5
@@ -229,16 +174,18 @@ grid_bot:
   volume_filter: false
   volume_ma_window: 10
   volume_multiple: 1.2
+higher_timeframe: 1d
 liquidity_check: true
 liquidity_depth: 3
+loop_interval_minutes: 30
 max_age_days: 60
 max_change_pct: 30
-max_concurrent_ohlcv: 5       # Reduced from 10 to prevent rate limiting
+max_concurrent_ohlcv: 3
 max_drawdown: 0.35
 max_latency_ms: 300
 max_ohlcv_failures: 8
-max_open_trades: 40    # Increased from 30 for more concurrent opportunities
-max_parallel: 120             # Increased from 100 for more parallel processing
+max_open_trades: 40
+max_parallel: 120
 max_slippage_pct: 0.3
 max_spread_pct: 4
 max_vol: 100000000
@@ -249,12 +196,12 @@ metrics_output_file: crypto_bot/logs/metrics.csv
 micro_scalp:
   atr_period: 8
   confirm_bars: 0
-  cooldown_seconds: 20        # Reduced from 30 for faster trading
+  cooldown_seconds: 20
   ema_fast: 1
   ema_slow: 3
   fresh_cross_only: false
   imbalance_filter: false
-  max_concurrent_signals: 30  # Increased from 25 for more scalps
+  max_concurrent_signals: 30
   max_drawdown: 0.2
   min_atr_pct: 0.0003
   min_score: 0.06
@@ -353,6 +300,45 @@ paper_wallet:
   enabled: true
   initial_balance: 10000.0
   max_open_trades: 10
+performance:
+  caching:
+    adaptive_cache_ttl: true
+    cache_hit_rate_threshold: 0.7
+    cache_size_multiplier: 2.0
+    max_cache_ttl: 3600
+    min_cache_ttl: 60
+  concurrency:
+    adaptive_concurrency: true
+    max_concurrent_requests: 5
+    min_concurrent_requests: 1
+    response_time_threshold: 1.0
+    success_rate_threshold: 0.8
+  database:
+    command_timeout: 30
+    database: crypto_bot
+    enabled: false
+    host: localhost
+    max_connections: 20
+    min_connections: 5
+    password: ''
+    port: 5432
+    user: postgres
+  memory:
+    adaptive_cache_sizing: true
+    gc_threshold: 70.0
+    max_memory_usage_pct: 80.0
+    memory_pressure_threshold: 80.0
+  monitoring:
+    alert_enabled: true
+    enable_performance_monitoring: true
+    metrics_export_interval: 300
+    performance_log_level: INFO
+  rate_limiting:
+    adaptive_rate_limiting: true
+    base_request_delay: 1.0
+    error_backoff_multiplier: 2.0
+    max_request_delay: 10.0
+    max_requests_per_minute: 10
 portfolio_rotation:
   enabled: true
   interval_days: 0.25
@@ -360,6 +346,10 @@ portfolio_rotation:
   scoring_method: momentum
   top_assets: 15
 preferred_chain: solana
+regime_timeframes:
+- 1h
+- 4h
+- 1d
 rest_ohlcv_timeout: 30
 risk:
   atr_long_window: 50
@@ -406,10 +396,10 @@ sl_pct: 0.008
 sniper_bot:
   atr_window: 8
   breakout_pct: 0.011236940825431006
-  cooldown_seconds: 30        # Reduced from 45 for faster re-entry
+  cooldown_seconds: 30
   fallback_atr_mult: 1.0
   fallback_volume_mult: 1.0
-  max_concurrent_signals: 20  # Increased from 15 for more opportunities
+  max_concurrent_signals: 20
   max_drawdown: 0.25
   max_history: 15
   max_slippage_bps: 15
@@ -432,20 +422,20 @@ solana_scanner:
     moralis: YOUR_KEY
   enabled: true
   gecko_search: true
-  interval_minutes: 5  # Increased from 0.15 to 5 minutes to prevent rate limiting
+  interval_minutes: 5
   max_tokens_per_scan: 150
   min_volume_usd: 100
 solana_slippage_bps: 15
 solana_symbols: []
-stop_loss_pct: 0.005   # Tightened from 0.008 for better risk/reward
+stop_loss_pct: 0.008
 strategy_allocation:
-  sniper_bot: 35      # Increased from 25% for pump catching
-  micro_scalp_bot: 25 # Reduced slightly to reallocate
-  bounce_scalper: 20  # Increased from 15% for quick scalps
-  momentum_bot: 10    # Added for trend acceleration opportunities
-  volatility_harvester: 10  # Added for high-volatility fast profits
-  trend_bot: 0        # Remove/reduce slower strategy
-  grid_bot: 0         # Remove/reduce slower strategy
+  bounce_scalper: 15
+  grid_bot: 15
+  micro_scalp_bot: 30
+  momentum_bot: 10
+  sniper_bot: 25
+  trend_bot: 15
+  volatility_harvester: 10
 strategy_router:
   bandit_enabled: true
   bounce_timeframe: 3m
@@ -456,6 +446,7 @@ strategy_router:
     breakout_volume_multiplier: 4
     trend_adx_threshold: 15
   mean_reverting_timeframe: 45m
+  omega_based_timeframe: 5m
   regimes:
     bounce:
     - bounce_scalper
@@ -487,6 +478,7 @@ strategy_router:
   sideways_timeframe: 45m
   trending_timeframe: 45m
   volatile_timeframe: 1m
+symbol: BTC/USD
 symbol_filter:
   change_pct_percentile: 30
   correlation_max_pairs: 250
@@ -499,8 +491,8 @@ symbol_filter:
   ticker_retry_attempts: 3
   uncached_volume_multiplier: 1.2
   volume_percentile: 20
-symbol_refresh_minutes: 5  # Increased from 0.15 to 5 minutes to prevent rate limiting
-take_profit_pct: 0.06  # Increased from 0.045 for bigger wins
+symbol_refresh_minutes: 15
+take_profit_pct: 0.045
 tax_tracking:
   enabled: true
   export_path: crypto_bot/logs/tax_trades.csv
@@ -535,7 +527,7 @@ timeframes:
 top_n_symbols: 150
 tp_mult: 2.5
 tp_pct: 0.045
-trade_size_pct: 0.4    # Increased from 0.25 for higher profit potential
+trade_size_pct: 0.4
 trend:
   atr_period: 8
   k: 0.9
@@ -550,7 +542,7 @@ ultra_scalp_bot:
   take_profit_pct: 0.026817922291809047
   timeframe: 1m
   volume_mult: 2.129581467112397
-use_websocket: true
+use_websocket: false
 volatility_harvester:
   atr_threshold: 0.002
   enabled: true
@@ -558,8 +550,129 @@ volatility_harvester:
   stop_loss_pct: 0.01
   take_profit_pct: 0.04
   volume_spike: 2.0
-ws_failures_before_disable: 5
-ws_max_retries: 5
-ws_ohlcv_timeout: 30
-ws_ping_interval: 10
-ws_reconnect_delay: 15
+  ws_failures_before_disable: 5
+  ws_max_retries: 5
+  ws_ohlcv_timeout: 30
+  ws_ping_interval: 10
+  ws_reconnect_delay: 15
+
+# Enhanced Logging and Debugging Configuration
+logging:
+  # Global logging configuration
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  # File logging
+  file_logging: true
+  log_directory: "crypto_bot/logs"
+  
+  # Console logging
+  console_logging: true
+  
+  # Trade pipeline specific logging
+  trade_pipeline:
+    enabled: true
+    level: "DEBUG"  # More detailed logging for trade pipeline
+    log_executions: true
+    log_signals: true
+    log_risk_checks: true
+    log_position_updates: true
+    log_balance_changes: true
+    
+  # Paper trading specific logging
+  paper_trading:
+    enabled: true
+    level: "DEBUG"
+    log_simulated_trades: true
+    log_balance_simulation: true
+    log_position_simulation: true
+    
+  # Live trading specific logging
+  live_trading:
+    enabled: true
+    level: "INFO"  # More conservative for live trading
+    log_real_executions: true
+    log_api_calls: true
+    log_websocket_events: true
+    
+  # Performance monitoring
+  performance:
+    enabled: true
+    log_execution_times: true
+    log_memory_usage: true
+    log_api_latency: true
+    
+  # Error tracking
+  error_tracking:
+    enabled: true
+    log_exceptions: true
+    log_api_errors: true
+    log_websocket_errors: true
+    log_validation_errors: true
+
+# Debug Mode Configuration
+debug_mode:
+  enabled: false  # Set to true for development/debugging
+  
+  # Trade pipeline debugging
+  trade_pipeline:
+    log_signal_generation: true
+    log_risk_calculations: true
+    log_position_sizing: true
+    log_execution_decisions: true
+    
+  # Strategy debugging
+  strategy_debug:
+    log_strategy_selection: true
+    log_strategy_weights: true
+    log_strategy_performance: true
+    
+  # Risk management debugging
+  risk_debug:
+    log_risk_checks: true
+    log_capital_allocation: true
+    log_position_limits: true
+    
+  # Execution debugging
+  execution_debug:
+    log_order_placement: true
+    log_order_status: true
+    log_slippage_calculation: true
+    log_fee_calculation: true
+
+# Enhanced Monitoring Configuration
+monitoring:
+  # Real-time monitoring
+  real_time:
+    enabled: true
+    update_interval: 5  # seconds
+    
+  # Trade monitoring
+  trade_monitoring:
+    enabled: true
+    log_all_trades: true
+    track_slippage: true
+    track_fees: true
+    track_execution_time: true
+    
+  # Position monitoring
+  position_monitoring:
+    enabled: true
+    log_position_changes: true
+    track_unrealized_pnl: true
+    track_realized_pnl: true
+    
+  # Risk monitoring
+  risk_monitoring:
+    enabled: true
+    log_risk_events: true
+    track_drawdown: true
+    track_exposure: true
+    
+  # Performance monitoring
+  performance_monitoring:
+    enabled: true
+    track_win_rate: true
+    track_profit_factor: true
+    track_sharpe_ratio: true
+    track_max_drawdown: true

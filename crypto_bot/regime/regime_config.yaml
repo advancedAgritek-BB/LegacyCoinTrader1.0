@@ -1,30 +1,155 @@
-adx_trending_min: 15
-adx_sideways_max: 25
-bb_width_sideways_max: 0.025
-bb_width_breakout_max: 4
-breakout_volume_mult: 1.2
-rsi_mean_rev_min: 25
-rsi_mean_rev_max: 75
-ema_distance_mean_rev_max: 0.05
-atr_volatility_mult: 1.5
-normalized_range_volatility_min: 1.5
-ema_fast: 8
-ema_slow: 21
-indicator_window: 14
-bb_window: 20
-ma_window: 20
-higher_timeframe: "4h"
-confirm_trend_with_higher_tf: false
+# Optimized Regime Detection Configuration
+# Enhanced sensitivity for better strategy routing
+
+# Trend Detection - More sensitive thresholds
+adx_trending_min: 12          # Reduced from 15 for earlier trend detection
+adx_sideways_max: 20          # Reduced from 25 for better sideways detection
+bb_width_sideways_max: 0.02   # Reduced from 0.025 for tighter ranges
+bb_width_breakout_max: 3.5    # Reduced from 4 for earlier breakout detection
+breakout_volume_mult: 1.5     # Increased from 1.2 for better volume confirmation
+
+# Mean Reversion Detection - Optimized ranges
+rsi_mean_rev_min: 30          # Increased from 25 for better mean reversion
+rsi_mean_rev_max: 70          # Decreased from 75 for better mean reversion
+ema_distance_mean_rev_max: 0.04  # Reduced from 0.05 for tighter ranges
+
+# Volatility Detection - Enhanced sensitivity
+atr_volatility_mult: 1.3      # Reduced from 1.5 for earlier volatility detection
+normalized_range_volatility_min: 1.3  # Reduced from 1.5 for earlier detection
+
+# Moving Average Windows - Faster response
+ema_fast: 6                    # Reduced from 8 for faster trend detection
+ema_slow: 18                   # Reduced from 21 for faster trend detection
+
+# Indicator Windows - Optimized for responsiveness
+indicator_window: 12           # Reduced from 14 for faster signals
+bb_window: 18                  # Reduced from 20 for faster BB signals
+ma_window: 18                  # Reduced from 20 for faster MA signals
+
+# Higher Timeframe Confirmation
+higher_timeframe: "1h"         # Changed from 4h for faster confirmation
+confirm_trend_with_higher_tf: true  # Enable higher timeframe confirmation
+
+# Machine Learning Integration
 use_ml_regime_classifier: true
-ml_min_bars: 20
+ml_min_bars: 15                # Reduced from 20 for earlier ML usage
+ml_blend_weight: 0.6           # Increased from 0.5 for better ML integration
+
+# Pattern Detection
+pattern_min_conf: 0.12         # Reduced from 0.15 for more pattern detection
 log_level: INFO
+
+# Score Weights - Balanced for all regimes
 score_weights:
-  trending: 1.0
-  sideways: 1.0
-  breakout: 1.0
-  mean-reverting: 1.0
-  volatile: 1.0
-pattern_min_conf: 0.15
-ml_blend_weight: 0.5
-bull_fng: 50
-atr_baseline: 0.01
+  trending: 1.2                # Slightly higher weight for trending
+  sideways: 1.0                # Standard weight
+  breakout: 1.3                # Higher weight for breakouts
+  mean-reverting: 1.1          # Slightly higher weight
+  volatile: 1.2                # Higher weight for volatility
+  bounce: 1.1                  # New regime weight
+  scalp: 1.0                   # Standard weight
+  cross_chain: 1.0             # New regime weight
+  accumulation: 1.0             # New regime weight
+  hft: 1.1                     # New regime weight
+  market_making: 1.0           # New regime weight
+  arbitrage: 1.0               # New regime weight
+  momentum: 1.2                # New regime weight
+  volatility: 1.2              # New regime weight
+  meme: 1.1                    # New regime weight
+  solana: 1.1                  # New regime weight
+  defi: 1.0                    # New regime weight
+  flash_crash: 1.1             # New regime weight
+  trend_acceleration: 1.2      # New regime weight
+  range_breakout: 1.2          # New regime weight
+  liquidity: 1.0               # New regime weight
+  stat_arb: 1.0                # New regime weight
+  hf_scalping: 1.1             # New regime weight
+  microstructure: 1.1          # New regime weight
+  correlation: 1.0             # New regime weight
+  vol_regime_switch: 1.2       # New regime weight
+  momentum_regime_switch: 1.2  # New regime weight
+  regime_transition: 1.1       # New regime weight
+  market_stress: 1.1           # New regime weight
+  recovery: 1.1                # New regime weight
+  consolidation: 1.0            # New regime weight
+  expansion: 1.2                # New regime weight
+  contraction: 1.1              # New regime weight
+  equilibrium: 1.0              # New regime weight
+  disequilibrium: 1.2          # New regime weight
+  adaptive: 1.1                 # New regime weight
+  opportunistic: 1.1            # New regime weight
+  systematic: 1.0               # New regime weight
+  discretionary: 1.1            # New regime weight
+  quantitative: 1.1             # New regime weight
+  fundamental: 1.0              # New regime weight
+  technical: 1.2                # New regime weight
+  hybrid: 1.1                   # New regime weight
+  multi_timeframe: 1.1          # New regime weight
+  single_timeframe: 1.0         # New regime weight
+  event_driven: 1.1             # New regime weight
+  pattern_based: 1.2            # New regime weight
+  signal_based: 1.0             # New regime weight
+  alpha_based: 1.2              # New regime weight
+  beta_based: 1.0               # New regime weight
+  gamma_based: 1.2              # New regime weight
+  theta_based: 1.0              # New regime weight
+  vega_based: 1.2               # New regime weight
+  delta_based: 1.2              # New regime weight
+  rho_based: 1.0                # New regime weight
+  kappa_based: 1.2              # New regime weight
+  lambda_based: 1.1             # New regime weight
+  mu_based: 1.0                 # New regime weight
+  nu_based: 1.2                 # New regime weight
+  xi_based: 1.1                 # New regime weight
+  omicron_based: 1.1            # New regime weight
+  pi_based: 1.0                 # New regime weight
+  sigma_based: 1.2              # New regime weight
+  tau_based: 1.2                # New regime weight
+  upsilon_based: 1.0            # New regime weight
+  phi_based: 1.0                # New regime weight
+  chi_based: 1.2                # New regime weight
+  psi_based: 1.1                # New regime weight
+  omega_based: 1.1              # New regime weight
+
+# Sentiment and Market Bias
+bull_fng: 50                   # Fear & Greed threshold
+atr_baseline: 0.008            # Reduced from 0.01 for better volatility scaling
+
+# Advanced Regime Detection
+enable_regime_transitions: true
+transition_sensitivity: 0.7    # Sensitivity for regime changes
+regime_persistence: 0.6        # How long regimes persist
+regime_overlap_threshold: 0.3  # Allow regime overlap for better strategy selection
+
+# Multi-Timeframe Analysis
+enable_multi_timeframe: true
+timeframe_weights:
+  "1m": 0.1
+  "5m": 0.2
+  "15m": 0.3
+  "1h": 0.25
+  "4h": 0.1
+  "1d": 0.05
+
+# Regime Confidence Thresholds
+min_regime_confidence: 0.6     # Minimum confidence for regime classification
+regime_consensus_threshold: 0.7  # Threshold for multi-timeframe consensus
+regime_divergence_threshold: 0.4  # Threshold for regime divergence detection
+
+# Pattern Recognition Enhancement
+enable_advanced_patterns: true
+pattern_confidence_decay: 0.95  # How quickly pattern confidence decays
+pattern_persistence: 0.8        # How long patterns persist
+pattern_correlation_threshold: 0.6  # Minimum correlation for pattern confirmation
+
+# Market Microstructure Detection
+enable_microstructure: true
+microstructure_sensitivity: 0.7  # Sensitivity for microstructure changes
+order_flow_threshold: 0.6      # Threshold for order flow analysis
+liquidity_threshold: 0.5       # Threshold for liquidity analysis
+
+# Regime Prediction
+enable_regime_prediction: true
+prediction_horizon: 5           # Number of bars to predict ahead
+prediction_confidence_threshold: 0.7  # Minimum confidence for predictions
+prediction_update_interval: 3   # Update predictions every N bars

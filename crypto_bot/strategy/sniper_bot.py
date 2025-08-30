@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 import pandas as pd
 import ta
@@ -13,7 +13,7 @@ ALLOWED_PAIRS = load_liquid_pairs() or DEFAULT_PAIRS
 
 def generate_signal(
     df: pd.DataFrame,
-    config: Optional[Dict[str, float | int | str]] = None,
+    config: Optional[Dict[str, Union[float, int, str]]] = None,
     *,
     breakout_pct: float = 0.05,
     volume_multiple: float = 1.5,
@@ -27,7 +27,7 @@ def generate_signal(
     price_fallback: bool = True,
     fallback_atr_mult: float = 1.5,
     fallback_volume_mult: float = 1.2,
-) -> Tuple[float, str, float, bool]:
+) -> Union[Tuple[float, str, float, bool], Tuple[float, str, float, bool]]:
     """Detect pumps for newly listed tokens using early price and volume action.
 
     Parameters

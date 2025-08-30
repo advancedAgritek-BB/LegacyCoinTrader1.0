@@ -15,8 +15,10 @@ logger = setup_logger(__name__, LOG_DIR / "indicators.log")
 
 # Use real API endpoints with fallbacks
 DEFAULT_MVRV_URL = "https://api.alternative.me/v2/onchain/mvrv"
-DEFAULT_NUPL_URL = "https://api.alternative.me/v2/onchain/nupl" 
+DEFAULT_NUPL_URL = "https://api.alternative.me/v2/onchain/nupl"
+# SOPR endpoint may be deprecated, try alternative endpoints
 DEFAULT_SOPR_URL = "https://api.alternative.me/v2/onchain/sopr"
+DEFAULT_SOPR_ALT_URL = "https://api.alternative.me/v2/onchain/realized-profit-loss"
 
 # Fallback endpoints if primary ones fail
 FALLBACK_MVRV_URL = "https://api.alternative.me/fng/?limit=1"
@@ -83,10 +85,23 @@ def get_cycle_bias(config: Optional[dict] = None) -> float:
     mvrv_url = cfg.get("mvrv_url") or os.getenv("MVRV_URL", DEFAULT_MVRV_URL)
     nupl_url = cfg.get("nupl_url") or os.getenv("NUPL_URL", DEFAULT_NUPL_URL)
     sopr_url = cfg.get("sopr_url") or os.getenv("SOPR_URL", DEFAULT_SOPR_URL)
+    sopr_alt_url = cfg.get("sopr_alt_url") or os.getenv("SOPR_ALT_URL", DEFAULT_SOPR_ALT_URL)
 
     mvrv = _fetch_value(mvrv_url, "MOCK_MVRV", FALLBACK_MVRV_URL)
     nupl = _fetch_value(nupl_url, "MOCK_NUPL", FALLBACK_NUPL_URL)
-    sopr = _fetch_value(sopr_url, "MOCK_SOPR", FALLBACK_SOPR_URL)
+
+    # Try primary SOPR endpoint first
+    sopr = _fetch_value(sopr_url, "MOCK_SOPR")
+
+    # If primary SOPR fails (returns 0.0), try alternative endpoint
+    if sopr == 0.0:
+        logger.info("Primary SOPR endpoint failed, trying alternative endpoint")
+        sopr = _fetch_value(sopr_alt_url, "MOCK_SOPR", FALLBACK_SOPR_URL)
+        if sopr != 0.0:
+            logger.info("Successfully fetched SOPR from alternative endpoint")
+        else:
+            logger.warning("Both SOPR endpoints failed, using fallback")
+            sopr = _fetch_value(FALLBACK_SOPR_URL, "MOCK_SOPR")
 
     # Normalize values to -1 to 1 range if they're not already
     mvrv = max(-1.0, min(1.0, mvrv))

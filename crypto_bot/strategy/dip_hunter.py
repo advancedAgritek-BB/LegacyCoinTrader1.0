@@ -1,35 +1,33 @@
-from typing import Tuple, Optional
+from typing import Optional, Tuple, Union
 
+import logging
 import pandas as pd
 import ta
-from ta.trend import ADXIndicator
+import numpy as np
 
 from crypto_bot.utils.indicator_cache import cache_series
-from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils import stats
-from crypto_bot.utils.logger import LOG_DIR, setup_logger
-from crypto_bot.cooldown_manager import in_cooldown, mark_cooldown
+from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
+from crypto_bot.cooldown_manager import in_cooldown
 
-NAME = "dip_hunter"
-logger = setup_logger(__name__, LOG_DIR / "bot.log")
-# Shared logger for symbol scoring
-score_logger = setup_logger(
-    "symbol_filter", LOG_DIR / "symbol_filter.log", to_console=False
-)
+logger = logging.getLogger(__name__)
 
 ML_AVAILABLE = init_ml_or_warn()
+
+NAME = "dip_hunter"
 if ML_AVAILABLE:
     MODEL = load_model("dip_hunter")
 else:  # pragma: no cover - fallback
     MODEL = None
+
 
 def generate_signal(
     df: pd.DataFrame,
     symbol: Optional[str] = None,
     timeframe: Optional[str] = None,
     **kwargs,
-) -> Tuple[float, str] | Tuple[float, str, dict]:
+) -> Union[Tuple[float, str], Tuple[float, str, dict]]:
     """Detect deep dips for mean reversion long entries.
 
     Parameters
@@ -93,11 +91,15 @@ def generate_signal(
     # ADX requires at least twice the window length for a stable reading
     if len(recent) < 2 * adx_window:
         return 0.0, "none"
-    adx = ADXIndicator(
+    adx = ta.trend.ADXIndicator(
         recent["high"], recent["low"], recent["close"], window=adx_window
     ).adx()
     bb = ta.volatility.BollingerBands(recent["close"], window=bb_window)
-    bb_pct = bb.bollinger_pband()
+    bb_width = bb.bollinger_wband()
+    bb_mid = recent["close"].rolling(bb_window).mean()
+    bb_upper = bb_mid + (bb_width / 2)
+    bb_lower = bb_mid - (bb_width / 2)
+    bb_pct = (recent["close"] - bb_lower) / (bb_upper - bb_lower)
     vol_ma = recent["volume"].rolling(vol_window).mean()
 
     rsi = cache_series("rsi_dip", df, rsi, lookback)
@@ -156,9 +158,26 @@ def generate_signal(
 
         if MODEL:
             try:  # pragma: no cover - best effort
-                ml_score = MODEL.predict(df)
+                # Ensure DataFrame is still valid before ML call
+                if not isinstance(df, pd.DataFrame) or not hasattr(df, 'empty'):
+                    logger.warning("DataFrame corrupted before ML prediction, skipping ML score")
+                    ml_score = 0.5  # Default neutral score
+                else:
+                    ml_score = MODEL.predict(df)
+                    # Validate that DataFrame is still intact after ML call
+                    if not isinstance(df, pd.DataFrame) or not hasattr(df, 'empty'):
+                        logger.warning("DataFrame corrupted after ML prediction, using default ML score")
+                        ml_score = 0.5  # Default neutral score
+                    else:
+                        # Ensure ml_score is a valid number
+                        if isinstance(ml_score, (list, np.ndarray)):
+                            ml_score = float(ml_score[0]) if len(ml_score) > 0 else 0.5
+                        else:
+                            ml_score = float(ml_score)
                 score = score * (1 - ml_weight) + ml_score * ml_weight
-            except Exception:
+            except Exception as e:
+                logger.warning(f"ML prediction failed, using base score: {e}")
+                # Continue with base score if ML fails
                 pass
 
         if atr_normalization:

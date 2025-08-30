@@ -37,8 +37,11 @@
           <button class="btn btn-warning btn-sm me-2" onclick="stopConflicts()" title="Stop conflicting bot processes">
             <i class="fas fa-exclamation-triangle"></i> Stop Conflicts
           </button>
-          <button class="btn btn-info btn-sm" onclick="forceRefresh()" title="Force refresh page">
+          <button class="btn btn-info btn-sm me-2" onclick="forceRefresh()" title="Force refresh page">
             <i class="fas fa-sync-alt"></i> Refresh
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="generateSampleData()" title="Generate sample data for testing">
+            <i class="fas fa-database"></i> Sample Data
           </button>
         </div>
       </div>
@@ -135,14 +138,14 @@
             </div>
             <div class="col-md-4">
               <div class="wallet-metric">
-                <div class="wallet-label">Current Balance</div>
-                <div class="wallet-value" id="currentWalletBalance">${{ "{:,.2f}".format(paper_wallet_balance) }}</div>
+                <div class="wallet-label">P&L</div>
+                <div class="wallet-value" id="walletPnl">$0.00</div>
               </div>
             </div>
             <div class="col-md-4">
               <div class="wallet-metric">
-                <div class="wallet-label">P&L</div>
-                <div class="wallet-value" id="walletPnl">$0.00</div>
+                <div class="wallet-label">Current Balance</div>
+                <div class="wallet-value" id="currentWalletBalance">${{ "{:,.2f}".format(paper_wallet_balance) if paper_wallet_balance else "0.00" }}</div>
               </div>
             </div>
           </div>
@@ -793,9 +796,41 @@ function updateOpenPositions() {
     .then(positions => {
       console.log('Positions received:', positions);
       updateOpenPositionsDisplay(positions);
+      
+      // Also update wallet PnL when positions change
+      updateWalletPnl();
     })
     .catch(error => {
       console.error('Error updating open positions:', error);
+    });
+}
+
+function updateWalletPnl() {
+  fetch('/api/wallet-pnl')
+    .then(response => response.json())
+    .then(data => {
+      if (data.error) {
+        console.error('Error fetching wallet PnL:', data.error);
+        return;
+      }
+      
+      // Update PnL display
+      const walletPnl = document.getElementById('walletPnl');
+      if (walletPnl) {
+        const pnl = data.unrealized_pnl || 0;
+        walletPnl.textContent = `$${pnl.toFixed(2)}`;
+        walletPnl.className = `wallet-value ${pnl >= 0 ? 'text-success' : 'text-danger'}`;
+      }
+      
+      // Update current balance display
+      const currentBalance = document.getElementById('currentWalletBalance');
+      if (currentBalance) {
+        const balance = data.current_balance || 0;
+        currentBalance.textContent = `$${balance.toFixed(2)}`;
+      }
+    })
+    .catch(error => {
+      console.error('Error updating wallet PnL:', error);
     });
 }
 
@@ -1112,6 +1147,39 @@ function forceRefresh() {
   window.location.href = newUrl;
   
   console.log('=== END FORCE REFRESH DEBUG ===');
+}
+
+function generateSampleData() {
+  if (confirm('Are you sure you want to generate sample data for testing? This will overwrite existing data.')) {
+    const generateBtn = document.querySelector('button[onclick="generateSampleData()"]');
+    if (generateBtn) {
+      generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+      generateBtn.disabled = true;
+    }
+
+    fetch('/api/generate_sample_trades', {
+      method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        window.LegacyCoinTrader.showToast('Sample data generated successfully!', 'success');
+        setTimeout(() => window.location.reload(), 1000);
+      } else {
+        window.LegacyCoinTrader.showToast(`Error generating sample data: ${data.error}`, 'error');
+      }
+    })
+    .catch(error => {
+      console.error('Error generating sample data:', error);
+      window.LegacyCoinTrader.showToast('Error generating sample data', 'error');
+    })
+    .finally(() => {
+      if (generateBtn) {
+        generateBtn.innerHTML = '<i class="fas fa-database"></i> Sample Data';
+        generateBtn.disabled = false;
+      }
+    });
+  }
 }
 
 // Ensure LegacyCoinTrader is available

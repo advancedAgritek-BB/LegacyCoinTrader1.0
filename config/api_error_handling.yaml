@@ -1,0 +1,77 @@
+# API Error Handling Configuration
+# This file configures how the bot handles various API errors and failures
+
+# General error handling settings
+error_handling:
+  max_retries: 3
+  retry_delay: 1.0  # seconds
+  exponential_backoff: true
+  max_backoff: 30.0  # seconds
+
+# Rate limiting configuration
+rate_limiting:
+  enabled: true
+  default_delay: 0.1  # seconds between requests
+  burst_limit: 10
+  burst_window: 1.0  # seconds
+
+# Exchange-specific error handling
+exchanges:
+  kraken:
+    retry_on_errors:
+      - "EAPI:Invalid key"
+      - "EAPI:Invalid signature"
+      - "EAPI:Invalid nonce"
+      - "EAPI:Rate limit exceeded"
+      - "EService:Unavailable"
+      - "EService:Busy"
+    max_retries: 5
+    retry_delay: 2.0
+    
+  coinbase:
+    retry_on_errors:
+      - "rate_limit_exceeded"
+      - "internal_server_error"
+      - "service_unavailable"
+    max_retries: 3
+    retry_delay: 1.0
+
+# LunarCrush sentiment API settings (primary sentiment source)
+lunarcrush_sentiment:
+  enabled: true
+  max_retries: 3
+  retry_delay: 1.0
+  timeout: 10.0
+  cache_duration: 300  # 5 minutes
+
+# Error notification settings
+notifications:
+  telegram:
+    enabled: true
+    error_threshold: "error"  # minimum level to send
+    rate_limit: 60  # seconds between notifications
+  
+  logging:
+    level: "warning"
+    include_stack_trace: false
+    max_log_size: "10MB"
+    backup_count: 5
+
+# Circuit breaker settings
+circuit_breaker:
+  enabled: true
+  failure_threshold: 5
+  recovery_timeout: 60  # seconds
+  expected_exception: "requests.RequestException"
+
+# Fallback strategies
+fallbacks:
+  sentiment:
+    primary: "lunarcrush"
+    backup: "fear_greed_index"
+    neutral_fallback: true
+  
+  market_data:
+    primary: "exchange_api"
+    backup: "cached_data"
+    max_cache_age: 300  # seconds

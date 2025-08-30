@@ -5,6 +5,7 @@ exchange: kraken
 kraken_api_key: test_key
 kraken_api_secret: test_secret
 mode: cex
+paper_wallet_balance: 15000.0
 telegram_chat_id: '827777274'
 telegram_token: 8126215032:AAEhQZLiXpssauKf0ktQsq1XqXl94QriCdE
 wallet_address: EoiVpzLA6b6JBKXTB5WRFor3mPkseM6UisLHt8qK9g1c
