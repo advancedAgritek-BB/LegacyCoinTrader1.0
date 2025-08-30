@@ -279,8 +279,11 @@ def mock_aiohttp():
         mock_get.return_value.__aenter__.return_value.status = 200
         mock_get.return_value.__aenter__.return_value.json = AsyncMock(return_value={'data': 'test_data'})
         yield mock_get
+<<<<<<< Current (Your changes)
 # Lightweight analyzer fixture used by pool analyzer tests
 @pytest.fixture
 def analyzer():
     from crypto_bot.solana.pool_analyzer import PoolAnalyzer
     return PoolAnalyzer()
+=======
+>>>>>>> Incoming (Background Agent changes)
