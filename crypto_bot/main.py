@@ -1226,9 +1226,15 @@ async def execute_signals(ctx: BotContext) -> None:
         return
 
     # Prioritize by score
+    from crypto_bot.utils.telemetry import telemetry
+    initial = len(results)
     results = [r for r in results if not r.get("skip") and r.get("direction") != "none"]
+    filtered = initial - len(results)
+    if filtered > 0:
+        telemetry.inc("exec.filtered_non_actionable", filtered)
     if not results:
         logger.info("All signals filtered out - nothing actionable")
+        telemetry.inc("exec.no_actionable")
         return
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
     top_n = ctx.config.get("top_n_symbols", 3)
@@ -1238,10 +1244,12 @@ async def execute_signals(ctx: BotContext) -> None:
         logger.info("Analysis result: %s", candidate)
         if not ctx.position_guard or not ctx.position_guard.can_open(ctx.positions):
             logger.info("Max open trades reached; skipping remaining signals")
+            telemetry.inc("exec.blocked_max_open_trades")
             break
         sym = candidate["symbol"]
         if sym in ctx.positions:
             logger.info("Existing position for %s - skipping", sym)
+            telemetry.inc("exec.skip_existing_position")
             continue
 
         df = candidate["df"]
@@ -1251,6 +1259,7 @@ async def execute_signals(ctx: BotContext) -> None:
         allowed, reason = ctx.risk_manager.allow_trade(df, strategy)
         if not allowed:
             logger.info("Trade blocked for %s: %s", sym, reason)
+            telemetry.inc(f"exec.blocked_risk.{str(reason).strip().replace(' ', '_').lower()}")
             continue
 
         probs = candidate.get("probabilities", {})
@@ -1276,6 +1285,7 @@ async def execute_signals(ctx: BotContext) -> None:
         size = base_size * sentiment_boost
         if size <= 0:
             logger.info("Calculated size %.4f for %s - skipping", size, sym)
+            telemetry.inc("exec.blocked_zero_size")
             continue
 
         if not ctx.risk_manager.can_allocate(strategy, size, ctx.balance):
@@ -1285,11 +1295,13 @@ async def execute_signals(ctx: BotContext) -> None:
                 sym,
                 strategy,
             )
+            telemetry.inc("exec.blocked_insufficient_capital")
             continue
 
         side = direction_to_side(candidate["direction"])
         if side == "sell" and not ctx.config.get("allow_short", False):
             logger.info("Short selling disabled; skipping signal for %s", sym)
+            telemetry.inc("exec.blocked_short_disabled")
             continue
 
         # Execute trades asynchronously based on symbol type

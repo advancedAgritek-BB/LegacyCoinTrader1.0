@@ -574,6 +574,7 @@ async def filter_symbols(
                     break
         if not symbol:
             logger.warning("Unable to map ticker id %s to requested symbol", pair_id)
+            telemetry.inc("scan.unmapped_ticker_id")
             continue
 
         vol_usd, change_pct, spread_pct = _parse_metrics(symbol, ticker)
@@ -588,6 +589,7 @@ async def filter_symbols(
         local_min_volume = min_volume * 0.5 if symbol.endswith("/USDC") else min_volume
         if cache_map and vol_usd < local_min_volume * vol_mult:
             skipped += 1
+            telemetry.inc("scan.skip_low_volume_uncached")
             continue
         if vol_usd >= local_min_volume and spread_pct <= max_spread:
             metrics.append((symbol, vol_usd, change_pct, spread_pct))
@@ -605,12 +607,14 @@ async def filter_symbols(
         cached = cached_data.get(sym) or cached_data.get(norm_sym)
         if cached is None:
             skipped += 1
+            telemetry.inc("scan.skip_no_cache")
             continue
         vol_usd, spread_pct, _ = cached
         seen.add(norm_sym)
         local_min_volume = min_volume * 0.5 if norm_sym.endswith("/USDC") else min_volume
         if cache_map and vol_usd < local_min_volume * vol_mult:
             skipped += 1
+            telemetry.inc("scan.skip_low_volume_uncached")
             continue
         if vol_usd >= local_min_volume and spread_pct <= max_spread:
             metrics.append((norm_sym, vol_usd, 0.0, spread_pct))
@@ -629,6 +633,10 @@ async def filter_symbols(
             metrics.append((sym, vol_usd, change_pct, spread_pct))
         else:
             skipped += 1
+            if spread_pct > max_spread:
+                telemetry.inc("scan.skip_spread")
+            if vol_usd < vol_cut:
+                telemetry.inc("scan.skip_volume_percentile")
 
     if metrics and pct:
         threshold = np.percentile([abs(m[2]) for m in metrics], pct)
@@ -673,6 +681,7 @@ async def filter_symbols(
                 scored.append((sym, score))
             else:
                 skipped += 1
+                telemetry.inc("scan.skip_min_score")
     scored.sort(key=lambda x: x[1], reverse=True)
 
     corr_map: Dict[Tuple[str, str], float] = {}
@@ -734,7 +743,9 @@ async def filter_symbols(
             result.append((sym, score))
         else:
             skipped += 1
+            telemetry.inc("scan.skip_correlation")
 
+    telemetry.inc("scan.selected", len(result))
     telemetry.inc("scan.symbols_skipped", skipped)
     if cache_changed and cache_map is not None:
         try:
