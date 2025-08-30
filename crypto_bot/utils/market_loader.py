@@ -870,18 +870,6 @@ async def fetch_geckoterminal_ohlcv(
 
     from urllib.parse import quote_plus
 
-    async with GECKO_SEMAPHORE:
-        # Validate symbol before making any requests
-        try:
-            token_mint, quote = symbol.split("/", 1)
-        except ValueError:
-            token_mint, quote = symbol, ""
-        if quote != "USDC":
-            return None
-        try:
-            base58.b58decode(token_mint)
-        except Exception:
-            return None
     # Validate symbol before making any requests
     try:
         token_mint, quote = symbol.split("/", 1)
@@ -898,80 +886,82 @@ async def fetch_geckoterminal_ohlcv(
     data = {}
     is_cached = False
 
-    backoff = 1
-    for attempt in range(3):
-        cached = GECKO_POOL_CACHE.get(symbol)
-        is_cached = cached is not None and cached[4] == limit
-        try:
-            async with aiohttp.ClientSession() as session:
-                if cached is None:
-                    query = quote_plus(symbol)
-                    search_url = (
-                        "https://api.geckoterminal.com/api/v2/search/pools"
-                        f"?query={query}&network=solana"
-                    )
+    # Use semaphore to limit concurrent API calls
+    async with GECKO_SEMAPHORE:
+        backoff = 1
+        for attempt in range(3):
+            cached = GECKO_POOL_CACHE.get(symbol)
+            is_cached = cached is not None and cached[4] == limit
+            try:
+                async with aiohttp.ClientSession() as session:
+                    if cached is None:
+                        query = quote_plus(symbol)
+                        search_url = (
+                            "https://api.geckoterminal.com/api/v2/search/pools"
+                            f"?query={query}&network=solana"
+                        )
 
-                    async with session.get(search_url, timeout=10) as resp:
-                        if resp.status == 404:
-                            logger.info(
-                                "pair not available on GeckoTerminal: %s", symbol
-                            )
+                        async with session.get(search_url, timeout=10) as resp:
+                            if resp.status == 404:
+                                logger.info(
+                                    "pair not available on GeckoTerminal: %s", symbol
+                                )
+                                return None
+                            resp.raise_for_status()
+                            search_data = await resp.json()
+
+                        items = search_data.get("data") or []
+                        if not items:
+                            logger.info("pair not available on GeckoTerminal: %s", symbol)
                             return None
+
+                        first = items[0]
+                        attrs = (
+                            first.get("attributes", {}) if isinstance(first, dict) else {}
+                        )
+
+                        pool_id = str(first.get("id", ""))
+                        pool_addr = pool_id.split("_", 1)[-1]
+                        try:
+                            volume = float(attrs.get("volume_usd", {}).get("h24", 0.0))
+                        except Exception:
+                            volume = 0.0
+                        if volume < float(min_24h_volume):
+                            return None
+                        try:
+                            price = float(attrs.get("base_token_price_quote_token", 0.0))
+                        except Exception:
+                            price = 0.0
+                        try:
+                            reserve = float(attrs.get("reserve_in_usd", 0.0))
+                        except Exception:
+                            reserve = 0.0
+
+                        GECKO_POOL_CACHE[symbol] = (
+                            pool_addr,
+                            volume,
+                            reserve,
+                            price,
+                            limit,
+                        )
+                    else:
+                        pool_addr, volume, reserve, price, _ = cached
+
+                    ohlcv_url = (
+                        "https://api.geckoterminal.com/api/v2/networks/solana/pools/"
+                        f"{pool_addr}/ohlcv/{timeframe}?aggregate=1&limit={limit}"
+                    )
+
+                    async with session.get(ohlcv_url, timeout=10) as resp:
                         resp.raise_for_status()
-                        search_data = await resp.json()
-
-                    items = search_data.get("data") or []
-                    if not items:
-                        logger.info("pair not available on GeckoTerminal: %s", symbol)
-                        return None
-
-                    first = items[0]
-                    attrs = (
-                        first.get("attributes", {}) if isinstance(first, dict) else {}
-                    )
-
-                    pool_id = str(first.get("id", ""))
-                    pool_addr = pool_id.split("_", 1)[-1]
-                    try:
-                        volume = float(attrs.get("volume_usd", {}).get("h24", 0.0))
-                    except Exception:
-                        volume = 0.0
-                    if volume < float(min_24h_volume):
-                        return None
-                    try:
-                        price = float(attrs.get("base_token_price_quote_token", 0.0))
-                    except Exception:
-                        price = 0.0
-                    try:
-                        reserve = float(attrs.get("reserve_in_usd", 0.0))
-                    except Exception:
-                        reserve = 0.0
-
-                    GECKO_POOL_CACHE[symbol] = (
-                        pool_addr,
-                        volume,
-                        reserve,
-                        price,
-                        limit,
-                    )
-                else:
-                    pool_addr, volume, reserve, price, _ = cached
-
-                ohlcv_url = (
-                    "https://api.geckoterminal.com/api/v2/networks/solana/pools/"
-                    f"{pool_addr}/ohlcv/{timeframe}?aggregate=1&limit={limit}"
-                )
-
-                async with session.get(ohlcv_url, timeout=10) as resp:
-                    resp.raise_for_status()
-                    data = await resp.json()
-            break
-        except Exception as exc:  # pragma: no cover - network
-            if attempt == 2:
-                logger.error("GeckoTerminal OHLCV error for %s: %s", symbol, exc)
-                return None
-            await asyncio.sleep(backoff)
-            backoff *= 2
+                        data = await resp.json()
+                break
+            except Exception as exc:  # pragma: no cover - network
+                if attempt == 2:
+                    logger.error("GeckoTerminal OHLCV error for %s: %s", symbol, exc)
+                    return None
+                await asyncio.sleep(backoff)
+                backoff *= 2
 
     candles = (data.get("data") or {}).get("attributes", {}).get("ohlcv_list") or []
 

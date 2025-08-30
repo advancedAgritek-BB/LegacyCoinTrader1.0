@@ -19,12 +19,13 @@ import pandas as pd
 import numpy as np
 
 from ..utils.scan_cache_manager import get_scan_cache_manager, ScanResult
-from ..utils.logger import setup_logger
+from ..utils.logger import setup_logger, LOG_DIR
 from .scanner import get_solana_new_tokens, get_sentiment_enhanced_tokens
 from .pyth_utils import get_pyth_price
 from .score import calculate_token_score
+from ..utils.logger import LOG_DIR
 
-logger = setup_logger(__name__)
+logger = setup_logger(__name__, LOG_DIR / "enhanced_scanner.log")
 
 
 @dataclass

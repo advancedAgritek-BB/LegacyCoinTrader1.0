@@ -1,25 +1,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Iterable, Any
+from typing import Optional, Iterable, Any, Union
 import asyncio
 import inspect
 import threading
 import os
 
 try:
-    from telegram.ext import Bot
-    from telegram.request import Request
+    # Try importing from telegram directly (for newer versions like 22.3+)
+    from telegram import Bot
+    try:
+        from telegram.request import HTTPXRequest as Request
+    except ImportError:
+        Request = None
 except ImportError:
     try:
-        from telegram import Bot
-        from telegram.request import Request
+        # Fallback to telegram.ext (for older versions)
+        from telegram.ext import Bot
+        try:
+            from telegram.request import HTTPXRequest as Request
+        except ImportError:
+            Request = None
     except ImportError:
         try:
             from telegram.ext import Bot
             Request = None
         except ImportError:
-            # Fallback for older versions
+            # Final fallback for older versions
             Bot = None
             Request = None
 
@@ -62,6 +70,9 @@ def send_message(token: str, chat_id: str, text: str) -> Optional[str]:
 
     Returns ``None`` on success or an error string on failure.
     """
+    if Bot is None:
+        return "Telegram library not available"
+    
     try:
         if Request is not None:
             bot = Bot(token, request=Request(
@@ -74,8 +85,14 @@ def send_message(token: str, chat_id: str, text: str) -> Optional[str]:
             # Fallback for older versions
             bot = Bot(token)
 
+        if bot is None:
+            return "Failed to create Telegram bot instance"
+
         async def _send() -> None:
             try:
+                if not hasattr(bot, 'send_message') or bot.send_message is None:
+                    logger.error("Bot object has no send_message method")
+                    return
                 await asyncio.wait_for(
                     bot.send_message(chat_id=chat_id, text=text),
                     timeout=30.0
@@ -110,13 +127,9 @@ def send_message(token: str, chat_id: str, text: str) -> Optional[str]:
         return str(e)
 
 
-@dataclass
 class TelegramNotifier:
     """Simple notifier for sending Telegram messages."""
 
-    token: str = ""
-    chat_id: str = ""
-    enabled: bool = True
     def __init__(
         self,
         enabled: bool = True,
@@ -142,7 +155,16 @@ class TelegramNotifier:
         with self._lock:
             if self._disabled:
                 return None
-            err = send_message(self.token, self.chat_id, text)
+            # Import at call-time so tests patching crypto_bot.utils.telegram.send_message work reliably
+            try:
+                from importlib import import_module
+                mod = import_module("crypto_bot.utils.telegram")
+                send_fn = getattr(mod, "send_message", None)
+            except Exception:
+                send_fn = None
+            if send_fn is None:
+                return None
+            err = send_fn(self.token, self.chat_id, text)
             if err is not None:
                 self._disabled = True
                 logger.error(

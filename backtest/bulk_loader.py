@@ -18,7 +18,7 @@ their concatenated contents ordered by time.  Optional ``start`` and
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Union
 
 import pandas as pd
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Union
 
 from crypto_bot.utils.logger import LOG_DIR
 import sys

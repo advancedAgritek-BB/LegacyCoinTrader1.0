@@ -85,13 +85,14 @@ class TestWalletManager:
             validate_private_key(invalid_key)
 
     @patch('crypto_bot.wallet_manager.Keypair')
-    def test_create_wallet_from_seed(self, mock_keypair, mock_keypair_instance):
+    def test_create_wallet_from_seed(self, mock_keypair):
         """Test creating wallet from seed phrase."""
+        mock_keypair_instance = Mock()
         mock_keypair.from_seed.return_value = mock_keypair_instance
-        
+
         seed_phrase = "test seed phrase for wallet creation"
         wallet = create_wallet_from_seed(seed_phrase)
-        
+
         assert wallet is not None
         mock_keypair.from_seed.assert_called_once()
 
@@ -164,18 +165,19 @@ class TestWalletManager:
         assert wallet_manager.has_wallet("wallet_1") == True
 
     @patch('crypto_bot.wallet_manager.Keypair')
-    def test_wallet_import_export(self, mock_keypair, mock_keypair_instance):
+    def test_wallet_import_export(self, mock_keypair):
         """Test wallet import and export functionality."""
         # Mock the keypair methods
+        mock_keypair_instance = Mock()
         mock_keypair_instance.secret_key = b"test_secret_key_32_bytes_long_12345"
         mock_keypair_instance.public_key.to_base58.return_value = "test_public_key"
-        
+
         # Test export
         exported_data = {
             'public_key': mock_keypair_instance.public_key.to_base58(),
             'secret_key': list(mock_keypair_instance.secret_key)
         }
-        
+
         assert exported_data['public_key'] == "test_public_key"
         assert len(exported_data['secret_key']) == 32
 

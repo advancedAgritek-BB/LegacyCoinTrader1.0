@@ -44,4 +44,8 @@ def execute_trade(exchange: ccxt.Exchange, symbol: str, side: str, amount: float
     err = notifier.notify(f"Order executed: {order}")
     if err:
         logger.error("Failed to send message: %s", err)
+    
+    # Debug logging before calling log_trade
+    logger.info(f"About to log trade (basic): {order}")
     log_trade(order)
+    logger.info(f"Trade logged successfully (basic): {order}")

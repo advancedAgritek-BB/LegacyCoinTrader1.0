@@ -6,9 +6,18 @@ import asyncio
 from typing import Dict, Any
 
 
+import os
+
 async def control_loop(state: Dict[str, Any]) -> None:
     """Listen for commands and update ``state`` accordingly."""
-    print("Commands: Union[start, stop] | reload | quit")
+    
+    # Auto-start trading in non-interactive mode
+    if os.environ.get('NON_INTERACTIVE'):
+        state["running"] = True
+        print("Auto-starting trading in non-interactive mode")
+        return
+    
+    print("Commands: start | stop | reload | quit")
     try:
         while True:
             cmd = (await asyncio.to_thread(input, "> ")).strip().lower()

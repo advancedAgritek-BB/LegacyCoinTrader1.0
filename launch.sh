@@ -59,6 +59,46 @@ echo "📊 Main bot PID: $MAIN_PID"
 echo "🌐 Web dashboard: http://localhost:8000"
 echo "📱 Telegram bot PID: $TELEGRAM_PID"
 echo ""
+
+# Function to open browser (cross-platform)
+open_browser() {
+    local url="$1"
+    local delay="$2"
+    
+    echo "⏳ Waiting $delay seconds for server to start..."
+    sleep "$delay"
+    
+    # Detect OS and open appropriate browser
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        echo "🌐 Opening browser on macOS..."
+        open "$url"
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        # Linux
+        echo "🌐 Opening browser on Linux..."
+        if command -v xdg-open >/dev/null 2>&1; then
+            xdg-open "$url"
+        elif command -v gnome-open >/dev/null 2>&1; then
+            gnome-open "$url"
+        elif command -v kde-open >/dev/null 2>&1; then
+            kde-open "$url"
+        else
+            echo "⚠️  Could not automatically open browser. Please manually navigate to: $url"
+        fi
+    else
+        # Windows or other
+        echo "🌐 Opening browser..."
+        if command -v start >/dev/null 2>&1; then
+            start "$url"
+        else
+            echo "⚠️  Could not automatically open browser. Please manually navigate to: $url"
+        fi
+    fi
+}
+
+# Open browser in background after a delay
+open_browser "http://localhost:8000" 3 &
+
 echo "Press Ctrl+C to stop all services"
 
 # Function to cleanup on exit

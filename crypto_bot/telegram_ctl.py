@@ -4,19 +4,25 @@ import asyncio
 import contextlib
 import json
 from pathlib import Path
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Sequence, Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
+try:  # pragma: no cover - optional dependency
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+    from telegram.ext import ContextTypes
+except Exception:  # pragma: no cover - telegram not installed
+    InlineKeyboardButton = InlineKeyboardMarkup = Update = object  # type: ignore
+    ContextTypes = object  # type: ignore
 
-# Remove circular imports that cause import chain failures
-# from . import console_monitor, log_reader
 from .utils.logger import LOG_DIR, setup_logger
 from .utils.open_trades import get_open_trades
 from .utils.telegram import TelegramNotifier
 
-
 logger = setup_logger(__name__, LOG_DIR / "telegram_ctl.log")
+
+STRATEGY_FILE = LOG_DIR / "strategy_stats.json"
+TRADES_FILE = LOG_DIR / "trades.csv"
+LOG_FILE = LOG_DIR / "bot.log"
+CONFIG_FILE = Path("crypto_bot/config.yaml")
 
 
 async def _maybe_call(func: Any) -> Any:
@@ -60,27 +66,6 @@ def start(
     if not enabled:
         return None
     return asyncio.create_task(status_loop(controller, admins, update_interval))
-"""Telegram command handlers used by TelegramBotUI and other clients."""
-
-import asyncio
-import json
-from pathlib import Path
-from typing import Any, Dict
-
-try:  # pragma: no cover - optional dependency
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-    from telegram.ext import ContextTypes
-except Exception:  # pragma: no cover - telegram not installed
-    InlineKeyboardButton = InlineKeyboardMarkup = Update = object  # type: ignore
-    ContextTypes = object  # type: ignore
-
-from . import console_monitor, log_reader
-from .utils.open_trades import get_open_trades
-
-STRATEGY_FILE = LOG_DIR / "strategy_stats.json"
-TRADES_FILE = LOG_DIR / "trades.csv"
-LOG_FILE = LOG_DIR / "bot.log"
-CONFIG_FILE = Path("crypto_bot/config.yaml")
 
 
 def is_admin(update: Update, admin_id: str) -> bool:
@@ -144,8 +129,12 @@ class BotController:
         return "No strategies found"
 
     async def positions(self) -> str:
-        lines = await console_monitor.trade_stats_lines(self.exchange, self.trades_file)
-        return "\n".join(lines) if lines else "(no positions)"
+        try:
+            from . import console_monitor
+            lines = await console_monitor.trade_stats_lines(self.exchange, self.trades_file)
+            return "\n".join(lines) if lines else "(no positions)"
+        except ImportError:
+            return "Console monitor not available"
 
     async def logs(self) -> str:
         if self.log_file.exists():
@@ -158,77 +147,16 @@ class BotController:
             return self.config_file.read_text()
         return "Config not found"
 
-    async def reload(self) -> str:
-        self.state["reload"] = True
-        return "Config reload requested"
-    async def reload_config(self) -> str:
-        self.state["reload"] = True
-        return "Config reload scheduled"
+    async def get_status(self) -> str:
+        return await self.status()
+
+    async def list_positions(self) -> str:
+        return await self.positions()
 
     async def close_all_positions(self) -> str:
         """Signal the trading bot to liquidate all open positions."""
         self.state["liquidate_all"] = True
         return "Liquidation requested"
-
-
-def _reply_or_edit(update: Update, text: str, reply_markup: Optional[Any] = None) -> None:
-    """Reply to message or edit callback text."""
-    if getattr(update, "callback_query", None):
-        asyncio.create_task(update.callback_query.answer())
-        asyncio.create_task(update.callback_query.message.edit_text(text, reply_markup=reply_markup))
-    else:
-        asyncio.create_task(update.message.reply_text(text, reply_markup=reply_markup))
-
-
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update, context.bot_data.get("admin_id")):
-        return
-    text = await context.bot_data["controller"].start()
-    await update.message.reply_text(text)
-
-
-async def stop_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update, context.bot_data.get("admin_id")):
-        return
-    text = await context.bot_data["controller"].stop()
-    await update.message.reply_text(text)
-
-
-async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update, context.bot_data.get("admin_id")):
-        return
-    text = await context.bot_data["controller"].status()
-    await update.message.reply_text(text)
-
-
-async def strategies_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update, context.bot_data.get("admin_id")):
-        return
-    text = await context.bot_data["controller"].strategies()
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Refresh", callback_data="strategies")]]
-    )
-    await _reply_or_edit(update, text, keyboard)
-
-
-async def positions_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update, context.bot_data.get("admin_id")):
-        return
-    text = await context.bot_data["controller"].positions()
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Refresh", callback_data="positions")]]
-    )
-    await _reply_or_edit(update, text, keyboard)
-
-
-async def logs_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update, context.bot_data.get("admin_id")):
-        return
-    text = await context.bot_data["controller"].logs()
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Refresh", callback_data="logs")]]
-    )
-    await _reply_or_edit(update, text, keyboard)
 
 
 async def panic_sell_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -237,100 +165,5 @@ async def panic_sell_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     text = await context.bot_data["controller"].close_all_positions()
     await update.message.reply_text(text)
-
-
-async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update, context.bot_data.get("admin_id")):
-        return
-    text = await context.bot_data["controller"].settings()
-    await update.message.reply_text(text)
-
-
-ITEMS_PER_PAGE = 20
-
-
-def _paginate(text: str, lines_per_page: int = ITEMS_PER_PAGE) -> List[str]:
-    """Return ``text`` split into pages of ``lines_per_page`` lines."""
-    lines = text.splitlines()
-    return [
-        "\n".join(lines[i : i + lines_per_page])
-        for i in range(0, len(lines), lines_per_page)
-    ] or [""]
-
-
-class TelegramCtl:
-    """Minimal Telegram controller wrapper for tests."""
-
-    def __init__(self, controller: Any, admin_id: Union[str, int]) -> None:
-        self.controller = controller
-        self.admin_id = str(admin_id)
-        self._heartbeat: Optional[asyncio.Task] = None
-
-    # ------------------------------------------------------------------
-    def _is_admin(self, update: Update) -> bool:
-        return str(getattr(update.effective_user, "id", "")) == self.admin_id
-
-    async def _reply(self, update: Update, text: str) -> None:
-        await update.reply_text(text)
-
-    async def _call(self, update: Update, name: str, ok: str = "") -> None:
-        if not self._is_admin(update):
-            await self._reply(update, "Unauthorized")
-            return
-        func = getattr(self.controller, name)
-        result = await _maybe_call(func)
-        await self._reply(update, result if isinstance(result, str) else ok)
-
-    # Command handlers -------------------------------------------------
-    async def start_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._call(update, "start", "Started")
-
-    async def stop_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._call(update, "stop", "Stopped")
-
-    async def status_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._call(update, "status")
-
-    async def log_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._call(update, "log")
-
-    async def rotate_now_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._call(update, "rotate_now")
-
-    async def toggle_mode_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._call(update, "toggle_mode")
-
-    async def reload_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._call(update, "reload_config")
-
-    async def signals_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._call(update, "signals")
-
-    async def balance_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._call(update, "balance")
-
-    async def trades_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._call(update, "trades")
-
-    async def panic_sell_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._call(update, "close_all_positions")
-
-    async def _send_pages(self, update: Update, pages: List[str]) -> None:
-        for page in pages:
-            await update.reply_text(page)
-
-    def start_heartbeat(self) -> asyncio.Task:
-        async def _loop() -> None:
-            while True:  # pragma: no cover - loop
-                await asyncio.sleep(1)
-
-        self._heartbeat = asyncio.create_task(_loop())
-        return self._heartbeat
-
-    async def stop_heartbeat(self) -> None:
-        if self._heartbeat:
-            self._heartbeat.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._heartbeat
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 """Utility for computing currently open trades from the trade log."""
 
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Union
 
 import csv
 import pandas as pd
@@ -107,5 +107,5 @@ def get_open_trades(log_path: Union[Path, str]) -> List[Dict]:
     for positions in short_positions.values():
         result.extend(positions)
 
-    result.sort(key=lambda x: x.get("entry_time"))
+    result.sort(key=lambda x: x.get("entry_time") or "")
     return result

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import List
+from typing import List, Union, Optional, Tuple
 import aiohttp
 import ccxt.async_support as ccxt
 

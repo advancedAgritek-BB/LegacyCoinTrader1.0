@@ -3,7 +3,7 @@ from __future__ import annotations
 """Utility for computing trade statistics from log files."""
 
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 import pandas as pd
 
@@ -13,7 +13,7 @@ def _read_trades(path: Union[Path, str]) -> pd.DataFrame:
     if not file.exists():
         return pd.DataFrame(columns=["symbol", "side", "amount", "price", "timestamp"])
 
-    cols = ["symbol", "side", "amount", "price", "timestamp"]
+    cols = ["symbol", "side", "amount", "price", "timestamp", "closed"]
     df = pd.read_csv(
         file,
         header=None,

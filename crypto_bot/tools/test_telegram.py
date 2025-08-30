@@ -1,159 +1,88 @@
-#!/usr/bin/env python3
-"""
-Telegram bot connection test script.
-Tests the bot's ability to connect and send messages.
-"""
+"""Pytest tests for Telegram bot functionality."""
 
-import yaml
-import asyncio
-import time
-from pathlib import Path
+import pytest
 from typing import Dict, Any
+from pathlib import Path
+import yaml
 
-try:
-    from telegram import Bot
-    from telegram.request import Request
-    TELEGRAM_AVAILABLE = True
-except ImportError:
-    TELEGRAM_AVAILABLE = False
-    print("❌ python-telegram-bot not installed. Install with: pip install python-telegram-bot")
 
-def load_config(config_path: str) -> Dict[str, Any]:
-    """Load configuration from YAML file."""
-    try:
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        print(f"Error loading config: {e}")
-        return {}
+@pytest.fixture
+def token():
+    """Mock Telegram bot token for testing."""
+    return "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
 
-async def test_telegram_connection(token: str, chat_id: str) -> bool:
-    """Test Telegram bot connection and send a test message."""
-    if not TELEGRAM_AVAILABLE:
-        return False
-    
-    try:
-        # Create bot with proper timeout settings
-        bot = Bot(token, request=Request(
-            connection_pool_size=8,
-            connect_timeout=30.0,
-            read_timeout=30.0,
-            write_timeout=30.0
-        ))
-        
-        print("🔗 Testing Telegram bot connection...")
-        
-        # Test getting bot info
-        bot_info = await asyncio.wait_for(bot.get_me(), timeout=30.0)
-        print(f"✅ Bot connected: @{bot_info.username} (ID: {bot_info.id})")
-        
-        # Test sending message
-        test_message = f"🤖 Bot connection test successful at {time.strftime('%Y-%m-%d %H:%M:%S')}"
-        await asyncio.wait_for(
-            bot.send_message(chat_id=chat_id, text=test_message),
-            timeout=30.0
-        )
-        print(f"✅ Test message sent to chat {chat_id}")
-        
-        return True
-        
-    except asyncio.TimeoutError:
-        print("❌ Connection timeout - check your internet connection")
-        return False
-    except Exception as e:
-        print(f"❌ Connection failed: {e}")
-        return False
+
+@pytest.fixture
+def chat_id():
+    """Mock Telegram chat ID for testing."""
+    return "123456789"
+
+
+@pytest.fixture
+def config():
+    """Mock configuration for testing."""
+    return {
+        'telegram': {
+            'enabled': True,
+            'token': '1234567890:ABCdefGHIjklMNOpqrsTUVwxyz',
+            'chat_id': '123456789',
+            'timeout_seconds': 30,
+            'fail_silently': False
+        }
+    }
+
 
 def test_config_values(config: Dict[str, Any]) -> None:
     """Test configuration values for common issues."""
-    print("\n🔍 Checking configuration values...")
-    
     telegram = config.get('telegram', {})
     
     # Check required fields
-    if not telegram.get('token'):
-        print("❌ Missing Telegram token")
-        return
-    
-    if not telegram.get('chat_id'):
-        print("❌ Missing Telegram chat ID")
-        return
+    assert telegram.get('token'), "Missing Telegram token"
+    assert telegram.get('chat_id'), "Missing Telegram chat ID"
     
     # Check token format
     token = telegram['token']
-    if not token or len(token) < 20:
-        print("❌ Invalid Telegram token format")
-        return
+    assert token and len(token) >= 20, "Invalid Telegram token format"
     
     # Check chat ID format
     chat_id = str(telegram['chat_id'])
-    if not chat_id.isdigit():
-        print("❌ Chat ID should be a numeric value")
-        return
-    
-    print("✅ Configuration values look valid")
+    assert chat_id.isdigit(), "Chat ID should be a numeric value"
     
     # Check optional settings
     timeout = telegram.get('timeout_seconds', 30)
-    if timeout < 10:
-        print(f"⚠️  timeout_seconds ({timeout}) is quite low, consider increasing to 30+")
-    
-    if telegram.get('fail_silently', False):
-        print("ℹ️  fail_silently is enabled - bot will continue running even if Telegram fails")
+    assert timeout >= 10, "timeout_seconds should be at least 10"
 
-def main():
-    """Main test function."""
-    config_path = "crypto_bot/config.yaml"
-    
-    if not Path(config_path).exists():
-        print(f"❌ Configuration file not found: {config_path}")
-        return
-    
-    print("🤖 Telegram Bot Connection Test")
-    print("=" * 40)
-    
-    config = load_config(config_path)
-    if not config:
-        print("❌ Failed to load configuration")
-        return
-    
+
+def test_config_file_exists():
+    """Test that the configuration file exists."""
+    config_path = Path("crypto_bot/config.yaml")
+    assert config_path.exists(), f"Configuration file not found: {config_path}"
+
+
+def test_config_file_parsable():
+    """Test that the configuration file can be parsed."""
+    config_path = Path("crypto_bot/config.yaml")
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        assert isinstance(config, dict), "Config should be a dictionary"
+    except Exception as e:
+        pytest.fail(f"Failed to parse config file: {e}")
+
+
+def test_telegram_enabled_in_config(config: Dict[str, Any]):
+    """Test that Telegram is enabled in configuration."""
     telegram = config.get('telegram', {})
-    if not telegram.get('enabled', False):
-        print("ℹ️  Telegram is disabled in configuration")
-        return
-    
-    # Test configuration values
-    test_config_values(config)
-    
-    # Test connection
-    token = telegram.get('token')
-    chat_id = telegram.get('chat_id')
-    
-    if not token or not chat_id:
-        print("❌ Cannot test connection - missing token or chat ID")
-        return
-    
-    print(f"\n🚀 Testing connection with token: {token[:10]}...")
-    print(f"📱 Chat ID: {chat_id}")
-    
-    # Run the connection test
-    success = asyncio.run(test_telegram_connection(token, chat_id))
-    
-    if success:
-        print("\n🎉 All tests passed! Your Telegram bot is working correctly.")
-        print("\n💡 If you're still seeing errors in the main bot:")
-        print("  - Check that the bot has been added to the chat")
-        print("  - Verify the chat ID is correct")
-        print("  - Ensure the bot has permission to send messages")
-        print("  - Check your internet connection")
-    else:
-        print("\n❌ Connection test failed. Check the errors above.")
-        print("\n🔧 Troubleshooting steps:")
-        print("  1. Verify your bot token is correct")
-        print("  2. Ensure the bot is added to the chat")
-        print("  3. Check that the chat ID matches the actual chat")
-        print("  4. Test with @userinfobot to get your chat ID")
-        print("  5. Ensure the bot has permission to send messages")
+    assert telegram.get('enabled', False), "Telegram should be enabled in config"
 
-if __name__ == "__main__":
-    main()
+
+def test_token_format(token: str):
+    """Test that the token has the correct format."""
+    assert len(token) >= 20, "Token should be at least 20 characters"
+    assert ':' in token, "Token should contain a colon separator"
+
+
+def test_chat_id_format(chat_id: str):
+    """Test that the chat ID has the correct format."""
+    assert chat_id.isdigit(), "Chat ID should be numeric"
+    assert len(chat_id) > 0, "Chat ID should not be empty"

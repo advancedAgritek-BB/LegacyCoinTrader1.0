@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Union, Optional
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 

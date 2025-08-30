@@ -400,7 +400,12 @@ async def execute_trade_async(
             order["price"] = t.get("last") or t.get("bid") or t.get("ask") or 0.0
         except Exception:
             order["price"] = 0.0
+    
+    # Debug logging before calling log_trade
+    logger.info(f"About to log trade (async): {order}")
     log_trade(order)
+    logger.info(f"Trade logged successfully (async): {order}")
+    
     logger.info(
         "Order executed - id=%s side=%s amount=%s price=%s dry_run=%s",
         order.get("id"),

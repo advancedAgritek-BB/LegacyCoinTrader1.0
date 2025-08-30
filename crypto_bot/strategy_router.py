@@ -595,6 +595,7 @@ def route(
         if hasattr(cfg, "raw")
         else cfg.get("strategy_router", {}).get("fast_path", {})
     )
+    df = None if isinstance(df_map, dict) else df_map
     if df is not None:
         try:
             # 1) breakout squeeze detected by Bollinger band z-score and

@@ -40,7 +40,11 @@ import pandas as pd
 import numpy as np
 import yaml
 from dotenv import dotenv_values
-from pydantic import ValidationError
+try:
+    from pydantic import ValidationError
+except Exception:  # pragma: no cover - fallback when pydantic missing
+    class ValidationError(Exception):
+        pass
 
 from schema.scanner import (
     ScannerConfig,
@@ -87,7 +91,7 @@ from crypto_bot.utils.market_loader import (
     fetch_order_book_async,
 )
 from crypto_bot.utils.eval_queue import build_priority_queue
-from crypto_bot.solana import get_solana_new_tokens
+from crypto_bot.solana.scanner import get_solana_new_tokens
 from crypto_bot.utils.symbol_utils import get_filtered_symbols, fix_symbol
 
 # Backwards compatibility for tests
@@ -830,7 +834,7 @@ async def update_caches(ctx: BotContext) -> None:
     tf_minutes = int(
         pd.Timedelta(ctx.config.get("timeframe", "1h")).total_seconds() // 60
     )
-    limit = max(150, tf_minutes * 2)
+    limit = max(200, tf_minutes * 2)
     limit = int(ctx.config.get("cycle_lookback_limit") or limit)
 
     max_concurrent = ctx.config.get("max_concurrent_ohlcv")
@@ -1796,10 +1800,15 @@ async def _main_impl() -> TelegramNotifier:
 
     paper_wallet = None
     if config.get("execution_mode") == "dry_run":
-        try:
-            start_bal = float(input("Enter paper trading balance in USDT: "))
-        except Exception:
-            start_bal = 1000.0
+        # Use default balance in non-interactive mode
+        if os.environ.get('NON_INTERACTIVE'):
+            start_bal = 10000.0
+            print(f"Using default paper trading balance: ${start_bal}")
+        else:
+            try:
+                start_bal = float(input("Enter paper trading balance in USDT: "))
+            except Exception:
+                start_bal = 1000.0
         paper_wallet = PaperWallet(
             start_bal,
             config.get("max_open_trades", 1),
@@ -1887,6 +1896,8 @@ async def _main_impl() -> TelegramNotifier:
             pump_sniper_started = await start_pump_sniper_system(config)
             if pump_sniper_started:
                 logger.info("Advanced Pump Sniper System started successfully")
+
+
             else:
                 logger.warning("Advanced Pump Sniper System failed to start")
         except Exception as exc:
@@ -1922,6 +1933,10 @@ async def _main_impl() -> TelegramNotifier:
     ctx.paper_wallet = paper_wallet
     ctx.position_guard = position_guard
     ctx.balance = last_balance
+    
+    # High-priority sell request processor - will be started after context is ready
+    sell_processor_task = None
+    
     runner = PhaseRunner(
         [
             fetch_candidates,
@@ -1957,6 +1972,102 @@ async def _main_impl() -> TelegramNotifier:
             if state.get("liquidate_all"):
                 await force_exit_all(ctx)
                 state["liquidate_all"] = False
+
+            # Start the high-priority sell request processor if not already started
+            if sell_processor_task is None:
+                async def process_sell_requests_loop():
+                    """Continuously process sell requests with high priority"""
+                    while True:
+                        try:
+                            sell_requests_file = LOG_DIR / 'sell_requests.json'
+                            if sell_requests_file.exists():
+                                with open(sell_requests_file, 'r') as f:
+                                    sell_requests = json.load(f)
+                                
+                                current_time = time.time()
+                                processed_requests = []
+                                unprocessed_requests = []
+                                
+                                for request in sell_requests:
+                                    request_age = current_time - request.get('timestamp', 0)
+                                    if request_age <= 60:  # 60 seconds old
+                                        symbol = request.get('symbol')
+                                        amount = request.get('amount')
+                                        
+                                        if symbol and amount and symbol in ctx.positions:
+                                            pos = ctx.positions[symbol]
+                                            sell_amount = min(float(amount), pos["size"])
+                                            
+                                            logger.info(f"Executing immediate sell request: {sell_amount} {symbol}")
+                                            
+                                            await cex_trade_async(
+                                                ctx.exchange,
+                                                ctx.ws_client,
+                                                symbol,
+                                                opposite_side(pos["side"]),
+                                                sell_amount,
+                                                ctx.notifier,
+                                                dry_run=ctx.config.get("execution_mode") == "dry_run",
+                                                use_websocket=ctx.config.get("use_websocket", False),
+                                                config=ctx.config,
+                                            )
+                                            
+                                            # Update paper wallet if in dry run mode
+                                            if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
+                                                try:
+                                                    tf = ctx.config.get("timeframe", "1h")
+                                                    tf_cache = ctx.df_cache.get(tf, {})
+                                                    df = tf_cache.get(symbol)
+                                                    exit_price = pos["entry_price"]
+                                                    if df is not None and not df.empty:
+                                                        exit_price = float(df["close"].iloc[-1])
+                                                    
+                                                    pnl = ctx.paper_wallet.close(symbol, sell_amount, exit_price)
+                                                    ctx.balance = ctx.paper_wallet.balance
+                                                    logger.info(f"Paper trade frontend sell: {pos['side']} {sell_amount} {symbol} @ ${exit_price:.6f}, PnL: ${pnl:.2f}, balance: ${ctx.balance:.2f}")
+                                                    
+                                                    if ctx.notifier and ctx.config.get("telegram", {}).get("trade_updates", True):
+                                                        pnl_emoji = "💰" if pnl >= 0 else "📉"
+                                                        frontend_sell_msg = f"📄 Frontend Market Sell {pnl_emoji}\n{pos['side'].upper()} {sell_amount:.4f} {symbol}\nEntry: ${pos['entry_price']:.6f}\nExit: ${exit_price:.6f}\nPnL: ${pnl:.2f}\nBalance: ${ctx.balance:.2f}"
+                                                        ctx.notifier.notify(frontend_sell_msg)
+                                                        
+                                                except Exception as e:
+                                                    logger.error(f"Failed to process frontend sell in paper wallet: {e}")
+                                            
+                                            # Update position size or remove if fully sold
+                                            if sell_amount >= pos["size"]:
+                                                ctx.positions.pop(symbol, None)
+                                                ctx.risk_manager.deallocate_capital(
+                                                    pos.get("strategy", ""), pos["size"] * pos["entry_price"]
+                                                )
+                                            else:
+                                                pos["size"] -= sell_amount
+                                                ctx.risk_manager.deallocate_capital(
+                                                    pos.get("strategy", ""), sell_amount * pos["entry_price"]
+                                                )
+                                            
+                                            logger.info(f"Frontend market sell executed: {sell_amount} {symbol}")
+                                            processed_requests.append(request)
+                                        else:
+                                            if symbol and amount:
+                                                logger.info(f"Position not found for {symbol}, available: {list(ctx.positions.keys())}")
+                                            processed_requests.append(request)
+                                    else:
+                                        unprocessed_requests.append(request)
+                                
+                                # Write back unprocessed requests
+                                with open(sell_requests_file, 'w') as f:
+                                    json.dump(unprocessed_requests, f)
+                            
+                            # Check every 2 seconds for new sell requests
+                            await asyncio.sleep(2)
+                            
+                        except Exception as e:
+                            logger.error(f"Error in sell request processor: {e}")
+                            await asyncio.sleep(5)  # Wait longer on error
+
+                sell_processor_task = asyncio.create_task(process_sell_requests_loop())
+                logger.info("Started high-priority sell request processor")
 
             if config.get("arbitrage_enabled", True):
                 try:

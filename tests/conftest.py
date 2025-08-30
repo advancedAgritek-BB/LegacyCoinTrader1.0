@@ -166,6 +166,26 @@ def mock_market_data():
     market_data.get_order_book = AsyncMock(return_value={'bids': [[99.5, 1.0]], 'asks': [[100.5, 1.0]]})
     return market_data
 
+@pytest.fixture
+def sample_market_data():
+    """Generate sample market data for backtesting tests."""
+    np.random.seed(42)
+    dates = pd.date_range('2024-01-01', periods=1000, freq='1H')
+    base_price = 100.0
+    returns = np.random.normal(0, 0.02, 1000)
+    prices = [base_price]
+    for ret in returns[1:]:
+        prices.append(max(0.1, prices[-1] * (1 + ret)))
+    df = pd.DataFrame({
+        'timestamp': dates,
+        'open': prices,
+        'high': [p * (1 + abs(np.random.normal(0, 0.01))) for p in prices],
+        'low': [p * (1 - abs(np.random.normal(0, 0.01))) for p in prices],
+        'close': prices,
+        'volume': np.random.uniform(1000, 10000, 1000)
+    })
+    return df.set_index('timestamp')
+
 # Fix for common import issues
 @pytest.fixture(autouse=True)
 def fix_imports():
@@ -259,3 +279,8 @@ def mock_aiohttp():
         mock_get.return_value.__aenter__.return_value.status = 200
         mock_get.return_value.__aenter__.return_value.json = AsyncMock(return_value={'data': 'test_data'})
         yield mock_get
+# Lightweight analyzer fixture used by pool analyzer tests
+@pytest.fixture
+def analyzer():
+    from crypto_bot.solana.pool_analyzer import PoolAnalyzer
+    return PoolAnalyzer()

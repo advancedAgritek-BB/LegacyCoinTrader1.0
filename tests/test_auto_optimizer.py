@@ -25,8 +25,9 @@ def test_optimize_strategies_writes_best_params(tmp_path, monkeypatch):
     )
 
     class FakeRunner:
-        def __init__(self, config):
+        def __init__(self, config, exchange=None):
             self.config = config
+            self.exchange = exchange
 
         def run_grid(self):
             return data

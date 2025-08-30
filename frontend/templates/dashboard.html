@@ -29,6 +29,33 @@
       </div>
     </div>
   </div>
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header">Strategy Allocation Details <span class="badge bg-success">Fixed</span></div>
+      <div class="card-body p-2">
+        <small class="text-muted">
+          <strong>Fixed:</strong> Allocation now uses actual performance data instead of static config values.
+          <br><br>
+          Allocation is calculated dynamically based on:
+          <ul class="mb-0 mt-1">
+            <li>Win rate (40% weight)</li>
+            <li>PnL per trade (40% weight)</li>
+            <li>Trade volume (20% weight)</li>
+          </ul>
+        </small>
+        {% if allocation %}
+        <div class="mt-2">
+          <strong>Dynamic Allocation (Performance-Based):</strong>
+          <ul class="mb-0 mt-1">
+            {% for strategy, percentage in allocation.items() %}
+            <li>{{ strategy }}: {{ "%.1f"|format(percentage) }}%</li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
 </div>
 <h2 class="mt-4">Recent Regimes</h2>
 <ul>
@@ -86,7 +113,16 @@ if (Object.keys(allocData).length > 0) {
             }]
         },
         options: {
-            responsive: true
+            responsive: true,
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return context.label + ': ' + context.parsed.toFixed(1) + '%';
+                        }
+                    }
+                }
+            }
         }
     });
 } else {

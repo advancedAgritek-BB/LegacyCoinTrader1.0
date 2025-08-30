@@ -9,6 +9,7 @@ and the coinTrader_Trainer ML system to ensure they work together properly.
 import asyncio
 import logging
 import sys
+import pytest
 from pathlib import Path
 from typing import Dict, Any
 
@@ -133,6 +134,7 @@ def test_integration_status():
         print(f"❌ Integration status failed: {e}")
         return False
 
+@pytest.mark.asyncio
 async def test_ml_training_data_preparation():
     """Test ML training data preparation."""
     print("\nTesting ML training data preparation...")

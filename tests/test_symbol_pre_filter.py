@@ -5,19 +5,20 @@ import pytest
 import ccxt
 import crypto_bot.utils.symbol_scoring as sc
 import crypto_bot.utils.symbol_pre_filter as sp
+import crypto_bot
 from crypto_bot.utils.telemetry import telemetry
 
 
 @pytest.fixture(autouse=True)
 def reset_telemetry():
     telemetry.reset()
-    sp.liq_cache.clear()
+    crypto_bot.utils.symbol_pre_filter.liq_cache.clear()
     yield
 
 
 @pytest.fixture(autouse=True)
 def reset_semaphore():
-    sp.SEMA = asyncio.Semaphore(1)
+    crypto_bot.utils.symbol_pre_filter.SEMA = asyncio.Semaphore(1)
     yield
 
 
@@ -29,6 +30,7 @@ CONFIG = {
         "change_pct_percentile": 0,
         "max_spread_pct": 3.0,
         "correlation_max_pairs": 100,
+        "min_volume_usd": 50000,
     },
     "symbol_score_weights": {
         "volume": 1,
@@ -49,7 +51,7 @@ class DummyExchange:
     }
 
 
-async def fake_fetch(_):
+async def fake_fetch(pairs):
     return {
         "result": {
             "XETHZUSD": {
@@ -73,8 +75,29 @@ async def fake_fetch(_):
 
 
 def test_filter_symbols(monkeypatch):
+    # Mock the _refresh_tickers function to return the correct data format
+    async def mock_refresh_tickers(exchange, symbols, config):
+        return {
+            "XETHZUSD": {
+                "a": ["101", "1", "1"],
+                "b": ["100", "1", "1"],
+                "c": ["101", "0.5"],
+                "v": ["800", "800"],
+                "p": ["100", "100"],
+                "o": "99",
+            },
+            "XXBTZUSD": {
+                "a": ["51", "1", "1"],
+                "b": ["50", "1", "1"],
+                "c": ["51", "1"],
+                "v": ["600", "600"],
+                "p": ["100", "100"],
+                "o": "49",
+            },
+        }
+    
     monkeypatch.setattr(
-        "sp._fetch_ticker_async", fake_fetch
+        "crypto_bot.utils.symbol_pre_filter._refresh_tickers", mock_refresh_tickers
     )
     symbols = asyncio.run(
         filter_symbols(DummyExchange(), ["ETH/USD", "BTC/USD"], CONFIG)
@@ -249,13 +272,13 @@ class WatchTickersExchange(DummyExchange):
 
 
 def test_watch_tickers_cache(monkeypatch):
-    sp.ticker_cache.clear()
-    sp.ticker_ts.clear()
+    crypto_bot.utils.symbol_pre_filter.ticker_cache.clear()
+    crypto_bot.utils.symbol_pre_filter.ticker_ts.clear()
     ex = WatchTickersExchange()
 
     t = {"now": 0}
 
-    monkeypatch.setattr(sp.time, "time", lambda: t["now"])
+    monkeypatch.setattr(crypto_bot.utils.symbol_pre_filter.time, "time", lambda: t["now"])
 
     symbols = asyncio.run(filter_symbols(ex, ["ETH/USD", "BTC/USD"], CONFIG))
     assert ex.calls == 1
@@ -299,12 +322,12 @@ def test_watch_tickers_fallback(monkeypatch, caplog, tmp_path):
 
     monkeypatch.setattr(sp, "_fetch_ticker_async", raise_if_called)
 
-    sp.ticker_cache.clear()
-    sp.ticker_ts.clear()
+    crypto_bot.utils.symbol_pre_filter.ticker_cache.clear()
+    crypto_bot.utils.symbol_pre_filter.ticker_ts.clear()
     ex = FailingWatchExchange()
 
     t = {"now": 0}
-    monkeypatch.setattr(sp.time, "time", lambda: t["now"])
+    monkeypatch.setattr(crypto_bot.utils.symbol_pre_filter.time, "time", lambda: t["now"])
 
     symbols = asyncio.run(filter_symbols(ex, ["ETH/USD", "BTC/USD"], CONFIG))
     assert ex.watch_calls == 1
@@ -769,7 +792,7 @@ def test_symbol_skipped_when_missing_from_cache(monkeypatch, tmp_path):
     }
     ex = DummyExchange()
     ex.has = {}
-    result = asyncio.run(sp.filter_symbols(ex, ["ETH/USD", "BTC/USD"], cfg))
+    result = asyncio.run(crypto_bot.utils.symbol_pre_filter.filter_symbols(ex, ["ETH/USD", "BTC/USD"], cfg))
 
     assert result == [("ETH/USD", 0.8), ("BTC/USD", 0.6)]
 
@@ -807,15 +830,15 @@ def test_uncached_multiplier_allows_symbol(monkeypatch, tmp_path):
         },
     }
     result = asyncio.run(
-        sp.filter_symbols(DummyExchange(), ["ETH/USD", "BTC/USD"], cfg)
+        crypto_bot.utils.symbol_pre_filter.filter_symbols(DummyExchange(), ["ETH/USD", "BTC/USD"], cfg)
     )
 
     assert result == [("ETH/USD", 0.8), ("BTC/USD", 0.6)]
 
 
 def test_liq_cache_skips_api(monkeypatch):
-    sp.liq_cache.clear()
-    sp.liq_cache["ETH/USD"] = (60000.0, 0.5)
+    crypto_bot.utils.symbol_pre_filter.liq_cache.clear()
+    crypto_bot.utils.symbol_pre_filter.liq_cache["ETH/USD"] = (60000.0, 0.5)
 
     class DummyExchange:
         has = {}
@@ -837,13 +860,13 @@ def test_liq_cache_skips_api(monkeypatch):
             "change_pct_percentile": 0,
         }
     }
-    result = asyncio.run(sp.filter_symbols(DummyExchange(), ["ETH/USD"], cfg))
+    result = asyncio.run(crypto_bot.utils.symbol_pre_filter.filter_symbols(DummyExchange(), ["ETH/USD"], cfg))
     assert result == [("ETH/USD", 1.0)]
 
 
 def test_stale_cache_not_counted_as_skipped(monkeypatch):
-    sp.liq_cache.clear()
-    sp.liq_cache["ETH/USD"] = (10000.0, 0.5)
+    crypto_bot.utils.symbol_pre_filter.liq_cache.clear()
+    crypto_bot.utils.symbol_pre_filter.liq_cache["ETH/USD"] = (10000.0, 0.5)
 
     class DummyExchange:
         has = {}
@@ -851,7 +874,7 @@ def test_stale_cache_not_counted_as_skipped(monkeypatch):
 
     monkeypatch.setattr(sp, "_fetch_ticker_async", fake_fetch)
 
-    result = asyncio.run(sp.filter_symbols(DummyExchange(), ["ETH/USD"], CONFIG))
+    result = asyncio.run(crypto_bot.utils.symbol_pre_filter.filter_symbols(DummyExchange(), ["ETH/USD"], CONFIG))
 
     assert result == [("ETH/USD", 0.8)]
     assert telemetry.snapshot().get("scan.symbols_skipped", 0) == 0
@@ -875,7 +898,7 @@ def test_refresh_tickers_warns_missing_market(monkeypatch, caplog):
     monkeypatch.setattr(sp, "_fetch_ticker_async", fake_fetch)
 
     ex = DummyExchange()
-    asyncio.run(sp._refresh_tickers(ex, ["ETH/USD", "BTC/USD"]))
+    asyncio.run(crypto_bot.utils.symbol_pre_filter._refresh_tickers(ex, ["ETH/USD", "BTC/USD"]))
 
     assert any("BTC/USD" in r.getMessage() for r in caplog.records)
     assert ex.called is True
@@ -892,7 +915,7 @@ def test_refresh_tickers_bad_symbol(monkeypatch, caplog):
             raise ccxt.BadSymbol("bad symbol")
 
     result = asyncio.run(
-        sp._refresh_tickers(BadSymbolExchange(), ["ETH/USD", "BTC/USD"])
+        crypto_bot.utils.symbol_pre_filter._refresh_tickers(BadSymbolExchange(), ["ETH/USD", "BTC/USD"])
     )
 
     assert result == {}
@@ -921,11 +944,11 @@ def test_refresh_tickers_retry_520(monkeypatch):
     async def fake_sleep(secs):
         sleeps.append(secs)
 
-    monkeypatch.setattr(sp.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(crypto_bot.utils.symbol_pre_filter.asyncio, "sleep", fake_sleep)
     monkeypatch.setattr(sp, "_fetch_ticker_async", lambda _p: {"result": {}})
 
     ex = RetryExchange()
-    result = asyncio.run(sp._refresh_tickers(ex, ["ETH/USD", "BTC/USD"]))
+    result = asyncio.run(crypto_bot.utils.symbol_pre_filter._refresh_tickers(ex, ["ETH/USD", "BTC/USD"]))
 
     assert ex.calls == 2
     assert sleeps == [1]
@@ -953,11 +976,11 @@ def test_refresh_tickers_retry_520_network(monkeypatch):
     async def fake_sleep(secs):
         sleeps.append(secs)
 
-    monkeypatch.setattr(sp.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(crypto_bot.utils.symbol_pre_filter.asyncio, "sleep", fake_sleep)
     monkeypatch.setattr(sp, "_fetch_ticker_async", lambda _p: {"result": {}})
 
     ex = RetryExchange()
-    result = asyncio.run(sp._refresh_tickers(ex, ["ETH/USD", "BTC/USD"]))
+    result = asyncio.run(crypto_bot.utils.symbol_pre_filter._refresh_tickers(ex, ["ETH/USD", "BTC/USD"]))
 
     assert ex.calls == 2
     assert sleeps == [1]
@@ -991,7 +1014,7 @@ def test_refresh_tickers_single_fallback(monkeypatch):
     monkeypatch.setattr(sp, "_fetch_ticker_async", raise_fetch_async)
 
     ex = FailBothExchange()
-    result = asyncio.run(sp._refresh_tickers(ex, ["ETH/USD", "BTC/USD"]))
+    result = asyncio.run(crypto_bot.utils.symbol_pre_filter._refresh_tickers(ex, ["ETH/USD", "BTC/USD"]))
 
     assert ex.bulk_calls == 2
     assert calls == [["ETHUSD", "BTCUSD"]]
@@ -1019,7 +1042,7 @@ def test_refresh_tickers_public_api_fallback(monkeypatch):
     monkeypatch.setattr(sp, "_fetch_ticker_async", fake_public)
 
     ex = FailingExchange()
-    result = asyncio.run(sp._refresh_tickers(ex, ["ETH/USD", "BTC/USD"]))
+    result = asyncio.run(crypto_bot.utils.symbol_pre_filter._refresh_tickers(ex, ["ETH/USD", "BTC/USD"]))
 
     assert ex.bulk_calls == 2
     assert calls == [["ETHUSD", "BTCUSD"]]
@@ -1040,7 +1063,7 @@ def test_refresh_tickers_batches(monkeypatch):
     ex = BatchExchange()
     monkeypatch.setattr(sp, "cfg", {"symbol_filter": {"kraken_batch_size": 2, "http_timeout": 10}})
 
-    result = asyncio.run(sp._refresh_tickers(ex, list(ex.markets)))
+    result = asyncio.run(crypto_bot.utils.symbol_pre_filter._refresh_tickers(ex, list(ex.markets)))
 
     assert ex.calls == [["PAIR0/USD", "PAIR1/USD"], ["PAIR2/USD", "PAIR3/USD"], ["PAIR4/USD"]]
     assert set(result) == set(ex.markets)
@@ -1067,9 +1090,9 @@ def test_fetch_ticker_async_timeout(monkeypatch):
             calls.append(timeout)
             return FakeResp()
 
-    monkeypatch.setattr(sp.aiohttp, "ClientSession", lambda: FakeSession())
+    monkeypatch.setattr(crypto_bot.utils.symbol_pre_filter.aiohttp, "ClientSession", lambda: FakeSession())
 
-    asyncio.run(sp._fetch_ticker_async(["XBTUSD"], timeout=5))
+    asyncio.run(crypto_bot.utils.symbol_pre_filter._fetch_ticker_async(["XBTUSD"], timeout=5))
 
     assert calls == [5]
 def test_ticker_retry_attempts(monkeypatch):
@@ -1088,12 +1111,12 @@ def test_ticker_retry_attempts(monkeypatch):
     async def fake_sleep(secs):
         sleeps.append(secs)
 
-    monkeypatch.setattr(sp.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(crypto_bot.utils.symbol_pre_filter.asyncio, "sleep", fake_sleep)
     monkeypatch.setattr(sp, "_fetch_ticker_async", lambda _p: {"result": {}})
 
     ex = RetryExchange()
     cfg = {"symbol_filter": {"ticker_retry_attempts": 1}}
-    result = asyncio.run(sp._refresh_tickers(ex, ["ETH/USD", "BTC/USD"], cfg))
+    result = asyncio.run(crypto_bot.utils.symbol_pre_filter._refresh_tickers(ex, ["ETH/USD", "BTC/USD"], cfg))
 
     assert ex.calls == 2
     assert sleeps == []
@@ -1115,12 +1138,12 @@ def test_log_ticker_exceptions(monkeypatch, caplog):
 
     ex = FailingExchange()
     cfg = {"symbol_filter": {"log_ticker_exceptions": True}}
-    asyncio.run(sp._refresh_tickers(ex, ["ETH/USD"], cfg))
+    asyncio.run(crypto_bot.utils.symbol_pre_filter._refresh_tickers(ex, ["ETH/USD"], cfg))
     assert any(r.exc_info for r in caplog.records)
 
     caplog.clear()
     cfg["symbol_filter"]["log_ticker_exceptions"] = False
-    asyncio.run(sp._refresh_tickers(ex, ["ETH/USD"], cfg))
+    asyncio.run(crypto_bot.utils.symbol_pre_filter._refresh_tickers(ex, ["ETH/USD"], cfg))
     assert any(r.exc_info for r in caplog.records)
 
 
@@ -1145,24 +1168,24 @@ class AlwaysFailWatchExchange(DummyExchange):
 def test_ws_failures_disable_scan(monkeypatch):
     monkeypatch.setattr(sp, "_fetch_ticker_async", lambda _p: {"result": {}})
 
-    sp.ticker_cache.clear()
-    sp.ticker_ts.clear()
+    crypto_bot.utils.symbol_pre_filter.ticker_cache.clear()
+    crypto_bot.utils.symbol_pre_filter.ticker_ts.clear()
     ex = AlwaysFailWatchExchange()
 
     t = {"now": 0}
-    monkeypatch.setattr(sp.time, "time", lambda: t["now"])
+    monkeypatch.setattr(crypto_bot.utils.symbol_pre_filter.time, "time", lambda: t["now"])
 
     sleeps: List[float] = []
 
     async def fake_sleep(secs):
         sleeps.append(secs)
 
-    monkeypatch.setattr(sp.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(crypto_bot.utils.symbol_pre_filter.asyncio, "sleep", fake_sleep)
 
     cfg = dict(CONFIG)
     cfg["ws_failures_before_disable"] = 2
 
-    asyncio.run(sp._refresh_tickers(ex, ["ETH/USD", "BTC/USD"], cfg))
+    asyncio.run(crypto_bot.utils.symbol_pre_filter._refresh_tickers(ex, ["ETH/USD", "BTC/USD"], cfg))
     assert ex.watch_calls == 1
     assert ex.fetch_calls == 1
     assert ex.options.get("ws_failures") == 1
@@ -1170,7 +1193,7 @@ def test_ws_failures_disable_scan(monkeypatch):
     assert sleeps == []
 
     t["now"] += 6
-    asyncio.run(sp._refresh_tickers(ex, ["ETH/USD", "BTC/USD"], cfg))
+    asyncio.run(crypto_bot.utils.symbol_pre_filter._refresh_tickers(ex, ["ETH/USD", "BTC/USD"], cfg))
     assert sleeps == [1]
     assert ex.watch_calls == 2
     assert ex.fetch_calls == 1
@@ -1178,7 +1201,7 @@ def test_ws_failures_disable_scan(monkeypatch):
     assert ex.options.get("ws_scan") is False
 
     t["now"] += 6
-    asyncio.run(sp._refresh_tickers(ex, ["ETH/USD", "BTC/USD"], cfg))
+    asyncio.run(crypto_bot.utils.symbol_pre_filter._refresh_tickers(ex, ["ETH/USD", "BTC/USD"], cfg))
     assert ex.watch_calls == 2
     assert ex.fetch_calls == 2
     assert sleeps == [1]

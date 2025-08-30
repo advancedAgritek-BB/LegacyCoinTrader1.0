@@ -77,7 +77,7 @@ class TestEnhancedScanIntegration:
     async def test_async_scan_integration(self, scan_integration):
         """Test async scanning functionality."""
         with patch.object(scan_integration, 'detect_waves', return_value=['TEST/SOL']):
-            result = await scan_integration.async_scan()
+            result = await scan_integration.force_scan()
             assert result == ['TEST/SOL']
 
 

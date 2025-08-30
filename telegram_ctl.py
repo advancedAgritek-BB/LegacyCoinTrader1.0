@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Union, List
 
 from crypto_bot.utils.logger import LOG_DIR
 

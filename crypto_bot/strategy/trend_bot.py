@@ -31,8 +31,8 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     df = df.copy()
     params = config or {}
     lookback_cfg = int(params.get("indicator_lookback", 250))
-    rsi_overbought_pct = float(params.get("rsi_overbought_pct", 90))
-    rsi_oversold_pct = float(params.get("rsi_oversold_pct", 10))
+    rsi_overbought_pct = params.get("rsi_overbought_pct")
+    rsi_oversold_pct = params.get("rsi_oversold_pct")
     fast_window = int(params.get("trend_ema_fast", 3))
     slow_window = int(params.get("trend_ema_slow", 10))
     atr_period = int(params.get("atr_period", 14))
@@ -82,50 +82,33 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
 
     rsi_z_last = df["rsi_z"].iloc[-1]
     rsi_z_series = df["rsi_z"].dropna()
-    if not rsi_z_series.empty:
-        upper_thr = rsi_z_series.quantile(rsi_overbought_pct / 100)
-        lower_thr = rsi_z_series.quantile(rsi_oversold_pct / 100)
+    volume_ok = latest["volume"] >= latest["volume_ma"] * volume_mult
+    if rsi_overbought_pct is not None and rsi_oversold_pct is not None and not rsi_z_series.empty:
+        try:
+            q_upper = rsi_z_series.quantile(float(rsi_overbought_pct) / 100)
+            q_lower = rsi_z_series.quantile(float(rsi_oversold_pct) / 100)
+        except Exception:
+            q_upper = np.nan
+            q_lower = np.nan
+        use_z = float(rsi_z_series.std() or 0.0) > 1e-6
+        overbought_cond = (
+            ((rsi_z_last > q_upper) if (use_z and not pd.isna(rsi_z_last) and not pd.isna(q_upper)) else latest["rsi"] > dynamic_overbought)
+            and volume_ok
+        )
+        oversold_cond = (
+            ((rsi_z_last < q_lower) if (use_z and not pd.isna(rsi_z_last) and not pd.isna(q_lower)) else latest["rsi"] < dynamic_oversold)
+            and volume_ok
+        )
     else:
-        upper_thr = np.nan
-        lower_thr = np.nan
-
-    overbought_cond = (
-        rsi_z_last > upper_thr
-        if not pd.isna(upper_thr) and not pd.isna(rsi_z_last)
-        else latest["rsi"] > dynamic_overbought
-    )
-    oversold_cond = (
-        rsi_z_last < lower_thr
-        if not pd.isna(lower_thr) and not pd.isna(rsi_z_last)
-        else latest["rsi"] < dynamic_oversold
-    )
-
-    upper_thr = scipy_stats.norm.ppf(rsi_overbought_pct / 100)
-    lower_thr = scipy_stats.norm.ppf(rsi_oversold_pct / 100)
-    volume_ok = latest["volume"] > latest["volume_ma"] * volume_mult
-    overbought_cond = (
-        (
-            rsi_z_last > upper_thr
-            if not pd.isna(rsi_z_last)
-            else latest["rsi"] > dynamic_overbought
-        )
-        and volume_ok
-    )
-    oversold_cond = (
-        (
-            rsi_z_last < lower_thr
-            if not pd.isna(rsi_z_last)
-            else latest["rsi"] < dynamic_oversold
-        )
-        and volume_ok
-    )
+        overbought_cond = latest["rsi"] > dynamic_overbought and volume_ok
+        oversold_cond = latest["rsi"] < dynamic_oversold and volume_ok
 
     long_cond = (
-        latest["close"] > latest["ema_fast"]
-        and latest["ema_fast"] > latest["ema_slow"]
+        latest["close"] >= latest["ema_fast"]
+        and latest["ema_fast"] >= latest["ema_slow"]
         and overbought_cond
-        and latest["adx"] > adx_threshold
-        and latest["volume"] > latest["volume_ma"]
+        and latest["adx"] >= adx_threshold
+        and latest["volume"] >= latest["volume_ma"]
     )
     short_cond = (
         latest["close"] < latest["ema_fast"]
@@ -171,12 +154,13 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
 
     if config:
         torch_cfg = config.get("torch_signal_model", {})
-        if torch_cfg.get("enabled") and score > 0:
+        if torch_cfg.get("enabled"):
             weight = float(torch_cfg.get("weight", 0.7))
             try:  # pragma: no cover - best effort
                 from crypto_bot.torch_signal_model import predict_signal as _pred
                 ml_score = _pred(df)
-                score = score * (1 - weight) + ml_score * weight
+                base = score if score > 0 else 0.0
+                score = base * (1 - weight) + ml_score * weight
                 score = max(0.0, min(score, 1.0))
             except Exception:
                 pass

@@ -16,11 +16,16 @@ def _cache_key(df: pd.DataFrame, name: str, symbol: Optional[str] = None) -> str
 def cache_series(
     name: str,
     df: pd.DataFrame,
-    series: pd.Series,
+    series: pd.Series | list | tuple,
     lookback: int,
     symbol: Optional[str] = None,
 ) -> pd.Series:
     """Store ``series`` under ``name`` and return the cached version."""
+    if not isinstance(series, pd.Series):
+        try:
+            series = pd.Series(series, index=getattr(df, "index", None))
+        except Exception:
+            series = pd.Series(series)
     key = _cache_key(df, name, symbol)
     prev = CACHE.get(key)
     if prev is not None:

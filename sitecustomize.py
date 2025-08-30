@@ -10,3 +10,27 @@ except Exception:  # pragma: no cover - fallback stub
             safe_dump=lambda *a, **k: '',
             dump=lambda *a, **k: ''
         )
+<<<<<<< Current (Your changes)
+=======
+
+>>>>>>> Incoming (Background Agent changes)
+# Provide lightweight fallbacks for heavy deps if not installed
+try:  # prefer real numpy
+    import numpy  # type: ignore
+except Exception:  # pragma: no cover - fallback stub
+    try:
+        from numpy_stub import *  # type: ignore
+        import numpy_stub as _np_stub  # type: ignore
+        sys.modules.setdefault('numpy', _np_stub)
+    except Exception:
+        pass
+
+try:  # prefer real pandas
+    import pandas  # type: ignore
+except Exception:  # pragma: no cover - fallback stub
+    try:
+        from pandas_stub import *  # type: ignore
+        import pandas_stub as _pd_stub  # type: ignore
+        sys.modules.setdefault('pandas', _pd_stub)
+    except Exception:
+        pass

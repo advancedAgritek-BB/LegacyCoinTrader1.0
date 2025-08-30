@@ -5,22 +5,36 @@
   <!-- Welcome Section -->
   <div class="welcome-section mb-4">
     <div class="row">
-      <div class="col-lg-8">
+      <div class="col-lg-6">
         <h2 class="welcome-title">Welcome to LegacyCoinTrader</h2>
         <p class="welcome-subtitle">Professional cryptocurrency trading automation platform</p>
       </div>
-      <div class="col-lg-4 text-end">
+      <div class="col-lg-6 text-end">
         <div class="bot-controls">
+          <!-- Execution Mode and Wallet Balance Display -->
+          <div class="status-display mb-2">
+            <span class="badge bg-info me-2">
+              <i class="fas fa-cog"></i> {{ mode.upper() if mode else 'STOPPED' }}
+            </span>
+            <span class="badge bg-success me-2">
+              <i class="fas fa-wallet"></i> $<span id="topWalletBalance">{{ "{:,.2f}".format(paper_wallet_balance) if paper_wallet_balance else "0.00" }}</span>
+            </span>
+          </div>
+          
+          <!-- Bot Control Buttons -->
           {% if running %}
-            <button class="btn btn-danger" onclick="stopBot()">
-              <i class="fas fa-stop"></i> Stop Bot
+            <button class="btn btn-warning btn-sm me-2" onclick="pauseBot()" title="Pause bot temporarily">
+              <i class="fas fa-pause"></i> Pause
+            </button>
+            <button class="btn btn-danger btn-sm me-2" onclick="stopBot()" title="Stop bot completely">
+              <i class="fas fa-stop"></i> Stop
             </button>
           {% else %}
-            <button class="btn btn-success" onclick="startBot()">
-              <i class="fas fa-play"></i> Start Bot
+            <button class="btn btn-success btn-sm me-2" onclick="startBot()" title="Start bot">
+              <i class="fas fa-play"></i> Start
             </button>
           {% endif %}
-          <button class="btn btn-warning" onclick="stopConflicts()" title="Stop conflicting bot processes">
+          <button class="btn btn-warning btn-sm" onclick="stopConflicts()" title="Stop conflicting bot processes">
             <i class="fas fa-exclamation-triangle"></i> Stop Conflicts
           </button>
         </div>
@@ -93,6 +107,8 @@
         </div>
       </div>
     </div>
+    
+
   </div>
 
   <!-- Paper Wallet Balance (Dry Run Mode Only) -->
@@ -173,6 +189,73 @@
     </div>
   </div>
 
+  <!-- Open Positions -->
+  <div class="row mb-4">
+    <div class="col-lg-6 mb-3">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="card-title mb-0">
+            <i class="fas fa-chart-line"></i>
+            Open Positions
+          </h5>
+          <div>
+            <button class="btn btn-sm btn-outline-warning me-2" onclick="clearOldPositions()" title="Clear old positions">
+              <i class="fas fa-trash"></i> Clear Old
+            </button>
+            <button class="btn btn-sm btn-outline-primary" onclick="refreshOpenPositions()" title="Refresh positions">
+              <i class="fas fa-sync-alt"></i>
+            </button>
+          </div>
+        </div>
+        <div class="card-body">
+          {% if open_positions %}
+            {% for position in open_positions %}
+              <div class="position-item">
+                <div class="position-header">
+                  <span class="position-symbol">{{ position.symbol }}</span>
+                  <span class="badge badge-{{ 'success' if position.side == 'buy' else 'danger' }}">
+                    {{ position.side.upper() }}
+                  </span>
+                </div>
+                <div class="position-details">
+                  <div class="position-row">
+                    <span class="label">Amount:</span>
+                    <span class="value">{{ "%.4f"|format(position.amount) }}</span>
+                  </div>
+                  <div class="position-row">
+                    <span class="label">Entry Price:</span>
+                    <span class="value">${{ "%.6f"|format(position.entry_price) }}</span>
+                  </div>
+                  <div class="position-row">
+                    <span class="label">Current Price:</span>
+                    <span class="value">${{ "%.6f"|format(position.current_price) }}</span>
+                  </div>
+                  <div class="position-row">
+                    <span class="label">PnL:</span>
+                    <span class="value {{ 'text-success' if position.pnl >= 0 else 'text-danger' }}">
+                      ${{ "%.2f"|format(position.pnl) }}
+                    </span>
+                  </div>
+                </div>
+                <div class="position-actions">
+                  <button class="btn btn-danger btn-sm" 
+                          onclick="marketSellPosition('{{ position.symbol }}', {{ position.amount }}, event)"
+                          title="Market sell this position immediately">
+                    <i class="fas fa-sell"></i> Market Sell
+                  </button>
+                </div>
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="no-positions">
+              <i class="fas fa-info-circle"></i>
+              <span>No open positions</span>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    
   <!-- Recent Activity & Status -->
   <div class="row mb-4">
     <div class="col-lg-6 mb-3">
@@ -386,6 +469,27 @@ function stopBot() {
   }
 }
 
+function pauseBot() {
+  if (confirm('Are you sure you want to pause the trading bot? It can be resumed later.')) {
+    fetch('/pause_bot', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.status === 'paused') {
+        window.LegacyCoinTrader.showToast('Bot paused successfully', 'success');
+        setTimeout(() => window.location.reload(), 1000);
+      }
+    })
+    .catch(error => {
+      window.LegacyCoinTrader.showToast('Error pausing bot', 'error');
+    });
+  }
+}
+
 function confirmBotAction() {
   const mode = document.getElementById('executionMode').value;
   const walletBalance = document.getElementById('walletBalance').value;
@@ -516,6 +620,19 @@ function updateDashboard() {
       }
     })
     .catch(error => console.error('Error fetching live updates:', error));
+  
+  // Update wallet balance from new API endpoint
+  fetch('/api/wallet-balance')
+    .then(response => response.json())
+    .then(data => {
+      if (data.success && data.balance !== undefined) {
+        updatePaperWalletBalance(data.balance);
+      }
+    })
+    .catch(error => console.error('Error fetching wallet balance:', error));
+  
+  // Update open positions
+  updateOpenPositions();
 }
 
 function updatePerformanceMetrics(performance) {
@@ -562,6 +679,172 @@ function updatePaperWalletBalance(balance) {
   if (walletBalanceDisplay) {
     walletBalanceDisplay.textContent = `$${balance.toFixed(2)}`;
   }
+  
+  // Update the top banner wallet balance
+  const topWalletBalance = document.getElementById('topWalletBalance');
+  if (topWalletBalance) {
+    topWalletBalance.textContent = balance.toFixed(2);
+  }
+}
+
+function updateOpenPositions() {
+  console.log('updateOpenPositions called');
+  fetch('/api/open-positions')
+    .then(response => {
+      console.log('Positions API response status:', response.status);
+      return response.json();
+    })
+    .then(positions => {
+      console.log('Positions received:', positions);
+      updateOpenPositionsDisplay(positions);
+    })
+    .catch(error => {
+      console.error('Error updating open positions:', error);
+    });
+}
+
+function refreshOpenPositions() {
+  const refreshBtn = document.querySelector('button[onclick="refreshOpenPositions()"]');
+  if (refreshBtn) {
+    refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    refreshBtn.disabled = true;
+  }
+  
+  fetch('/api/open-positions')
+    .then(response => response.json())
+    .then(positions => {
+      updateOpenPositionsDisplay(positions);
+      if (refreshBtn) {
+        refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+        refreshBtn.disabled = false;
+      }
+    })
+    .catch(error => {
+      console.error('Error refreshing open positions:', error);
+      if (refreshBtn) {
+        refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+        refreshBtn.disabled = false;
+      }
+    });
+}
+
+function clearOldPositions() {
+  if (!confirm('Are you sure you want to clear old position entries? This will remove positions older than 24 hours.')) {
+    return;
+  }
+  
+  const clearBtn = document.querySelector('button[onclick="clearOldPositions()"]');
+  if (clearBtn) {
+    clearBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clearing...';
+    clearBtn.disabled = true;
+  }
+  
+  fetch('/api/clear-old-positions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    }
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.success) {
+      window.LegacyCoinTrader.showToast('Old positions cleared successfully', 'success');
+      // Refresh positions after clearing
+      setTimeout(() => {
+        refreshOpenPositions();
+      }, 1000);
+    } else {
+      window.LegacyCoinTrader.showToast(`Error: ${data.error}`, 'error');
+    }
+  })
+  .catch(error => {
+    console.error('Error clearing old positions:', error);
+    window.LegacyCoinTrader.showToast('Error clearing old positions', 'error');
+  })
+  .finally(() => {
+    if (clearBtn) {
+      clearBtn.innerHTML = '<i class="fas fa-trash"></i> Clear Old';
+      clearBtn.disabled = false;
+    }
+  });
+}
+
+function updateOpenPositionsDisplay(positions) {
+  console.log('updateOpenPositionsDisplay called with:', positions);
+  
+  const positionsContainer = document.querySelector('.card-body');
+  console.log('positionsContainer found:', !!positionsContainer);
+  if (!positionsContainer) {
+    console.log('No positionsContainer found, trying alternative selector...');
+    return;
+  }
+  
+  // Find the open positions card
+  const openPositionsCard = positionsContainer.closest('.card');
+  console.log('openPositionsCard found:', !!openPositionsCard);
+  if (!openPositionsCard) {
+    console.log('No openPositionsCard found');
+    return;
+  }
+  
+  const positionsBody = openPositionsCard.querySelector('.card-body');
+  console.log('positionsBody found:', !!positionsBody);
+  if (!positionsBody) {
+    console.log('No positionsBody found');
+    return;
+  }
+  
+  if (positions && positions.length > 0) {
+    let html = '';
+    positions.forEach(position => {
+      const pnlClass = position.pnl >= 0 ? 'text-success' : 'text-danger';
+      html += `
+        <div class="position-item">
+          <div class="position-header">
+            <span class="position-symbol">${position.symbol}</span>
+            <span class="badge badge-${position.side === 'buy' ? 'success' : 'danger'}">
+              ${position.side.toUpperCase()}
+            </span>
+          </div>
+          <div class="position-details">
+            <div class="position-row">
+              <span class="label">Amount:</span>
+              <span class="value">${parseFloat(position.amount).toFixed(4)}</span>
+            </div>
+            <div class="position-row">
+              <span class="label">Entry Price:</span>
+              <span class="value">$${parseFloat(position.entry_price).toFixed(6)}</span>
+            </div>
+            <div class="position-row">
+              <span class="label">Current Price:</span>
+              <span class="value">$${parseFloat(position.current_price).toFixed(6)}</span>
+            </div>
+            <div class="position-row">
+              <span class="label">PnL:</span>
+              <span class="value ${pnlClass}">
+                $${parseFloat(position.pnl).toFixed(2)}
+              </span>
+            </div>
+          </div>
+          <div class="position-actions">
+            <button class="btn btn-danger btn-sm" 
+                    onclick="marketSellPosition('${position.symbol}', ${position.amount}, event)"
+                    title="Market sell this position immediately">
+              <i class="fas fa-sell"></i> Market Sell
+            </button>
+          </div>
+        </div>
+      `;
+    });
+    positionsBody.innerHTML = html;
+  } else {
+    positionsBody.innerHTML = `
+      <div class="no-positions">
+        <i class="fas fa-info-circle"></i>
+        <span>No open positions</span>
+      </div>
+    `;
+  }
 }
 
 function updateBotStatus() {
@@ -583,8 +866,117 @@ function updateBotStatus() {
     .catch(error => console.error('Error updating bot status:', error));
 }
 
+function marketSellPosition(symbol, amount, event) {
+  console.log('=== MARKET SELL DEBUG START ===');
+  console.log('marketSellPosition called with:', { symbol, amount, event });
+  
+  // Check if LegacyCoinTrader is available
+  console.log('Checking LegacyCoinTrader availability...');
+  console.log('window.LegacyCoinTrader:', window.LegacyCoinTrader);
+  console.log('window.LegacyCoinTrader.showToast:', window.LegacyCoinTrader?.showToast);
+  
+  if (!window.LegacyCoinTrader || !window.LegacyCoinTrader.showToast) {
+    console.error('LegacyCoinTrader object not available');
+    alert('Error: LegacyCoinTrader not loaded. Please refresh the page.');
+    return;
+  }
+  
+  console.log('LegacyCoinTrader is available, proceeding...');
+  
+  if (!confirm(`Are you sure you want to market sell ${amount} ${symbol}? This action cannot be undone.`)) {
+    return;
+  }
+  
+  // Show loading state
+  const button = event ? event.target.closest('button') : null;
+  const originalText = button ? button.innerHTML : '';
+  if (button) {
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Selling...';
+    button.disabled = true;
+  }
+  
+  console.log('Sending sell request to API:', { symbol, amount });
+  console.log('Request URL:', '/api/sell-position');
+  console.log('Request body:', JSON.stringify({ symbol, amount }));
+  
+  fetch('/api/sell-position', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      symbol: symbol,
+      amount: amount
+    })
+  })
+  .then(response => {
+    console.log('API response received');
+    console.log('Response status:', response.status);
+    console.log('Response headers:', response.headers);
+    return response.json();
+  })
+  .then(data => {
+    console.log('API response data parsed:', data);
+    if (data.success) {
+      console.log('Sell successful, showing toast...');
+      window.LegacyCoinTrader.showToast(`Market sell order submitted for ${amount} ${symbol}`, 'success');
+      console.log('Toast shown, refreshing positions in 2 seconds...');
+      // Refresh positions after a short delay
+      setTimeout(() => {
+        console.log('Refreshing positions...');
+        updateOpenPositions();
+      }, 2000);
+      // Reset button immediately
+      if (button) {
+        console.log('Resetting button...');
+        button.innerHTML = originalText;
+        button.disabled = false;
+      }
+    } else {
+      console.log('Sell failed:', data.error);
+      window.LegacyCoinTrader.showToast(`Error: ${data.error}`, 'error');
+      // Reset button
+      if (button) {
+        button.innerHTML = originalText;
+        button.disabled = false;
+      }
+    }
+  })
+  .catch(error => {
+    console.error('=== MARKET SELL ERROR ===');
+    console.error('Error selling position:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    window.LegacyCoinTrader.showToast('Error submitting sell order', 'error');
+    // Reset button
+    if (button) {
+      button.innerHTML = originalText;
+      button.disabled = false;
+    }
+  });
+  console.log('=== MARKET SELL DEBUG END ===');
+}
+
+// Ensure LegacyCoinTrader is available
+function ensureLegacyCoinTrader() {
+  if (!window.LegacyCoinTrader || !window.LegacyCoinTrader.showToast) {
+    console.log('LegacyCoinTrader not ready, waiting...');
+    setTimeout(ensureLegacyCoinTrader, 100);
+    return;
+  }
+  console.log('LegacyCoinTrader is ready');
+}
+
+
+
 // Add custom styles for the dashboard
 document.addEventListener('DOMContentLoaded', function() {
+  console.log('DOM loaded, JavaScript is working!');
+  alert('DOM loaded, JavaScript is working!');
+  
+  // Ensure LegacyCoinTrader is loaded
+  ensureLegacyCoinTrader();
+  
   const style = document.createElement('style');
   style.textContent = `
     .welcome-section {
@@ -608,10 +1000,92 @@ document.addEventListener('DOMContentLoaded', function() {
       margin: 0;
     }
     
+    .status-display {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .status-display .badge {
+      font-size: 0.875rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.5rem;
+    }
+    
+    .bot-controls {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.5rem;
+    }
+    
     .metric-icon {
       font-size: 2rem;
       color: var(--primary-color);
       margin-bottom: 1rem;
+    }
+    
+    .position-item {
+      background: var(--bg-secondary);
+      border-radius: 0.5rem;
+      padding: 1rem;
+      margin-bottom: 1rem;
+      border-left: 4px solid var(--primary-color);
+    }
+    
+    .position-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+    
+    .position-symbol {
+      font-weight: 600;
+      color: var(--text-primary);
+      font-size: 1.1rem;
+    }
+    
+    .position-details {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    
+    .position-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .position-row .label {
+      color: var(--text-secondary);
+      font-size: 0.875rem;
+    }
+    
+    .position-row .value {
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+    
+    .position-actions {
+      margin-top: 1rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--border-color);
+      text-align: right;
+    }
+    
+    .no-positions {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 2rem;
+    }
+    
+    .no-positions i {
+      font-size: 3rem;
+      margin-bottom: 1rem;
+      display: block;
     }
     
     .recent-trade {

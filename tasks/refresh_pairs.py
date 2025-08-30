@@ -11,7 +11,15 @@ import logging
 import ccxt.async_support as ccxt
 import yaml
 import aiohttp
-from crypto_bot.utils import timeframe_seconds
+try:
+    from crypto_bot.utils import timeframe_seconds
+except Exception:  # pragma: no cover - fallback for tests
+    def timeframe_seconds(_exchange=None, timeframe: str = "1m"):
+        import pandas as _pd
+        try:
+            return int(_pd.Timedelta(timeframe).total_seconds())
+        except Exception:
+            return 60
 from crypto_bot.utils.symbol_utils import fix_symbol
 
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "crypto_bot" / "config.yaml"

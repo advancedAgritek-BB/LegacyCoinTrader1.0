@@ -9,6 +9,7 @@ to ensure it's working correctly before running full backtests.
 import asyncio
 import logging
 import sys
+import pytest
 from pathlib import Path
 
 # Add the project root to the path
@@ -16,55 +17,38 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 def test_gpu_detection():
     """Test GPU detection functionality."""
-    print("Testing GPU detection...")
-    
-    try:
-        from crypto_bot.backtest.gpu_accelerator import get_gpu_info, is_gpu_available
-        
-        gpu_available = is_gpu_available()
-        gpu_info = get_gpu_info()
-        
-        print(f"GPU Available: {gpu_available}")
-        print(f"GPU Info: {gpu_info}")
-        
-        if gpu_available:
-            print("✅ GPU detection working")
-        else:
-            print("⚠️  No GPU detected - will use CPU fallback")
-            
-        return True
-        
-    except Exception as e:
-        print(f"❌ GPU detection failed: {e}")
-        return False
+
+    from crypto_bot.backtest.gpu_accelerator import get_gpu_info, is_gpu_available
+
+    gpu_available = is_gpu_available()
+    gpu_info = get_gpu_info()
+
+    assert isinstance(gpu_available, bool), "GPU availability should be boolean"
+    assert isinstance(gpu_info, dict), "GPU info should be a dictionary"
+
+    # GPU info should at least contain status or basic keys
+    assert 'status' in gpu_info or 'gpu_count' in gpu_info, "GPU info should contain status or gpu_count"
 
 def test_enhanced_backtester():
     """Test enhanced backtester creation."""
-    print("\nTesting enhanced backtester creation...")
-    
-    try:
-        from crypto_bot.backtest.enhanced_backtester import create_enhanced_backtester
-        
-        config = {
-            'top_pairs_count': 5,  # Small number for testing
-            'use_gpu': True,
-            'timeframes': ['1h'],
-            'batch_size': 10
-        }
-        
-        engine = create_enhanced_backtester(config)
-        
-        print(f"Engine created successfully")
-        print(f"Available strategies: {len(engine.get_all_strategies())}")
-        print(f"Configuration: {engine.config}")
-        
-        print("✅ Enhanced backtester creation working")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Enhanced backtester creation failed: {e}")
-        return False
 
+    from crypto_bot.backtest.enhanced_backtester import create_enhanced_backtester
+
+    config = {
+        'top_pairs_count': 5,  # Small number for testing
+        'use_gpu': True,
+        'timeframes': ['1h'],
+        'batch_size': 10
+    }
+
+    engine = create_enhanced_backtester(config)
+
+    assert engine is not None, "Enhanced backtester should be created successfully"
+    assert hasattr(engine, 'get_all_strategies'), "Engine should have get_all_strategies method"
+    assert hasattr(engine, 'config'), "Engine should have config attribute"
+    assert engine.config is not None, "Engine config should not be None"
+
+@pytest.mark.asyncio
 async def test_single_backtest():
     """Test single backtest functionality."""
     print("\nTesting single backtest...")
@@ -119,102 +103,28 @@ async def test_single_backtest():
 
 def test_cli_imports():
     """Test CLI module imports."""
-    print("\nTesting CLI imports...")
-    
-    try:
-        from crypto_bot.backtest.cli import setup_logging, load_config, print_results_summary
-        
-        print("✅ CLI imports working")
-        return True
-        
-    except Exception as e:
-        print(f"❌ CLI imports failed: {e}")
-        return False
+
+    from crypto_bot.backtest.cli import setup_logging, load_config, print_results_summary
+
+    # Verify the imported functions are callable
+    assert callable(setup_logging), "setup_logging should be callable"
+    assert callable(load_config), "load_config should be callable"
+    assert callable(print_results_summary), "print_results_summary should be callable"
 
 def test_config_loading():
     """Test configuration file loading."""
-    print("\nTesting configuration loading...")
-    
-    try:
-        config_path = Path("config/backtest_config.yaml")
-        
-        if config_path.exists():
-            from crypto_bot.backtest.cli import load_config
-            config = load_config(str(config_path))
-            
-            print(f"Configuration loaded successfully")
-            print(f"Top pairs count: {config.get('top_pairs_count', 'Not set')}")
-            print(f"GPU enabled: {config.get('use_gpu', 'Not set')}")
-            
-            print("✅ Configuration loading working")
-            return True
-        else:
-            print(f"⚠️  Configuration file not found at {config_path}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Configuration loading failed: {e}")
-        return False
 
-async def main():
-    """Run all tests."""
-    print("Enhanced Backtesting System - Test Suite")
-    print("=" * 50)
-    
-    tests = [
-        ("GPU Detection", test_gpu_detection),
-        ("Enhanced Backtester", test_enhanced_backtester),
-        ("Single Backtest", test_single_backtest),
-        ("CLI Imports", test_cli_imports),
-        ("Config Loading", test_config_loading),
-    ]
-    
-    results = []
-    
-    for test_name, test_func in tests:
-        try:
-            if asyncio.iscoroutinefunction(test_func):
-                result = await test_func()
-            else:
-                result = test_func()
-            results.append((test_name, result))
-        except Exception as e:
-            print(f"❌ {test_name} failed with exception: {e}")
-            results.append((test_name, False))
-    
-    # Print summary
-    print("\n" + "=" * 50)
-    print("Test Results Summary")
-    print("=" * 50)
-    
-    passed = 0
-    total = len(results)
-    
-    for test_name, result in results:
-        status = "✅ PASS" if result else "❌ FAIL"
-        print(f"{test_name:25s}: {status}")
-        if result:
-            passed += 1
-    
-    print(f"\nOverall: {passed}/{total} tests passed")
-    
-    if passed == total:
-        print("🎉 All tests passed! The enhanced backtesting system is ready to use.")
-        return True
+    config_path = Path("config/backtest_config.yaml")
+
+    if config_path.exists():
+        from crypto_bot.backtest.cli import load_config
+        config = load_config(str(config_path))
+
+        assert isinstance(config, dict), "Loaded config should be a dictionary"
+        assert 'top_pairs_count' in config, "Config should contain top_pairs_count"
+        assert 'use_gpu' in config, "Config should contain use_gpu"
     else:
-        print("⚠️  Some tests failed. Check the output above for details.")
-        return False
+        # If config file doesn't exist, skip the test
+        pytest.skip(f"Configuration file not found at {config_path}")
 
-if __name__ == "__main__":
-    # Setup basic logging
-    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-    
-    try:
-        success = asyncio.run(main())
-        sys.exit(0 if success else 1)
-    except KeyboardInterrupt:
-        print("\n\nTest interrupted by user")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n\nTest suite failed with exception: {e}")
-        sys.exit(1)
+

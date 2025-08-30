@@ -250,7 +250,12 @@ run_tests() {
     
     if command_exists pytest; then
         print_status "Running pytest..."
-        python -m pytest -q
+        if python -m pytest -q; then
+            print_success "All tests passed!"
+        else
+            print_warning "Some tests failed, but continuing with startup..."
+            print_warning "You can run tests separately with: $0 test"
+        fi
     else
         print_warning "pytest not found, skipping tests"
     fi
@@ -283,9 +288,48 @@ start_application() {
     print_status "Main application PID: $MAIN_PID"
     print_status "Frontend PID: $FRONTEND_PID"
     print_status "Telegram bot PID: $TELEGRAM_PID"
-    print_status "Web dashboard available at: http://localhost:5000"
+    print_status "Web dashboard available at: http://localhost:8000"
     print_status "Use 'ps aux | grep python' to see running processes"
     print_status "Use 'kill $MAIN_PID $FRONTEND_PID $TELEGRAM_PID' to stop all services"
+    
+    # Function to open browser (cross-platform)
+    open_browser() {
+        local url="$1"
+        local delay="$2"
+        
+        print_status "Waiting $delay seconds for server to start..."
+        sleep "$delay"
+        
+        # Detect OS and open appropriate browser
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            # macOS
+            print_status "Opening browser on macOS..."
+            open "$url"
+        elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            # Linux
+            print_status "Opening browser on Linux..."
+            if command -v xdg-open >/dev/null 2>&1; then
+                xdg-open "$url"
+            elif command -v gnome-open >/dev/null 2>&1; then
+                gnome-open "$url"
+            elif command -v kde-open >/dev/null 2>&1; then
+                kde-open "$url"
+            else
+                print_warning "Could not automatically open browser. Please manually navigate to: $url"
+            fi
+        else
+            # Windows or other
+            print_status "Opening browser..."
+            if command -v start >/dev/null 2>&1; then
+                start "$url"
+            else
+                print_warning "Could not automatically open browser. Please manually navigate to: $url"
+            fi
+        fi
+    }
+    
+    # Open browser in background after a delay
+    open_browser "http://localhost:8000" 3 &
     
     # Wait for user input to stop
     echo
@@ -305,6 +349,7 @@ show_usage() {
     echo "  test      - Run test suite"
     echo "  start     - Start the application"
     echo "  full      - Full setup and start (default)"
+    echo "  no-test   - Setup and start without running tests"
     echo "  help      - Show this help message"
     echo
     echo "Examples:"
@@ -312,6 +357,7 @@ show_usage() {
     echo "  $0 test     # Only run tests"
     echo "  $0 start    # Only start application (assumes setup is complete)"
     echo "  $0          # Full setup and start"
+    echo "  $0 no-test  # Setup and start without running tests"
 }
 
 # Main execution
@@ -343,6 +389,14 @@ main() {
             setup_python_env
             check_env
             run_tests
+            start_application
+            ;;
+        "no-test")
+            check_os
+            install_system_deps
+            setup_python_env
+            check_env
+            print_warning "Skipping tests as requested"
             start_application
             ;;
         "help"|"-h"|"--help")

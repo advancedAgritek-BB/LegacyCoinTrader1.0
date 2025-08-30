@@ -84,15 +84,6 @@ exec:
   allow_market_orders: true
   order_retry_interval: 0.5
 execution_mode: dry_run
-
-# Paper Wallet Configuration for Dry Run Mode
-paper_wallet:
-  enabled: true
-  initial_balance: 10000.0
-  max_open_trades: 10
-  allow_short: true
-  config_file: "crypto_bot/paper_wallet_config.yaml"
-
 exit_strategy:
   adaptive_trailing:
     base_trailing_pct: 0.008
@@ -298,6 +289,12 @@ optimization:
       - 0.08
       - 0.12
       - 0.15
+paper_wallet:
+  allow_short: true
+  config_file: crypto_bot/paper_wallet_config.yaml
+  enabled: true
+  initial_balance: 10000.0
+  max_open_trades: 10
 portfolio_rotation:
   enabled: true
   interval_days: 0.25
@@ -384,15 +381,15 @@ solana_slippage_bps: 15
 solana_symbols: []
 stop_loss_pct: 0.008
 strategy_allocation:
-  bounce_scalper: 0.15
-  grid_bot: 0.15
-  micro_scalp_bot: 0.3
-  sniper_bot: 0.25
-  trend_bot: 0.15
+  bounce_scalper: 15
+  grid_bot: 15
+  micro_scalp_bot: 30
+  sniper_bot: 25
+  trend_bot: 15
 strategy_router:
   bandit_enabled: true
   bounce_timeframe: 3m
-  breakout_timeframe: 10m
+  breakout_timeframe: 15m
   fast_path:
     breakout_max_bandwidth: 0.025
     breakout_squeeze_window: 8
@@ -468,11 +465,10 @@ telegram_ctl:
   enabled: true
   update_interval: 15
 testing_mode: false
-timeframe: 10m
+timeframe: 15m
 timeframes:
 - 1m
 - 5m
-- 10m
 - 15m
 - 1h
 - 4h

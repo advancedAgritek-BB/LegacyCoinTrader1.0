@@ -4,10 +4,12 @@ Test script to verify async Solana and CEX trading execution.
 """
 import asyncio
 import time
+import pytest
 from unittest.mock import Mock, AsyncMock
 from crypto_bot.main import AsyncTradeManager, execute_solana_trade, execute_cex_trade
 
 
+@pytest.mark.asyncio
 async def test_async_trade_manager():
     """Test the AsyncTradeManager functionality."""
     print("Testing AsyncTradeManager...")
@@ -35,6 +37,7 @@ async def test_async_trade_manager():
     print("AsyncTradeManager test completed!")
 
 
+@pytest.mark.asyncio
 async def test_trade_execution_functions():
     """Test the separate trade execution functions."""
     print("\nTesting trade execution functions...")

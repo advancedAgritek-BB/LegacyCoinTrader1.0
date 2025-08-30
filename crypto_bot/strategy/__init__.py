@@ -37,9 +37,14 @@ range_arb_bot = _optional_import("range_arb_bot")
 stat_arb_bot = _optional_import("stat_arb_bot")
 meme_wave_bot = _optional_import("meme_wave_bot")
 
-# Export Solana sniper strategy module under a unified name
-sniper_solana = importlib.import_module("crypto_bot.strategies.sniper_solana")
-solana_scalping = importlib.import_module("crypto_bot.solana.scalping")
+try:  # Export Solana sniper strategy if available
+    sniper_solana = importlib.import_module("crypto_bot.strategies.sniper_solana")
+except Exception:  # pragma: no cover - optional during tests
+    sniper_solana = None
+try:
+    solana_scalping = importlib.import_module("crypto_bot.solana.scalping")
+except Exception:  # pragma: no cover - optional during tests
+    solana_scalping = None
 
 __all__ = [
     name

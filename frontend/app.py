@@ -4,9 +4,19 @@ This module launches the Flask web server, manages the background trading
 process and provides REST API routes used by the UI and tests.
 """
 
-from flask import Flask, render_template, redirect, url_for, request, jsonify
+try:
+    from flask import Flask, render_template, redirect, url_for, request, jsonify
+except Exception:  # pragma: no cover - provide minimal shim for import-time tests
+    class _Dummy:
+        def __getattr__(self, _):
+            return self
+        def __call__(self, *a, **k):
+            return None
+    Flask = lambda *a, **k: _Dummy()  # type: ignore
+    render_template = redirect = url_for = request = jsonify = _Dummy()
 from pathlib import Path
 import os
+import signal
 
 from crypto_bot.utils.logger import LOG_DIR
 import subprocess
@@ -14,6 +24,7 @@ import json
 import threading
 import time
 import yaml
+import requests
 from crypto_bot import log_reader
 from crypto_bot import ml_signal_model as ml
 from . import utils
@@ -32,6 +43,7 @@ TRADE_FILE = LOG_DIR / 'trades.csv'
 ERROR_FILE = LOG_DIR / 'errors.log'
 CONFIG_FILE = Path('crypto_bot/config.yaml')
 REGIME_FILE = LOG_DIR / 'regime_history.txt'
+POSITIONS_FILE = LOG_DIR / 'positions.log'
 
 
 def stop_conflicting_bots() -> None:
@@ -74,7 +86,9 @@ def watch_bot() -> None:
             # Check if there's already another bot process running to avoid conflicts
             if not check_existing_bot():
                 print("Bot process exited, restarting...")
-                bot_proc = subprocess.Popen(['python', '-m', 'crypto_bot.main'])
+                venv_python = Path(__file__).parent.parent / 'venv' / 'bin' / 'python3'
+                bot_script = Path(__file__).parent.parent / 'start_bot_noninteractive.py'
+                bot_proc = subprocess.Popen([str(venv_python), str(bot_script)])
                 bot_start_time = time.time()
             else:
                 print("Another bot process detected, skipping restart to avoid conflicts")
@@ -115,6 +129,122 @@ def set_paper_wallet_balance(balance: float) -> None:
         yaml.dump(config, f)
 
 
+def get_open_positions() -> list:
+    """Parse open positions from positions.log file."""
+    import re
+    from datetime import datetime, timedelta
+    
+    if not POSITIONS_FILE.exists():
+        return []
+    
+    positions = []
+    pos_pattern = re.compile(
+        r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
+        r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+) "
+        r"pnl \$?(?P<pnl>[0-9.+-]+).*balance \$?(?P<balance>[0-9.]+)"
+    )
+    
+    try:
+        with open(POSITIONS_FILE) as f:
+            lines = f.readlines()
+            
+        # Only process recent lines (last 24 hours)
+        cutoff_time = datetime.now() - timedelta(hours=24)
+        recent_positions = []
+        
+        for line in lines:
+            # Extract timestamp from the beginning of the line
+            timestamp_match = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})", line)
+            if timestamp_match:
+                try:
+                    timestamp_str = timestamp_match.group(1)
+                    line_timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S,%f")
+                    
+                    # Only include positions from the last 24 hours
+                    if line_timestamp >= cutoff_time:
+                        match = pos_pattern.search(line)
+                        if match:
+                            # Check if this is a real position (not just a balance update)
+                            symbol = match.group('symbol')
+                            side = match.group('side')
+                            amount = float(match.group('amount'))
+                            
+                            # Filter out positions with zero amounts or very small amounts
+                            if amount > 0.0001:  # Minimum threshold
+                                recent_positions.append({
+                                    'symbol': symbol,
+                                    'side': side,
+                                    'amount': amount,
+                                    'entry_price': float(match.group('entry')),
+                                    'current_price': float(match.group('current')),
+                                    'pnl': float(match.group('pnl')),
+                                    'balance': float(match.group('balance')),
+                                    'timestamp': timestamp_str
+                                })
+                except ValueError:
+                    continue
+        
+        # Remove duplicates based on symbol and side, keeping the most recent
+        seen = set()
+        unique_positions = []
+        for pos in reversed(recent_positions):  # Process in reverse to keep most recent
+            key = f"{pos['symbol']}_{pos['side']}"
+            if key not in seen:
+                seen.add(key)
+                unique_positions.append(pos)
+        
+        # Return positions in chronological order
+        return list(reversed(unique_positions))
+        
+    except Exception as e:
+        print(f"Error reading positions: {e}")
+    
+    return []
+
+
+def clear_old_positions() -> None:
+    """Clear old position entries from the positions.log file."""
+    if not POSITIONS_FILE.exists():
+        return
+    
+    try:
+        import re
+        from datetime import datetime, timedelta
+        
+        # Read all lines
+        with open(POSITIONS_FILE, 'r') as f:
+            lines = f.readlines()
+        
+        # Keep only lines from the last 24 hours
+        cutoff_time = datetime.now() - timedelta(hours=24)
+        recent_lines = []
+        
+        for line in lines:
+            # Extract timestamp from the beginning of the line
+            timestamp_match = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})", line)
+            if timestamp_match:
+                try:
+                    timestamp_str = timestamp_match.group(1)
+                    line_timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S,%f")
+                    
+                    # Keep lines from the last 24 hours
+                    if line_timestamp >= cutoff_time:
+                        recent_lines.append(line)
+                except ValueError:
+                    # Keep lines that don't have valid timestamps (they might be important)
+                    recent_lines.append(line)
+            else:
+                # Keep lines without timestamps
+                recent_lines.append(line)
+        
+        # Write back the filtered lines
+        with open(POSITIONS_FILE, 'w') as f:
+            f.writelines(recent_lines)
+            
+    except Exception as e:
+        print(f"Error clearing old positions: {e}")
+
+
 def get_uptime() -> str:
     """Return human readable uptime."""
     return utils.get_uptime(bot_start_time)
@@ -130,20 +260,28 @@ def index():
     df = log_reader._read_trades(TRADE_FILE)
     perf = utils.compute_performance(df)
     
-    # Get allocation data
-    allocation = {}
-    if CONFIG_FILE.exists():
+    # Get dynamic allocation data based on actual performance
+    allocation = utils.calculate_dynamic_allocation()
+    
+    # Fallback to static config if no dynamic data available
+    if not allocation and CONFIG_FILE.exists():
         with open(CONFIG_FILE) as f:
             cfg = yaml.safe_load(f) or {}
             allocation = cfg.get('strategy_allocation', {})
     
-    # Fallback to weights.json if no allocation in config
+    # Final fallback to weights.json if no allocation in config
     if not allocation and (LOG_DIR / 'weights.json').exists():
         with open(LOG_DIR / 'weights.json') as f:
             allocation = json.load(f)
     
-    # Get paper wallet balance for dry run mode
-    paper_wallet_balance = get_paper_wallet_balance() if mode == 'dry_run' else None
+    # Get paper wallet balance (always show wallet balance)
+    paper_wallet_balance = get_paper_wallet_balance()
+    
+    # Get open positions
+    open_positions = get_open_positions()
+    
+    # Get open positions
+    open_positions = get_open_positions()
     
     return render_template(
         'index.html',
@@ -157,6 +295,7 @@ def index():
         performance=perf,
         allocation=allocation,
         paper_wallet_balance=paper_wallet_balance,
+        open_positions=open_positions,
     )
 
 
@@ -168,8 +307,10 @@ def start():
     mode = request.form.get('mode', 'dry_run')
     set_execution_mode(mode)
     if not is_running() and not check_existing_bot():
-        # Launch the asyncio-based trading bot
-        bot_proc = subprocess.Popen(['python', '-m', 'crypto_bot.main'])
+        # Launch the asyncio-based trading bot using the non-interactive script
+        venv_python = Path(__file__).parent.parent / 'venv' / 'bin' / 'python3'
+        bot_script = Path(__file__).parent.parent / 'start_bot_noninteractive.py'
+        bot_proc = subprocess.Popen([str(venv_python), str(bot_script)])
         bot_start_time = time.time()
     return redirect(url_for('index'))
 
@@ -184,7 +325,9 @@ def start_bot():
     set_execution_mode(mode)
     status = 'running'
     if not is_running() and not check_existing_bot():
-        bot_proc = subprocess.Popen(['python', '-m', 'crypto_bot.main'])
+        venv_python = Path(__file__).parent.parent / 'venv' / 'bin' / 'python3'
+        bot_script = Path(__file__).parent.parent / 'start_bot_noninteractive.py'
+        bot_proc = subprocess.Popen([str(venv_python), str(bot_script)])
         bot_start_time = time.time()
         status = 'started'
     elif check_existing_bot():
@@ -222,6 +365,40 @@ def stop_bot():
     return jsonify({
         'status': status,
         'running': False,
+        'uptime': get_uptime(),
+        'mode': load_execution_mode(),
+    })
+
+
+@app.route('/pause_bot', methods=['POST'])
+def pause_bot():
+    """Pause the trading bot and return JSON status."""
+    global bot_proc, bot_start_time
+    status = 'not_running'
+    if is_running():
+        # Send SIGSTOP to pause the process
+        bot_proc.send_signal(signal.SIGSTOP)
+        status = 'paused'
+    return jsonify({
+        'status': status,
+        'running': False,
+        'uptime': get_uptime(),
+        'mode': load_execution_mode(),
+    })
+
+
+@app.route('/resume_bot', methods=['POST'])
+def resume_bot():
+    """Resume the trading bot and return JSON status."""
+    global bot_proc, bot_start_time
+    status = 'not_running'
+    if bot_proc and bot_proc.poll() is None:
+        # Send SIGCONT to resume the process
+        bot_proc.send_signal(signal.SIGCONT)
+        status = 'resumed'
+    return jsonify({
+        'status': status,
+        'running': True,
         'uptime': get_uptime(),
         'mode': load_execution_mode(),
     })
@@ -265,12 +442,13 @@ def cli():
     if request.method == 'POST':
         base = request.form.get('base', 'bot')
         cmd_args = request.form.get('command', '')
+        venv_python = Path(__file__).parent.parent / 'venv' / 'bin' / 'python3'
         if base == 'backtest':
-            cmd = f"python -m crypto_bot.backtest.backtest_runner {cmd_args}"
+            cmd = f"{venv_python} -m crypto_bot.backtest.backtest_runner {cmd_args}"
         elif base == 'custom':
             cmd = cmd_args
         else:
-            cmd = f"python -m crypto_bot.main {cmd_args}"
+            cmd = f"{venv_python} start_bot_noninteractive.py {cmd_args}"
         try:
             proc = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, check=False
@@ -284,13 +462,17 @@ def dashboard():
     summary = log_reader.trade_summary(TRADE_FILE)
     df = log_reader._read_trades(TRADE_FILE)
     perf = utils.compute_performance(df)
-    allocation = {}
-    if CONFIG_FILE.exists():
+    
+    # Get dynamic allocation data based on actual performance
+    allocation = utils.calculate_dynamic_allocation()
+    
+    # Fallback to static config if no dynamic data available
+    if not allocation and CONFIG_FILE.exists():
         with open(CONFIG_FILE) as f:
             cfg = yaml.safe_load(f) or {}
             allocation = cfg.get('strategy_allocation', {})
     
-    # Fallback to weights.json if no allocation in config
+    # Final fallback to weights.json if no allocation in config
     if not allocation and (LOG_DIR / 'weights.json').exists():
         with open(LOG_DIR / 'weights.json') as f:
             allocation = json.load(f)
@@ -347,6 +529,101 @@ def validate_model_route():
     if metrics:
         MODEL_REPORT.write_text(json.dumps(metrics))
     return redirect(url_for('model_page'))
+
+
+@app.route('/api_config')
+def api_config_page():
+    """API configuration page."""
+    # Load current API configuration
+    api_config = {}
+    user_config_file = Path('crypto_bot/user_config.yaml')
+    if user_config_file.exists():
+        with open(user_config_file) as f:
+            api_config = yaml.safe_load(f) or {}
+    
+    return render_template('api_config.html', api_config=api_config)
+
+
+@app.route('/config_settings')
+def config_settings_page():
+    """General configuration settings page."""
+    # Load current configuration
+    config_data = {}
+    if CONFIG_FILE.exists():
+        with open(CONFIG_FILE) as f:
+            config_data = yaml.safe_load(f) or {}
+    
+    return render_template('config_settings.html', config_data=config_data)
+
+
+@app.route('/api/save_api_config', methods=['POST'])
+def save_api_config():
+    """Save API configuration."""
+    try:
+        data = request.get_json()
+        user_config_file = Path('crypto_bot/user_config.yaml')
+        
+        # Load existing config
+        current_config = {}
+        if user_config_file.exists():
+            with open(user_config_file) as f:
+                current_config = yaml.safe_load(f) or {}
+        
+        # Update with new values
+        current_config.update(data)
+        
+        # Save back to file
+        with open(user_config_file, 'w') as f:
+            yaml.dump(current_config, f, default_flow_style=False)
+        
+        return jsonify({'status': 'success', 'message': 'API configuration saved successfully'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Error saving configuration: {str(e)}'}), 500
+
+
+@app.route('/api/save_config_settings', methods=['POST'])
+def save_config_settings():
+    """Save general configuration settings."""
+    try:
+        data = request.get_json()
+        
+        # Load existing config
+        current_config = {}
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE) as f:
+                current_config = yaml.safe_load(f) or {}
+        
+        # Update with new values (merge nested structures)
+        def deep_merge(d1, d2):
+            for key, value in d2.items():
+                if key in d1 and isinstance(d1[key], dict) and isinstance(value, dict):
+                    deep_merge(d1[key], value)
+                else:
+                    d1[key] = value
+            return d1
+        
+        updated_config = deep_merge(current_config, data)
+        
+        # Save back to file
+        with open(CONFIG_FILE, 'w') as f:
+            yaml.dump(updated_config, f, default_flow_style=False)
+        
+        return jsonify({'status': 'success', 'message': 'Configuration saved successfully'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Error saving configuration: {str(e)}'}), 500
+
+
+@app.route('/api/refresh_config', methods=['POST'])
+def refresh_config():
+    """Refresh configuration by reloading from files."""
+    try:
+        # This endpoint can be used to reload configuration without restarting the bot
+        # For now, we'll just return success since the config is loaded on each request
+        return jsonify({'status': 'success', 'message': 'Configuration refreshed successfully'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Error refreshing configuration: {str(e)}'}), 500
+
+
 @app.route('/trades')
 def trades_page():
     return render_template('trades.html')
@@ -363,12 +640,190 @@ def trades_tail():
     return jsonify({'trades': trades, 'errors': errors})
 
 
+@app.route('/api/current-prices')
+def api_current_prices():
+    """Return current market prices for symbols."""
+    try:
+        # Read trades to get unique symbols
+        df = log_reader._read_trades(TRADE_FILE)
+        if df.empty:
+            return jsonify({})
+        
+        symbols = df['symbol'].unique().tolist()
+        current_prices = {}
+        
+        # For now, we'll use a simple approach to get current prices
+        # In a real implementation, you'd fetch from exchange APIs
+        for symbol in symbols:
+            try:
+                # Try to get price from various sources
+                price = get_current_price_for_symbol(symbol)
+                if price > 0:
+                    current_prices[symbol] = price
+            except Exception as e:
+                print(f"Error getting price for {symbol}: {e}")
+                continue
+        
+        return jsonify(current_prices)
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
+def get_current_price_for_symbol(symbol: str) -> float:
+    """Get current price for a symbol using available price sources."""
+    try:
+        # Try Pyth network first
+        from crypto_bot.utils.pyth import get_pyth_price
+        price = get_pyth_price(symbol)
+        if price and price > 0:
+            return price
+    except Exception:
+        pass
+    
+    try:
+        # Try Jupiter API for Solana tokens
+        import requests
+        
+        base = symbol.split('/')[0] if '/' in symbol else symbol
+        response = requests.get(
+            "https://price.jup.ag/v4/price",
+            params={"ids[]": base},
+            timeout=5
+        )
+        if response.status_code == 200:
+            data = response.json()
+            price = float(data.get("data", {}).get(base, {}).get("price", 0.0))
+            if price > 0:
+                return price
+    except Exception:
+        pass
+    
+    # Fallback: try to get from cached data if available
+    try:
+        scan_file = LOG_DIR / 'asset_scores.json'
+        if scan_file.exists():
+            with open(scan_file) as f:
+                data = json.load(f)
+                if symbol in data and 'price' in data[symbol]:
+                    return float(data[symbol]['price'])
+    except Exception:
+        pass
+    
+    return 0.0
+
+
 @app.route('/trades_data')
 def trades_data():
-    """Return full trade history as JSON records."""
+    """Return full trade history as JSON records with PnL calculations."""
     if TRADE_FILE.exists():
-        df = log_reader._read_trades(TRADE_FILE)
-        return jsonify(df.to_dict(orient='records'))
+        try:
+            df = log_reader._read_trades(TRADE_FILE)
+            if not df.empty:
+                # Get current prices for PnL calculation
+                current_prices = {}
+                try:
+                    # Get current prices from the new endpoint
+                    import requests
+                    response = requests.get('http://localhost:8000/api/current-prices', timeout=5)
+                    if response.status_code == 200:
+                        current_prices = response.json()
+                except Exception:
+                    # Fallback: try to get prices directly
+                    symbols = df['symbol'].unique().tolist()
+                    for symbol in symbols:
+                        price = get_current_price_for_symbol(symbol)
+                        if price > 0:
+                            current_prices[symbol] = price
+                
+                # Calculate PnL for each trade
+                records = []
+                open_positions = {}  # Track open positions per symbol
+                
+                for _, row in df.iterrows():
+                    symbol = str(row.get('symbol', ''))
+                    side = str(row.get('side', ''))
+                    amount = float(row.get('amount', 0))
+                    price = float(row.get('price', 0))
+                    timestamp = str(row.get('timestamp', ''))
+                    
+                    # Calculate trade total
+                    total = amount * price
+                    
+                    # Calculate PnL for this trade
+                    pnl = 0.0
+                    pnl_percentage = 0.0
+                    
+                    if symbol in open_positions:
+                        # Check if this trade closes an existing position
+                        if (side == 'sell' and open_positions[symbol]['side'] == 'buy') or \
+                           (side == 'buy' and open_positions[symbol]['side'] == 'sell'):
+                            # Calculate realized PnL
+                            entry_price = open_positions[symbol]['price']
+                            entry_amount = open_positions[symbol]['amount']
+                            
+                            if side == 'sell':  # Closing long position
+                                pnl = (price - entry_price) * min(amount, entry_amount)
+                            else:  # Closing short position
+                                pnl = (entry_price - price) * min(amount, entry_amount)
+                            
+                            pnl_percentage = (pnl / (entry_price * min(amount, entry_amount))) * 100
+                            
+                            # Update or remove position
+                            if amount >= entry_amount:
+                                del open_positions[symbol]
+                            else:
+                                open_positions[symbol]['amount'] -= amount
+                        else:
+                            # Same side trade - update position
+                            if symbol in open_positions:
+                                # Average down/up
+                                total_cost = (open_positions[symbol]['price'] * open_positions[symbol]['amount']) + total
+                                total_amount = open_positions[symbol]['amount'] + amount
+                                open_positions[symbol]['price'] = total_cost / total_amount
+                                open_positions[symbol]['amount'] = total_amount
+                            else:
+                                open_positions[symbol] = {'side': side, 'price': price, 'amount': amount}
+                    else:
+                        # New position
+                        open_positions[symbol] = {'side': side, 'price': price, 'amount': amount}
+                    
+                    # Calculate unrealized PnL for open positions
+                    unrealized_pnl = 0.0
+                    unrealized_pnl_percentage = 0.0
+                    if symbol in open_positions and symbol in current_prices:
+                        current_price = current_prices[symbol]
+                        if current_price > 0:
+                            pos = open_positions[symbol]
+                            if pos['side'] == 'buy':
+                                unrealized_pnl = (current_price - pos['price']) * pos['amount']
+                            else:
+                                unrealized_pnl = (pos['price'] - current_price) * pos['amount']
+                            
+                            if pos['price'] > 0:
+                                unrealized_pnl_percentage = (unrealized_pnl / (pos['price'] * pos['amount'])) * 100
+                    
+                    record = {
+                        'symbol': symbol,
+                        'side': side,
+                        'amount': amount,
+                        'price': price,
+                        'timestamp': timestamp,
+                        'total': total,
+                        'status': 'completed',
+                        'pnl': pnl,
+                        'pnl_percentage': pnl_percentage,
+                        'unrealized_pnl': unrealized_pnl,
+                        'unrealized_pnl_percentage': unrealized_pnl_percentage,
+                        'current_price': current_prices.get(symbol, 0.0)
+                    }
+                    records.append(record)
+                
+                return jsonify(records)
+            else:
+                return jsonify([])
+        except Exception as e:
+            print(f"Error reading trades: {e}")
+            return jsonify([])
     return jsonify([])
 
 
@@ -386,6 +841,16 @@ def api_bot_status():
 
 
 
+
+
+@app.route('/api/open-positions')
+def api_open_positions():
+    """Return open positions as JSON."""
+    try:
+        positions = get_open_positions()
+        return jsonify(positions)
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 
 @app.route('/api/live-signals')
@@ -448,14 +913,16 @@ def api_dashboard_metrics():
         df = log_reader._read_trades(TRADE_FILE)
         perf = utils.compute_performance(df)
         
-        # Get allocation data
-        allocation = {}
-        if CONFIG_FILE.exists():
+        # Get dynamic allocation data based on actual performance
+        allocation = utils.calculate_dynamic_allocation()
+        
+        # Fallback to static config if no dynamic data available
+        if not allocation and CONFIG_FILE.exists():
             with open(CONFIG_FILE) as f:
                 cfg = yaml.safe_load(f) or {}
                 allocation = cfg.get('strategy_allocation', {})
         
-        # Fallback to weights.json if no allocation in config
+        # Final fallback to weights.json if no allocation in config
         if not allocation and (LOG_DIR / 'weights.json').exists():
             with open(LOG_DIR / 'weights.json') as f:
                 allocation = json.load(f)
@@ -482,11 +949,15 @@ def api_dashboard_metrics():
                             'timestamp': parts[4]
                         })
         
+        # Get open positions
+        open_positions = get_open_positions()
+        
         return jsonify({
             'performance': perf,
             'allocation': allocation,
             'asset_scores': asset_scores,
             'recent_trades': recent_trades,
+            'open_positions': open_positions,
             'bot_status': {
                 'running': is_running(),
                 'mode': load_execution_mode(),
@@ -513,6 +984,45 @@ def api_paper_wallet_balance():
     else:
         balance = get_paper_wallet_balance()
         return jsonify({'balance': balance})
+
+
+@app.route('/api/wallet-balance')
+def api_wallet_balance():
+    """Get current wallet balance from bot logs."""
+    try:
+        # Try to get the most recent balance from positions.log
+        if POSITIONS_FILE.exists():
+            with open(POSITIONS_FILE, 'r') as f:
+                lines = f.readlines()
+                
+            # Look for the most recent balance entry
+            for line in reversed(lines):
+                if 'balance $' in line:
+                    # Extract balance using regex
+                    import re
+                    balance_match = re.search(r'balance \$?([0-9.]+)', line)
+                    if balance_match:
+                        balance = float(balance_match.group(1))
+                        return jsonify({
+                            'success': True,
+                            'balance': balance,
+                            'source': 'positions_log'
+                        })
+        
+        # Fallback to paper wallet config
+        balance = get_paper_wallet_balance()
+        return jsonify({
+            'success': True,
+            'balance': balance,
+            'source': 'paper_wallet_config'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'balance': 0.0
+        })
 
 
 @app.route('/api/live-updates')
@@ -543,15 +1053,91 @@ def api_live_updates():
         if bot_status['mode'] == 'dry_run':
             paper_wallet_balance = get_paper_wallet_balance()
         
+        # Get open positions
+        open_positions = get_open_positions()
+        
         return jsonify({
             'timestamp': time.time(),
             'bot_status': bot_status,
             'performance': perf,
             'asset_scores': asset_scores,
-            'paper_wallet_balance': paper_wallet_balance
+            'paper_wallet_balance': paper_wallet_balance,
+            'open_positions': open_positions
         })
     except Exception as e:
         return jsonify({'error': str(e)})
+
+
+@app.route('/api/sell-position', methods=['POST'])
+def api_sell_position():
+    """Sell a specific position immediately via market order."""
+    try:
+        print(f"Received sell position request: {request.get_json()}")
+        data = request.get_json()
+        symbol = data.get('symbol')
+        amount = data.get('amount')
+        
+        print(f"Processing sell request for {amount} {symbol}")
+        
+        if not symbol or not amount:
+            print(f"Missing symbol or amount: symbol={symbol}, amount={amount}")
+            return jsonify({'success': False, 'error': 'Missing symbol or amount'})
+        
+        # Write sell request to a state file that the main bot can read
+        sell_request = {
+            'symbol': symbol,
+            'amount': float(amount),
+            'timestamp': time.time()
+        }
+        
+        sell_state_file = LOG_DIR / 'sell_requests.json'
+        try:
+            # Read existing requests
+            if sell_state_file.exists():
+                with open(sell_state_file, 'r') as f:
+                    requests = json.load(f)
+            else:
+                requests = []
+            
+            # Add new request
+            requests.append(sell_request)
+            
+            # Keep only recent requests (last 10)
+            requests = requests[-10:]
+            
+            # Write back to file
+            with open(sell_state_file, 'w') as f:
+                json.dump(requests, f)
+            
+            print(f"Sell request saved successfully for {amount} {symbol}")
+            return jsonify({
+                'success': True,
+                'message': f'Market sell order submitted for {amount} {symbol}',
+                'symbol': symbol,
+                'amount': amount
+            })
+            
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'Failed to save sell request: {str(e)}'})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/clear-old-positions', methods=['POST'])
+def api_clear_old_positions():
+    """Clear old position entries from the log file."""
+    try:
+        clear_old_positions()
+        return jsonify({'success': True, 'message': 'Old positions cleared successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/debug_market_sell')
+def debug_market_sell():
+    """Debug page for testing market sell functionality."""
+    return render_template('debug_market_sell.html')
 
 
 if __name__ == '__main__':

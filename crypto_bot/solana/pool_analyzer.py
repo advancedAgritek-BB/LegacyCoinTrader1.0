@@ -79,8 +79,8 @@ class PoolMetrics:
     
     # Risk Indicators
     manipulation_risk: float # Risk of price manipulation
-    rug_pull_indicators: List[str] = field(default_factory=list)
     suspicious_activity: float  # Suspicious trading patterns
+    rug_pull_indicators: List[str] = field(default_factory=list)
     
     # Composite Scores
     sniping_viability: float = 0.0  # How good for sniping (0-1)
@@ -728,3 +728,135 @@ class LiquidityPoolAnalyzer:
             1.0 - self.stats["analysis_failures"] / max(total_analyzed, 1)
         )
         return stats
+
+
+class PoolAnalyzer:
+    """Lightweight facade providing simple analysis APIs expected by tests."""
+
+    def __init__(self) -> None:
+        # Reasonable defaults used by tests
+        self.min_liquidity_threshold = 10_000.0
+        self.max_price_impact = 0.05
+
+    def _calculate_price_impact(self, pool: Dict, trade_size: float) -> float:
+        reserve_a = float(pool.get("reserve_a", 0) or 0)
+        reserve_b = float(pool.get("reserve_b", 0) or 0)
+        total_liquidity = max(reserve_a + reserve_b, 1e-9)
+        impact = min(trade_size / total_liquidity, 1.0)
+        return float(impact)
+
+    def _analyze_volume(self, pool: Dict) -> Dict[str, float]:
+        vol_24h = float(pool.get("volume_24h", 0) or 0)
+        # Normalize volume stability and trend heuristically
+        stability = 1.0 if vol_24h > 0 else 0.0
+        trend = min(vol_24h / 1e6, 1.0)
+        abnormal = 1.0 if vol_24h > 5e6 else 0.0
+        return {
+            "volume_stability": stability,
+            "volume_trend": trend,
+            "abnormal_volume": abnormal,
+        }
+
+    def _analyze_liquidity_depth(self, pool: Dict) -> Dict[str, float]:
+        reserve_a = float(pool.get("reserve_a", 0) or 0)
+        reserve_b = float(pool.get("reserve_b", 0) or 0)
+        providers = int(pool.get("liquidity_providers", 0) or 0)
+        depth = min((reserve_a + reserve_b) / 100_000.0, 1.0)
+        concentration_risk = 1.0 if providers and providers < 5 else 0.2 if providers and providers < 20 else 0.1
+        return {
+            "depth_score": float(depth),
+            "concentration_risk": float(concentration_risk),
+        }
+
+    def _analyze_fees(self, pool: Dict) -> Dict[str, float]:
+        fee_rate = float(pool.get("fee_rate", 0.003) or 0.003)
+        fee_eff = max(0.0, 1.0 - min(fee_rate / 0.01, 1.0))
+        competitiveness = max(0.0, 1.0 - fee_rate * 50)
+        return {
+            "fee_efficiency": float(min(max(fee_eff, 0.0), 1.0)),
+            "fee_competitiveness": float(min(max(competitiveness, 0.0), 1.0)),
+        }
+
+    def _calculate_pool_health(self, pool: Dict) -> float:
+        vols = self._analyze_volume(pool)
+        depth = self._analyze_liquidity_depth(pool)
+        fees = self._analyze_fees(pool)
+        score = (
+            0.35 * depth["depth_score"] +
+            0.25 * vols["volume_trend"] +
+            0.20 * vols["volume_stability"] +
+            0.10 * fees["fee_efficiency"] +
+            0.10 * max(0.0, 1.0 - depth["concentration_risk"])
+        )
+        return float(min(max(score, 0.0), 1.0))
+
+    def _assess_risk(self, pool: Dict) -> Dict[str, any]:
+        price_hist = pool.get("price_history") or []
+        volatility = 0.0
+        if isinstance(price_hist, (list, tuple)) and len(price_hist) > 1:
+            import numpy as np
+            arr = np.array(price_hist, dtype=float)
+            if float(arr.mean()) != 0:
+                volatility = float(np.std(arr) / max(abs(arr.mean()), 1e-9))
+        overall = "low" if volatility < 0.1 else "medium" if volatility < 0.3 else "high"
+        return {
+            "overall_risk": overall,
+            "risk_factors": [f"volatility:{volatility:.2f}"],
+            "recommendations": ["monitor", "reduce position" if overall == "high" else "normal"],
+        }
+
+
+def analyze_liquidity(pool: Dict) -> Dict[str, float]:
+    reserve_a = float(pool.get("reserve_a", 0) or 0)
+    reserve_b = float(pool.get("reserve_b", 0) or 0)
+    vol_24h = float(pool.get("volume_24h", 0) or 0)
+    liquidity = reserve_a + reserve_b
+    # Heuristic score: liquidity and usage
+    liquidity_score = min(max(liquidity / 100_000.0, 0.0), 1.0) * 0.7 + min(max(vol_24h / 1_000_000.0, 0.0), 1.0) * 0.3
+    risk_level = "low" if liquidity_score > 0.7 else "medium" if liquidity_score > 0.3 else "high"
+    return {"liquidity_score": float(liquidity_score), "risk_level": risk_level}
+
+
+def calculate_pool_metrics(pool: Dict) -> Dict[str, float]:
+    price_hist = pool.get("price_history") or []
+    import numpy as np
+    if isinstance(price_hist, (list, tuple)) and len(price_hist) > 1:
+        arr = np.array(price_hist, dtype=float)
+        vol = float(np.std(arr) / max(abs(arr.mean()), 1e-9))
+    else:
+        vol = 0.0
+    depth = min(max((float(pool.get("reserve_a", 0) or 0) + float(pool.get("reserve_b", 0) or 0)) / 200_000.0, 0.0), 1.0)
+    fee_rate = float(pool.get("fee_rate", 0.003) or 0.003)
+    fee_eff = max(0.0, 1.0 - min(fee_rate / 0.01, 1.0))
+    return {
+        "price_volatility": float(min(max(vol, 0.0), 1.0)),
+        "volume_stability": float(1.0 if float(pool.get("volume_24h", 0) or 0) > 0 else 0.0),
+        "liquidity_depth": float(depth),
+        "fee_efficiency": float(min(max(fee_eff, 0.0), 1.0)),
+    }
+
+
+def detect_manipulation(pool: Dict) -> Dict[str, any]:
+    price_hist = pool.get("price_history") or []
+    suspicious_patterns: List[str] = []
+    manipulation_score = 0.0
+    try:
+        if isinstance(price_hist, (list, tuple)) and len(price_hist) >= 5:
+            import numpy as np
+            arr = np.array(price_hist, dtype=float)
+            # Sudden spike pattern
+            if arr.max() > 1.5 * max(arr.min(), 1e-9):
+                suspicious_patterns.append("sudden_spike")
+                manipulation_score += 0.5
+        vol_24h = float(pool.get("volume_24h", 0) or 0)
+        providers = int(pool.get("liquidity_providers", 0) or 0)
+        if vol_24h > 1_000_000 and providers < 10:
+            suspicious_patterns.append("high_volume_few_LPs")
+            manipulation_score += 0.3
+        if float(pool.get("reserve_a", 0) or 0) == 0 or float(pool.get("reserve_b", 0) or 0) == 0:
+            suspicious_patterns.append("imbalanced_reserves")
+            manipulation_score += 0.2
+    except Exception:
+        pass
+    manipulation_score = float(min(max(manipulation_score, 0.0), 1.0))
+    return {"manipulation_score": manipulation_score, "suspicious_patterns": suspicious_patterns}
