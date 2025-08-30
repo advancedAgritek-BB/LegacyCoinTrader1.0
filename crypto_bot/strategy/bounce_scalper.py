@@ -208,8 +208,7 @@ def generate_signal(
         and in_cooldown(symbol, strategy)
         and not force
     ):
-        if get_recent_win_rate() >= 0.5:
-            return 0.0, "none"
+        return 0.0, "none"
 
     rsi_window = cfg.rsi_window
     oversold = cfg.oversold

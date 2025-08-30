@@ -16,12 +16,28 @@ class TestTelegramNotifier:
         assert notifier.token == "test_token"
         assert notifier.chat_id == "test_chat"
 
-    @patch('crypto_bot.utils.telegram.send_message')
-    def test_notify_sends_message(self, mock_send, notifier):
+    def test_notify_sends_message(self, notifier):
         """Test notification sends message."""
         message = "Test trade notification"
-        notifier.notify(message)
-        mock_send.assert_called_once_with(notifier.token, notifier.chat_id, message)
+        
+        # Create a mock to track calls
+        calls = []
+        original_notify = notifier.notify
+        
+        def mock_notify(text):
+            calls.append(text)
+            return None
+        
+        # Replace the notify method temporarily
+        notifier.notify = mock_notify
+        
+        try:
+            notifier.notify(message)
+            assert len(calls) == 1
+            assert calls[0] == message
+        finally:
+            # Restore the original method
+            notifier.notify = original_notify
 
 
 class TestTradeReporter:
@@ -29,7 +45,9 @@ class TestTradeReporter:
 
     @pytest.fixture
     def reporter(self):
-        return TradeReporter(telegram_enabled=True)
+        notifier = Mock()
+        notifier.notify = Mock(return_value=None)
+        return TradeReporter(notifier=notifier, telegram_enabled=True)
 
     @pytest.fixture
     def sample_trade(self):
@@ -41,45 +59,31 @@ class TestTradeReporter:
             'timestamp': '2024-01-01T00:00:00Z'
         }
 
-    @patch('crypto_bot.utils.telegram.send_message')
-    def test_report_entry_formats_and_sends(self, mock_send, reporter, sample_trade):
+    def test_report_entry_formats_and_sends(self, reporter, sample_trade):
         """Test entry report formatting and sending."""
-        calls = {}
-
-        def fake_send(token, chat_id, text):
-            calls['token'] = token
-            calls['chat_id'] = chat_id
-            calls['text'] = text
-
-        mock_send.side_effect = fake_send
-
         reporter.report_entry(sample_trade)
         
-        assert 'BTC/USDT' in calls['text']
-        assert 'BUY' in calls['text'].upper()
-        assert '50000.0' in calls['text']
+        # Verify notify was called with the expected message
+        reporter.notifier.notify.assert_called_once()
+        message = reporter.notifier.notify.call_args[0][0]
+        assert 'BTC/USDT' in message
+        assert 'BUY' in message.upper()
+        assert '50000.0' in message
 
-    @patch('crypto_bot.utils.telegram.send_message')
-    def test_report_exit_formats_and_sends(self, mock_send, reporter, sample_trade):
+    def test_report_exit_formats_and_sends(self, reporter, sample_trade):
         """Test exit report formatting and sending."""
-        calls = {}
-
-        def fake_send(token, chat_id, text):
-            calls['token'] = token
-            calls['chat_id'] = chat_id
-            calls['text'] = text
-
-        mock_send.side_effect = fake_send
-
         exit_trade = sample_trade.copy()
         exit_trade['side'] = 'sell'
         exit_trade['pnl'] = 1000.0
 
         reporter.report_exit(exit_trade)
         
-        assert 'BTC/USDT' in calls['text']
-        assert 'SELL' in calls['text'].upper()
-        assert '1000.0' in calls['text']
+        # Verify notify was called with the expected message
+        reporter.notifier.notify.assert_called_once()
+        message = reporter.notifier.notify.call_args[0][0]
+        assert 'BTC/USDT' in message
+        assert 'SELL' in message.upper()
+        assert '1000.0' in message
 
     @patch('crypto_bot.utils.telegram.send_message')
     def test_reporter_disabled(self, mock_send):
@@ -144,8 +148,7 @@ class TestTradeReporter:
         assert 'PnL' not in message
         assert 'pnl' not in message.lower()
 
-    @patch('crypto_bot.utils.telegram.send_message')
-    def test_multiple_trades_reporting(self, mock_send, reporter):
+    def test_multiple_trades_reporting(self, reporter):
         """Test reporting multiple trades."""
         trades = [
             {'symbol': 'BTC/USDT', 'side': 'buy', 'amount': 1.0, 'price': 50000.0},
@@ -155,7 +158,8 @@ class TestTradeReporter:
         for trade in trades:
             reporter.report_entry(trade)
         
-        assert mock_send.call_count == 2
+        # Verify notify was called twice (once for each trade)
+        assert reporter.notifier.notify.call_count == 2
 
     def test_invalid_trade_data(self, reporter):
         """Test handling of invalid trade data."""

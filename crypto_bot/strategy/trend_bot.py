@@ -19,8 +19,11 @@ except Exception:  # pragma: no cover - fallback when scipy missing
     scipy_stats = _FakeStats()
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils import stats
+from crypto_bot.utils.logger import LOG_DIR, setup_logger
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
+
+logger = setup_logger(__name__, LOG_DIR / "trend_bot.log")
 
 
 def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[float, str]:
@@ -47,13 +50,29 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     df["rsi_z"] = stats.zscore(df["rsi"], lookback_cfg)
     df["volume_ma"] = df["volume"].rolling(window=volume_window).mean()
     df["atr"] = ta.volatility.average_true_range(df["high"], df["low"], df["close"], window=atr_period)
-    lookback = max(50, volume_window)
+    
+    # Use indicator_lookback if provided, otherwise use default calculation
+    if lookback_cfg is not None:
+        lookback = lookback_cfg
+    else:
+        lookback = max(50, volume_window)
+    
     recent = df.iloc[-(lookback + 1) :]
 
     ema20 = ta.trend.ema_indicator(recent["close"], window=20)
     ema50 = ta.trend.ema_indicator(recent["close"], window=50)
     rsi = ta.momentum.rsi(recent["close"], window=14)
     vol_ma = recent["volume"].rolling(window=volume_window).mean()
+
+    # Convert numpy arrays to pandas Series with proper indices
+    if isinstance(ema20, np.ndarray):
+        ema20 = pd.Series(ema20, index=recent.index)
+    if isinstance(ema50, np.ndarray):
+        ema50 = pd.Series(ema50, index=recent.index)
+    if isinstance(rsi, np.ndarray):
+        rsi = pd.Series(rsi, index=recent.index)
+    if isinstance(vol_ma, np.ndarray):
+        vol_ma = pd.Series(vol_ma, index=recent.index)
 
     ema20 = cache_series("ema20", df, ema20, lookback)
     ema50 = cache_series("ema50", df, ema50, lookback)
@@ -108,14 +127,14 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
         and latest["ema_fast"] >= latest["ema_slow"]
         and overbought_cond
         and latest["adx"] >= adx_threshold
-        and latest["volume"] >= latest["volume_ma"]
+        and volume_ok
     )
     short_cond = (
         latest["close"] < latest["ema_fast"]
         and latest["ema_fast"] < latest["ema_slow"]
         and oversold_cond
         and latest["adx"] > adx_threshold
-        and latest["volume"] > latest["volume_ma"]
+        and volume_ok
     )
 
     if params.get("donchian_confirmation", False):
@@ -148,6 +167,22 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     elif reversal_short:
         score = min((latest["rsi"] - dynamic_overbought) / (100 - dynamic_overbought), 1.0)
         direction = "short"
+    else:
+        # Debug: log why no signal was generated
+        print(
+            f"No signal generated. Conditions: close>=ema_fast={latest['close'] >= latest['ema_fast']}, "
+            f"ema_fast>=ema_slow={latest['ema_fast'] >= latest['ema_slow']}, "
+            f"overbought_cond={overbought_cond}, adx>=threshold={latest['adx'] >= adx_threshold}, "
+            f"volume_ok={volume_ok}"
+        )
+        print(
+            f"RSI details: latest_rsi={latest['rsi']}, dynamic_overbought={dynamic_overbought}, "
+            f"rsi_overbought_pct={rsi_overbought_pct}, rsi_oversold_pct={rsi_oversold_pct}"
+        )
+        print(
+            f"Data details: recent_length={len(recent)}, close_range={recent['close'].min()}-{recent['close'].max()}, "
+            f"volume_range={recent['volume'].min()}-{recent['volume'].max()}"
+        )
 
     if score > 0 and (config is None or config.get("atr_normalization", True)):
         score = normalize_score_by_volatility(df, score)

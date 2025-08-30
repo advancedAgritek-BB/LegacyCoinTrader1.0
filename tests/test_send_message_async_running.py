@@ -8,7 +8,7 @@ def test_send_message_async_running(monkeypatch):
     calls = {"count": 0}
 
     class DummyBot:
-        def __init__(self, token):
+        def __init__(self, token, request=None):
             calls['token'] = token
 
         async def send_message(self, chat_id, text):

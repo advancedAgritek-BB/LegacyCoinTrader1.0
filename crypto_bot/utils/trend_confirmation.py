@@ -16,7 +16,8 @@ def _strong_trend(df: pd.DataFrame) -> bool:
     df["ema50"] = ta.trend.ema_indicator(df["close"], window=50)
     adx = ta.trend.adx(df["high"], df["low"], df["close"], window=14)
     df["adx"] = adx
-    adx_avg = adx.rolling(20).mean()
+    adx_series = pd.Series(adx) if not isinstance(adx, pd.Series) else adx
+    adx_avg = adx_series.rolling(20).mean()
     latest = df.iloc[-1]
     return bool(latest["ema20"] > latest["ema50"] and latest["adx"] >= max(20, adx_avg.iloc[-1]))
 

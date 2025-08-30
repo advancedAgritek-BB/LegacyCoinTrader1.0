@@ -50,7 +50,10 @@ class TestWalletManager:
         """Test getting wallet with valid private key."""
         mock_keypair.from_secret_key.return_value = Mock()
         
-        with patch.dict(os.environ, {'SOLANA_PRIVATE_KEY': '[1,2,3,4,5]'}):
+        # Use a valid 32-byte private key
+        valid_key = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 
+                     17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
+        with patch.dict(os.environ, {'SOLANA_PRIVATE_KEY': str(valid_key).replace(' ', '')}):
             wallet = get_wallet()
             assert wallet is not None
 
@@ -169,7 +172,8 @@ class TestWalletManager:
         """Test wallet import and export functionality."""
         # Mock the keypair methods
         mock_keypair_instance = Mock()
-        mock_keypair_instance.secret_key = b"test_secret_key_32_bytes_long_12345"
+        # Create exactly 32 bytes for the secret key
+        mock_keypair_instance.secret_key = bytes(range(32))  # 32 bytes: [0, 1, 2, ..., 31]
         mock_keypair_instance.public_key.to_base58.return_value = "test_public_key"
 
         # Test export

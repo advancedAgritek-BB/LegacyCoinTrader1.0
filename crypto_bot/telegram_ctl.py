@@ -158,6 +158,11 @@ class BotController:
         self.state["liquidate_all"] = True
         return "Liquidation requested"
 
+    async def reload_config(self) -> str:
+        """Signal the trading bot to reload configuration."""
+        self.state["reload"] = True
+        return "Config reload scheduled"
+
 
 async def panic_sell_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Close all open positions immediately."""

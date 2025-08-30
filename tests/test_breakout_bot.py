@@ -103,8 +103,9 @@ def test_higher_timeframe_optional(direction, breakout_df, higher_squeeze_df, no
 
 
 def test_squeeze_zscore(monkeypatch):
-    prices = [100] * 15 + [103]
-    volumes = [100] * 15 + [300]
+    # Use more data points to ensure indicators work properly with short windows
+    prices = [100] * 25 + [103]
+    volumes = [100] * 25 + [300]
     df = _make_df(prices, volumes)
 
     monkeypatch.setattr(

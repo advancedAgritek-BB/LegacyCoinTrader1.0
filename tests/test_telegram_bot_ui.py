@@ -118,7 +118,7 @@ def make_ui(tmp_path, state, rotator=None, exchange=None, notifier=None):
     log_file = tmp_path / "bot.log"
     log_file.write_text("line1\nline2\n")
     if notifier is None:
-        notifier = TelegramNotifier("token", "chat")
+        notifier = TelegramNotifier(token="token", chat_id="chat")
     ui = TelegramBotUI(
         notifier,
         state,
@@ -137,7 +137,7 @@ def test_menu_sent_on_run(monkeypatch, tmp_path):
 
     class DummyNotifier(TelegramNotifier):
         def __init__(self):
-            super().__init__("token", "chat")
+            super().__init__(token="token", chat_id="chat")
 
         def notify(self, text):
             messages.append(text)

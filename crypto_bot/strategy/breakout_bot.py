@@ -40,9 +40,13 @@ def _squeeze(
     high = recent["high"]
     low = recent["low"]
 
-    bb = ta.volatility.BollingerBands(close, window=bb_len, window_dev=bb_std)
-    bb_width = bb.bollinger_hband() - bb.bollinger_lband()
-    bb_mid = bb.bollinger_mavg()
+    # Calculate Bollinger Bands manually since ta library API changed
+    sma = close.rolling(bb_len).mean()
+    std = close.rolling(bb_len).std()
+    bb_upper = sma + (std * bb_std)
+    bb_lower = sma - (std * bb_std)
+    bb_width = bb_upper - bb_lower
+    bb_mid = sma
 
     atr = ta.volatility.average_true_range(high, low, close, window=kc_len)
     kc_width = 2 * atr * kc_mult
@@ -139,7 +143,9 @@ def generate_signal(
     vol_ma = volume.rolling(vol_window).mean()
 
     rsi = ta.momentum.rsi(close, window=14)
-    macd_hist = ta.trend.macd_diff(close)
+    macd_line = ta.trend.macd(close)
+    macd_signal = ta.trend.macd_signal(close)
+    macd_hist = macd_line - macd_signal
 
     dc_high = cache_series("dc_high", df, dc_high, lookback)
     dc_low = cache_series("dc_low", df, dc_low, lookback)

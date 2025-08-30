@@ -7,6 +7,11 @@ from typing import Dict
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 
+# Import Keypair at module level for proper mocking in tests
+try:
+    from solana.keypair import Keypair
+except ImportError:
+    Keypair = None
 
 try:
 	from cryptography.fernet import Fernet
@@ -80,7 +85,8 @@ def validate_private_key(key):
 
 def create_wallet_from_seed(seed_phrase: str) -> "Keypair":
 	"""Create a Keypair from a seed phrase using solana library."""
-	from solana.keypair import Keypair
+	if Keypair is None:
+		raise ImportError("Solana Keypair not available")
 	# This is a simplified stand-in; in real usage, use a proper derivation.
 	# For tests we only need that Keypair.from_seed is called.
 	return Keypair.from_seed(seed_phrase.encode()[:32].ljust(32, b"\0"))
@@ -241,8 +247,8 @@ def load_or_create() -> dict:
 
 def get_wallet() -> "Keypair":
 	"""Return a Keypair loaded from ``SOLANA_PRIVATE_KEY`` env variable."""
-	from solana.keypair import Keypair
-
+	if Keypair is None:
+		raise ImportError("Solana Keypair not available")
 	private_key = os.getenv("SOLANA_PRIVATE_KEY")
 	if not private_key:
 		raise ValueError("SOLANA_PRIVATE_KEY environment variable not set")

@@ -58,7 +58,7 @@ def set_admin_ids(admins: Optional[Union[Iterable[str], str, Any]]) -> None:
 def is_admin(chat_id: str) -> bool:
     """Return ``True`` if ``chat_id`` is allowed to issue commands."""
     if not _admin_ids:
-        return True
+        return True  # No admin IDs set means no restrictions
     return str(chat_id) in _admin_ids
 
 
@@ -155,16 +155,8 @@ class TelegramNotifier:
         with self._lock:
             if self._disabled:
                 return None
-            # Import at call-time so tests patching crypto_bot.utils.telegram.send_message work reliably
-            try:
-                from importlib import import_module
-                mod = import_module("crypto_bot.utils.telegram")
-                send_fn = getattr(mod, "send_message", None)
-            except Exception:
-                send_fn = None
-            if send_fn is None:
-                return None
-            err = send_fn(self.token, self.chat_id, text)
+            # Use the local send_message function directly
+            err = send_message(self.token, self.chat_id, text)
             if err is not None:
                 self._disabled = True
                 logger.error(

@@ -40,7 +40,7 @@ def test_send_message_async_no_warning(monkeypatch):
     calls = {}
 
     class DummyBot:
-        def __init__(self, token):
+        def __init__(self, token, request=None):
             calls["token"] = token
 
         async def send_message(self, chat_id, text):
@@ -61,7 +61,7 @@ def test_send_message_async_no_warning(monkeypatch):
 
 def test_send_message_exception_logged(monkeypatch, tmp_path, caplog):
     class DummyBot:
-        def __init__(self, token):
+        def __init__(self, token, request=None):
             pass
 
         def send_message(self, chat_id, text):
@@ -84,7 +84,7 @@ def test_send_message_exception_logged(monkeypatch, tmp_path, caplog):
 
 def test_send_message_async_exception_logged(monkeypatch, tmp_path, caplog):
     class DummyBot:
-        def __init__(self, token):
+        def __init__(self, token, request=None):
             pass
 
         async def send_message(self, chat_id, text):
@@ -106,7 +106,7 @@ def test_send_message_async_exception_logged(monkeypatch, tmp_path, caplog):
     with caplog.at_level(logging.ERROR):
         err = asyncio.run(runner())
 
-    assert err is None
+    assert err is None  # For async operations, error is logged but None is returned
     assert any("boom" in r.getMessage() for r in caplog.records)
 
 

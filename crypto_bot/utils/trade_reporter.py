@@ -14,14 +14,60 @@ logger = setup_logger(__name__, LOG_DIR / "bot.log")
 class TradeReporter:
     """Minimal reporter wrapper used by tests to ensure interface exists."""
 
-    def __init__(self, notifier: TelegramNotifier):
+    def __init__(self, notifier: TelegramNotifier = None, telegram_enabled: bool = True):
         self.notifier = notifier
+        self.telegram_enabled = telegram_enabled
 
-    def report_entry(self, symbol: str, strategy: str, score: float, direction: str) -> Optional[str]:
-        return report_entry(self.notifier, symbol, strategy, score, direction)
+    def report_entry(self, symbol_or_trade, strategy: str = None, score: float = None, direction: str = None) -> Optional[str]:
+        """Report a trade entry. Can be called with individual params or trade dict."""
+        if not self.telegram_enabled or not self.notifier:
+            return None
+        
+        if isinstance(symbol_or_trade, dict):
+            # Called with trade dict - use the format method
+            message = self._format_entry_message(symbol_or_trade)
+            return self.notifier.notify(message)
+        else:
+            # Called with individual parameters - use entry_summary
+            symbol = symbol_or_trade
+            strategy = strategy or 'Unknown'
+            score = score or 0.0
+            direction = direction or 'Unknown'
+            return self.notifier.notify(entry_summary(symbol, strategy, score, direction))
 
-    def report_exit(self, symbol: str, strategy: str, pnl: float, direction: str) -> Optional[str]:
-        return report_exit(self.notifier, symbol, strategy, pnl, direction)
+    def report_exit(self, symbol_or_trade, strategy: str = None, pnl: float = None, direction: str = None) -> Optional[str]:
+        """Report a trade exit. Can be called with individual params or trade dict."""
+        if not self.telegram_enabled or not self.notifier:
+            return None
+        
+        if isinstance(symbol_or_trade, dict):
+            # Called with trade dict - use the format method
+            message = self._format_exit_message(symbol_or_trade)
+            return self.notifier.notify(message)
+        else:
+            # Called with individual parameters - use exit_summary
+            symbol = symbol_or_trade
+            strategy = strategy or 'Unknown'
+            pnl = pnl or 0.0
+            direction = direction or 'Unknown'
+            return self.notifier.notify(exit_summary(symbol, strategy, pnl, direction))
+
+    def _format_entry_message(self, trade: dict) -> str:
+        """Format entry message from trade data."""
+        symbol = trade.get('symbol', 'Unknown')
+        side = trade.get('side', 'Unknown').upper()
+        amount = trade.get('amount', 0)
+        price = trade.get('price', 0)
+        return f"Entering {side} on {symbol}: {amount} @ ${price}"
+
+    def _format_exit_message(self, trade: dict) -> str:
+        """Format exit message from trade data."""
+        symbol = trade.get('symbol', 'Unknown')
+        side = trade.get('side', 'Unknown').upper()
+        amount = trade.get('amount', 0)
+        price = trade.get('price', 0)
+        pnl = trade.get('pnl', 0)
+        return f"Exiting {side} on {symbol}: {amount} @ ${price} | PnL: ${pnl}"
 
 
 def entry_summary(symbol: str, strategy: str, score: float, direction: str) -> str:
