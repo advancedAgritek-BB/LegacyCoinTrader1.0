@@ -48,10 +48,12 @@ async def monitor_loop(
                     if paper_wallet is not None:
                         balance = getattr(paper_wallet, "balance", None)
                     elif hasattr(exchange, "fetch_balance"):
-                        if asyncio.iscoroutinefunction(getattr(exchange, "fetch_balance")):
-                            bal = await exchange.fetch_balance()
+                        # Try calling fetch_balance and check if it returns a coroutine
+                        bal_result = exchange.fetch_balance()
+                        if asyncio.iscoroutine(bal_result):
+                            bal = await bal_result
                         else:
-                            bal = await asyncio.to_thread(exchange.fetch_balance)
+                            bal = bal_result
                         balance = bal.get("USDT", {}).get("free", 0) if isinstance(bal.get("USDT"), dict) else bal.get("USDT", 0)
                 except Exception:
                     pass
@@ -125,10 +127,12 @@ async def trade_stats_lines(exchange: Any, trade_file: Path = TRADE_FILE) -> Lis
     prices: Dict[str, float] = {}
     for sym in symbols:
         try:
-            if asyncio.iscoroutinefunction(getattr(exchange, "fetch_ticker", None)):
-                ticker = await exchange.fetch_ticker(sym)
+            # Try calling fetch_ticker and check if it returns a coroutine
+            ticker_result = exchange.fetch_ticker(sym)
+            if asyncio.iscoroutine(ticker_result):
+                ticker = await ticker_result
             else:
-                ticker = await asyncio.to_thread(exchange.fetch_ticker, sym)
+                ticker = ticker_result
             prices[sym] = float(ticker.get("last") or ticker.get("close") or 0.0)
         except Exception:
             prices[sym] = 0.0

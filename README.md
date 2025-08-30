@@ -25,6 +25,16 @@ This project provides a modular hybrid cryptocurrency trading bot capable of ope
 * **Backtesting module** with PnL, drawdown and Sharpe metrics
 * **Utility functions** automatically handle synchronous or asynchronous exchange clients
 
+### 🚀 Performance Optimization Features
+
+* **Dynamic Memory Management**: Intelligent memory monitoring and cache optimization
+* **Adaptive Concurrency Control**: Dynamic concurrency limits based on performance metrics
+* **Smart Rate Limiting**: Adaptive rate limiting with exponential backoff
+* **Intelligent Caching**: Hit-rate based cache sizing and optimization
+* **Comprehensive Performance Monitoring**: Real-time metrics, alerts, and reporting
+* **Database Integration**: Optimized database operations with connection pooling
+* **Performance Benchmarks**: Built-in performance testing and optimization tools
+
 On-chain DEX execution submits real transactions when not running in dry-run mode.
 
 ## Regime Classifier
@@ -166,6 +176,54 @@ This starts all services (trading bot, web dashboard, Telegram bot) in one comma
 - **Real-time monitoring**: Console shows wallet balance and active trades
 - **Web dashboard**: Monitor performance at `http://localhost:5000`
 - **Telegram control**: Use `/menu` for interactive bot control
+
+### 🔧 Performance Configuration
+
+The bot includes comprehensive performance optimization features that can be configured in `crypto_bot/config.yaml`:
+
+#### Memory Management
+```yaml
+performance:
+  memory:
+    max_memory_usage_pct: 75.0  # Maximum memory usage before optimization
+    adaptive_cache_sizing: true  # Enable adaptive cache sizing
+    memory_pressure_threshold: 80.0  # Memory pressure threshold for alerts
+    gc_threshold: 70.0  # Garbage collection threshold
+```
+
+#### Concurrency Control
+```yaml
+performance:
+  concurrency:
+    adaptive_concurrency: true  # Enable adaptive concurrency control
+    min_concurrent_requests: 1  # Minimum concurrent requests
+    max_concurrent_requests: 20  # Maximum concurrent requests
+    success_rate_threshold: 0.8  # Success rate threshold for adjustments
+    response_time_threshold: 1.0  # Response time threshold in seconds
+```
+
+#### Rate Limiting
+```yaml
+performance:
+  rate_limiting:
+    adaptive_rate_limiting: true  # Enable adaptive rate limiting
+    base_request_delay: 1.0  # Base delay between requests in seconds
+    max_request_delay: 10.0  # Maximum delay between requests
+    error_backoff_multiplier: 2.0  # Exponential backoff multiplier
+    max_requests_per_minute: 10  # Maximum requests per minute
+```
+
+#### Performance Monitoring
+```yaml
+performance:
+  monitoring:
+    enable_performance_monitoring: true  # Enable performance monitoring
+    metrics_export_interval: 300  # Metrics export interval in seconds
+    alert_enabled: true  # Enable performance alerts
+    performance_log_level: "INFO"  # Performance logging level
+```
+
+For detailed performance optimization information, see [PERFORMANCE.md](PERFORMANCE.md).
 
 ### 🔄 Configuration Reload
 

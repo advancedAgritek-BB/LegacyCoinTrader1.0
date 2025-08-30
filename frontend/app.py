@@ -18,6 +18,11 @@ from pathlib import Path
 import os
 import signal
 
+try:
+    from dotenv import dotenv_values
+except ImportError:
+    dotenv_values = None
+
 from crypto_bot.utils.logger import LOG_DIR
 import subprocess
 import json
@@ -27,7 +32,7 @@ import yaml
 import requests
 from crypto_bot import log_reader
 from crypto_bot import ml_signal_model as ml
-from . import utils
+import frontend.utils as utils
 
 app = Flask(__name__)
 
@@ -35,6 +40,15 @@ app = Flask(__name__)
 bot_proc = None
 bot_start_time = None
 watch_thread = None
+
+# Context processor to make bot status available to all templates
+@app.context_processor
+def inject_bot_status():
+    return {
+        'running': is_running(),
+        'mode': load_execution_mode(),
+        'uptime': get_uptime()
+    }
 LOG_FILE = LOG_DIR / 'bot.log'
 STATS_FILE = LOG_DIR / 'strategy_stats.json'
 SCAN_FILE = LOG_DIR / 'asset_scores.json'
@@ -44,6 +58,16 @@ ERROR_FILE = LOG_DIR / 'errors.log'
 CONFIG_FILE = Path('crypto_bot/config.yaml')
 REGIME_FILE = LOG_DIR / 'regime_history.txt'
 POSITIONS_FILE = LOG_DIR / 'positions.log'
+
+# Load environment variables from .env file
+ENV_FILE = Path('.env')
+if ENV_FILE.exists() and dotenv_values:
+    print("Loading environment variables from .env file")
+    env_vars = dotenv_values(str(ENV_FILE))
+    os.environ.update(env_vars)
+    print(f"Loaded {len(env_vars)} environment variables")
+else:
+    print("No .env file found or dotenv not available")
 
 
 def stop_conflicting_bots() -> None:
@@ -69,8 +93,15 @@ def check_existing_bot() -> bool:
     try:
         import psutil
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-            if proc.info['cmdline'] and 'crypto_bot.main' in ' '.join(proc.info['cmdline']):
-                return True
+            if proc.info['cmdline']:
+                cmdline_str = ' '.join(proc.info['cmdline'])
+                # Check for various bot startup patterns
+                if any(pattern in cmdline_str for pattern in [
+                    'crypto_bot.main',
+                    'start_bot_noninteractive.py',
+                    'start_bot_auto.py'
+                ]):
+                    return True
         return False
     except ImportError:
         # psutil not available, use basic check
@@ -98,7 +129,12 @@ def watch_bot() -> None:
 
 def is_running() -> bool:
     """Return True if the bot process is running."""
-    return utils.is_running(bot_proc)
+    # Check if we have a tracked subprocess
+    if bot_proc and bot_proc.poll() is None:
+        return True
+
+    # Also check for existing bot processes
+    return check_existing_bot()
 
 
 def set_execution_mode(mode: str) -> None:
@@ -113,20 +149,57 @@ def load_execution_mode() -> str:
 
 def get_paper_wallet_balance() -> float:
     """Get paper wallet balance from config."""
-    paper_wallet_config = LOG_DIR / 'paper_wallet.yaml'
-    if paper_wallet_config.exists():
-        with open(paper_wallet_config) as f:
-            config = yaml.safe_load(f) or {}
-            return config.get('initial_balance', 10000.0)
+    # Try multiple possible paths for the paper wallet config (same as main bot)
+    possible_paths = [
+        Path("crypto_bot/paper_wallet_config.yaml"),  # Relative to current directory
+        Path(__file__).parent.parent / "paper_wallet_config.yaml",  # Relative to frontend/app.py
+        Path.cwd() / "crypto_bot" / "paper_wallet_config.yaml",  # Relative to working directory
+        LOG_DIR / 'paper_wallet.yaml',  # Legacy location (fallback)
+    ]
+    
+    for config_path in possible_paths:
+        if config_path.exists():
+            try:
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f) or {}
+                    balance = config.get('initial_balance', 10000.0)
+                    print(f"Frontend loaded paper wallet balance from {config_path}: ${balance:.2f}")
+                    return balance
+            except Exception as e:
+                print(f"Frontend failed to read paper wallet config {config_path}: {e}")
+                continue
+    
+    print("Frontend: No paper wallet config found, using default balance: $10000.0")
     return 10000.0  # Default balance
 
 
 def set_paper_wallet_balance(balance: float) -> None:
     """Set paper wallet balance in config."""
-    paper_wallet_config = LOG_DIR / 'paper_wallet.yaml'
+    # Write to the same config file that the main bot reads from
+    primary_config_path = Path("crypto_bot/paper_wallet_config.yaml")
+    
+    # Also write to the legacy location for backward compatibility
+    legacy_config_path = LOG_DIR / 'paper_wallet.yaml'
+    
     config = {'initial_balance': balance}
-    with open(paper_wallet_config, 'w') as f:
-        yaml.dump(config, f)
+    
+    # Write to primary location
+    try:
+        primary_config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(primary_config_path, 'w') as f:
+            yaml.dump(config, f)
+        print(f"Frontend wrote paper wallet balance to {primary_config_path}: ${balance:.2f}")
+    except Exception as e:
+        print(f"Frontend failed to write to primary config {primary_config_path}: {e}")
+    
+    # Write to legacy location for backward compatibility
+    try:
+        legacy_config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(legacy_config_path, 'w') as f:
+            yaml.dump(config, f)
+        print(f"Frontend wrote paper wallet balance to legacy config {legacy_config_path}: ${balance:.2f}")
+    except Exception as e:
+        print(f"Frontend failed to write to legacy config {legacy_config_path}: {e}")
 
 
 def get_open_positions() -> list:
@@ -272,13 +345,12 @@ def index():
     # Final fallback to weights.json if no allocation in config
     if not allocation and (LOG_DIR / 'weights.json').exists():
         with open(LOG_DIR / 'weights.json') as f:
-            allocation = json.load(f)
+            weights_data = json.load(f)
+            # Convert decimal weights to percentages for consistency
+            allocation = {strategy: weight * 100 for strategy, weight in weights_data.items()}
     
     # Get paper wallet balance (always show wallet balance)
     paper_wallet_balance = get_paper_wallet_balance()
-    
-    # Get open positions
-    open_positions = get_open_positions()
     
     # Get open positions
     open_positions = get_open_positions()
@@ -322,22 +394,108 @@ def start_bot():
     mode = (
         request.json.get('mode', 'dry_run') if request.is_json else request.form.get('mode', 'dry_run')
     )
+    print(f"Starting bot with mode: {mode}")
     set_execution_mode(mode)
-    status = 'running'
-    if not is_running() and not check_existing_bot():
+    
+    # Check if we have a tracked subprocess running
+    if utils.is_running(bot_proc):
+        print("Bot subprocess is already running")
+        return jsonify({
+            'status': 'already_running',
+            'running': True,
+            'uptime': get_uptime(),
+            'mode': mode,
+        })
+
+    # Check if there's another bot process running
+    if check_existing_bot():
+        print("Another bot process detected, sending start command")
+        try:
+            from crypto_bot.utils.logger import LOG_DIR
+            control_file = LOG_DIR / "bot_control.json"
+            with open(control_file, 'w') as f:
+                json.dump({"command": "start"}, f)
+
+            # Set start time if not already set (for existing processes)
+            global bot_start_time
+            if bot_start_time is None:
+                bot_start_time = time.time()
+
+            return jsonify({
+                'status': 'started',
+                'running': True,
+                'uptime': get_uptime(),
+                'mode': mode,
+            })
+        except Exception as e:
+            print(f"Error sending start command: {e}")
+            return jsonify({
+                'status': f'error: {e}',
+                'running': False,
+                'uptime': get_uptime(),
+                'mode': mode,
+            })
+    
+    # Start new bot process
+    print("Starting new bot process")
+    try:
         venv_python = Path(__file__).parent.parent / 'venv' / 'bin' / 'python3'
         bot_script = Path(__file__).parent.parent / 'start_bot_noninteractive.py'
-        bot_proc = subprocess.Popen([str(venv_python), str(bot_script)])
+
+        print(f"Using Python: {venv_python}")
+        print(f"Using script: {bot_script}")
+
+        if not venv_python.exists():
+            print(f"Python executable not found: {venv_python}")
+            return jsonify({
+                'status': 'error: Python executable not found',
+                'running': False,
+                'uptime': get_uptime(),
+                'mode': mode,
+            })
+
+        if not bot_script.exists():
+            print(f"Bot script not found: {bot_script}")
+            return jsonify({
+                'status': 'error: Bot script not found',
+                'running': False,
+                'uptime': get_uptime(),
+                'mode': mode,
+            })
+
+        # Pass environment variables to subprocess
+        env = os.environ.copy()
+        bot_proc = subprocess.Popen([str(venv_python), str(bot_script)], env=env)
         bot_start_time = time.time()
-        status = 'started'
-    elif check_existing_bot():
-        status = 'conflict'
-    return jsonify({
-        'status': status,
-        'running': True,
-        'uptime': get_uptime(),
-        'mode': mode,
-    })
+
+        # Wait a moment to see if the process starts successfully
+        time.sleep(1)
+
+        if bot_proc.poll() is None:
+            print("Bot process started successfully")
+            return jsonify({
+                'status': 'started',
+                'running': True,
+                'uptime': get_uptime(),
+                'mode': mode,
+            })
+        else:
+            print(f"Bot process failed to start, return code: {bot_proc.returncode}")
+            return jsonify({
+                'status': f'error: Bot process failed to start (return code: {bot_proc.returncode})',
+                'running': False,
+                'uptime': get_uptime(),
+                'mode': mode,
+            })
+            
+    except Exception as e:
+        print(f"Error starting bot: {e}")
+        return jsonify({
+            'status': f'error: {e}',
+            'running': False,
+            'uptime': get_uptime(),
+            'mode': mode,
+        })
 
 
 @app.route('/stop')
@@ -356,12 +514,24 @@ def stop_bot():
     """Stop the trading bot and return JSON status."""
     global bot_proc, bot_start_time
     status = 'not_running'
-    if is_running():
+    
+    # Send stop command to running bot if it exists
+    if check_existing_bot():
+        try:
+            from crypto_bot.utils.logger import LOG_DIR
+            control_file = LOG_DIR / "bot_control.json"
+            with open(control_file, 'w') as f:
+                json.dump({"command": "stop"}, f)
+            status = 'stopped'
+        except Exception as e:
+            status = f'error: {e}'
+    elif is_running():
         bot_proc.terminate()
         bot_proc.wait()
         status = 'stopped'
-    bot_proc = None
-    bot_start_time = None
+        bot_proc = None
+        bot_start_time = None
+    
     return jsonify({
         'status': status,
         'running': False,
@@ -475,7 +645,9 @@ def dashboard():
     # Final fallback to weights.json if no allocation in config
     if not allocation and (LOG_DIR / 'weights.json').exists():
         with open(LOG_DIR / 'weights.json') as f:
-            allocation = json.load(f)
+            weights_data = json.load(f)
+            # Convert decimal weights to percentages for consistency
+            allocation = {strategy: weight * 100 for strategy, weight in weights_data.items()}
     
     regimes = []
     if REGIME_FILE.exists():
@@ -617,9 +789,16 @@ def save_config_settings():
 def refresh_config():
     """Refresh configuration by reloading from files."""
     try:
-        # This endpoint can be used to reload configuration without restarting the bot
-        # For now, we'll just return success since the config is loaded on each request
-        return jsonify({'status': 'success', 'message': 'Configuration refreshed successfully'})
+        # Send reload command to running bot if it exists
+        if check_existing_bot():
+            from crypto_bot.utils.logger import LOG_DIR
+            control_file = LOG_DIR / "bot_control.json"
+            with open(control_file, 'w') as f:
+                json.dump({"command": "reload"}, f)
+            return jsonify({'status': 'success', 'message': 'Reload command sent to bot'})
+        else:
+            # Bot not running, just return success
+            return jsonify({'status': 'success', 'message': 'Configuration refreshed successfully'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Error refreshing configuration: {str(e)}'}), 500
 
@@ -925,7 +1104,9 @@ def api_dashboard_metrics():
         # Final fallback to weights.json if no allocation in config
         if not allocation and (LOG_DIR / 'weights.json').exists():
             with open(LOG_DIR / 'weights.json') as f:
-                allocation = json.load(f)
+                weights_data = json.load(f)
+                # Convert decimal weights to percentages for consistency
+                allocation = {strategy: weight * 100 for strategy, weight in weights_data.items()}
         
         # Get asset scores
         asset_scores = {}
@@ -1134,6 +1315,17 @@ def api_clear_old_positions():
         return jsonify({'success': False, 'error': str(e)})
 
 
+@app.route('/test')
+def test():
+    """Simple test endpoint to verify the Flask app is running."""
+    return jsonify({
+        'status': 'ok',
+        'message': 'Flask app is running',
+        'timestamp': time.time(),
+        'debug': True
+    })
+
+
 @app.route('/debug_market_sell')
 def debug_market_sell():
     """Debug page for testing market sell functionality."""
@@ -1141,8 +1333,12 @@ def debug_market_sell():
 
 
 if __name__ == '__main__':
+    print("=== FLASK APP STARTUP DEBUG ===")
+    print("Starting Flask app...")
+    
     watch_thread = threading.Thread(target=watch_bot, daemon=True)
     watch_thread.start()
+    print("Watch thread started")
     
     # Try to find an available port starting from 8000
     import socket
@@ -1161,4 +1357,5 @@ if __name__ == '__main__':
     # and find an available port starting from 8000 (avoiding macOS ControlCenter on port 5000)
     port = int(os.environ.get('FLASK_RUN_PORT', find_free_port()))
     print(f"Starting Flask app on port {port}")
+    print("=== END FLASK APP STARTUP DEBUG ===")
     app.run(host='0.0.0.0', port=port, debug=False)

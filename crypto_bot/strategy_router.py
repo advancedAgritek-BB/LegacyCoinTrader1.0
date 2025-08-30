@@ -433,12 +433,12 @@ def evaluate_regime(
         def wrapped(df_p: pd.DataFrame, cfg_p=None):
             telemetry.inc("router.signals_checked")
             try:
-                res = fn(df_p, cfg_p)
-            except TypeError:
-                res = fn(df_p)
-            except asyncio.TimeoutError:
-                telemetry.inc("router.signal_timeout")
-                raise
+                from crypto_bot.utils.strategy_utils import safe_strategy_execution
+                timeout_seconds = cfg_dict.get("strategy_timeout_seconds", 10)
+                res = safe_strategy_execution(fn, df_p, cfg_p, timeout_seconds)
+            except Exception as e:
+                logger.warning(f"Strategy {fn.__name__} failed: {e}")
+                return 0.0, "none"
             telemetry.inc("router.signal_returned")
             return res
 

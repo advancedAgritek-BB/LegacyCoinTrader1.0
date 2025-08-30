@@ -13,15 +13,38 @@ def _read_trades(path: Union[Path, str]) -> pd.DataFrame:
     if not file.exists():
         return pd.DataFrame(columns=["symbol", "side", "amount", "price", "timestamp"])
 
-    cols = ["symbol", "side", "amount", "price", "timestamp", "closed"]
-    df = pd.read_csv(
-        file,
-        header=None,
-        names=cols,
-        engine="python",
-        on_bad_lines=lambda row: row[: len(cols)],
-    )
-    df = df.iloc[:, : len(cols)]
+    try:
+        # First try to read with header detection
+        df = pd.read_csv(file, engine="python")
+        
+        # Check if the first row looks like a header (contains string values)
+        if not df.empty and df.iloc[0].dtype == 'object':
+            # First row is likely a header, check if it contains expected column names
+            first_row = df.iloc[0].astype(str).str.lower()
+            if any(col in first_row.values for col in ['symbol', 'side', 'amount', 'price', 'timestamp']):
+                # This is a header row, skip it
+                df = df.iloc[1:].reset_index(drop=True)
+        
+        # Ensure we have the expected columns
+        expected_cols = ["symbol", "side", "amount", "price", "timestamp"]
+        if not df.empty and len(df.columns) >= len(expected_cols):
+            df = df.iloc[:, :len(expected_cols)]
+            df.columns = expected_cols
+        else:
+            # Fallback to reading without header
+            df = pd.read_csv(
+                file,
+                header=None,
+                names=expected_cols,
+                engine="python",
+                on_bad_lines=lambda row: row[: len(expected_cols)],
+            )
+            df = df.iloc[:, : len(expected_cols)]
+            
+    except Exception:
+        # If all else fails, return empty DataFrame
+        df = pd.DataFrame(columns=["symbol", "side", "amount", "price", "timestamp"])
+    
     return df
 
 

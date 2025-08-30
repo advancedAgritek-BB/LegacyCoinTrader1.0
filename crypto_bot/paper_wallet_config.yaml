@@ -1,6 +1,1 @@
-# Paper Wallet Configuration for Dry Run Mode
-# This file stores the initial balance for paper trading
-
 initial_balance: 10000.0
-max_open_trades: 10
-allow_short: true

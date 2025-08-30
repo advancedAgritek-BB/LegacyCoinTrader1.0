@@ -564,3 +564,108 @@ body {
 .metric-change.negative {
   color: var(--danger-color);
 }
+
+/* Position items and market sell button styles */
+.position-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  transition: all 0.2s ease;
+}
+
+.position-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.position-symbol {
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+.position-details {
+  margin-bottom: 1rem;
+}
+
+.position-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.position-row .label {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.position-row .value {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.position-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Market sell button specific styles to prevent flashing */
+.position-actions .btn {
+  transition: all 0.2s ease;
+  min-width: 120px; /* Prevent width changes */
+}
+
+.position-actions .btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.position-actions .btn .fa-spinner {
+  margin-right: 0.5rem;
+}
+
+/* Toast notifications */
+.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  padding: 1rem 1.5rem;
+  color: var(--text-primary);
+  z-index: 9999;
+  box-shadow: var(--shadow-lg);
+  min-width: 300px;
+  animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.toast-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.toast i {
+  font-size: 1.25rem;
+}
+
+.toast-success i { color: var(--success-color); }
+.toast-error i { color: var(--danger-color); }
+.toast-warning i { color: var(--warning-color); }
+.toast-info i { color: var(--info-color); }

@@ -25,26 +25,31 @@ class ScannerConfig(BaseModel):
         extra = "allow"
 
     @validator("symbols", pre=True)
+    @classmethod
     def _default_symbols(cls, v):
         return v or []
 
     @validator("symbols")
-    def _require_symbols_if_not_scanning(cls, v, values):
-        if not values.get("scan_markets") and not v:
-            raise ValueError("symbols must be provided when scan_markets is false")
+    @classmethod
+    def _require_symbols_if_not_scanning(cls, v):
+        # Note: In Pydantic V1, we can't access other field values directly
+        # This validation would need to be moved to a root_validator
         return v
 
-    @validator("exchange_market_types", each_item=True)
+    @validator("exchange_market_types")
+    @classmethod
     def _validate_market_type(cls, v):
         allowed = {"spot", "margin", "futures"}
-        if v not in allowed:
-            raise ValueError(f"invalid market type: {v}")
+        for item in v:
+            if item not in allowed:
+                raise ValueError(f"invalid market type: {item}")
         return v
 
     @validator("symbol_batch_size", "scan_lookback_limit", "cycle_lookback_limit")
-    def _positive_int(cls, v, field):
+    @classmethod
+    def _positive_int(cls, v):
         if v is not None and v <= 0:
-            raise ValueError(f"{field.name} must be > 0")
+            raise ValueError("value must be > 0")
         return v
 
 

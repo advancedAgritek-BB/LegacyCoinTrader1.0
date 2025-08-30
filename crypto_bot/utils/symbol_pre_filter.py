@@ -7,7 +7,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Iterable, List, Dict
+from typing import Iterable, List, Dict, Optional, Tuple
 
 import ccxt
 
@@ -509,6 +509,30 @@ async def filter_symbols(
     except Exception:
         raise
 
+    # Simple debug: log what we got back
+    logger.info(f"Ticker data received: {len(data)} tickers for {len(symbols)} symbols")
+    if len(data) == 0:
+        logger.error(f"No ticker data received - this is the root cause!")
+        logger.error(f"Exchange: {type(exchange).__name__}")
+        logger.error(f"Symbols requested: {len(symbols)}")
+        logger.error(f"Check exchange connection and API configuration")
+        
+        # Test basic exchange functionality
+        try:
+            if hasattr(exchange, 'fetch_ticker'):
+                test_symbol = "BTC/USD"
+                logger.info(f"Testing basic ticker fetch for {test_symbol}")
+                if asyncio.iscoroutinefunction(exchange.fetch_ticker):
+                    test_ticker = await exchange.fetch_ticker(test_symbol)
+                    logger.info(f"Basic ticker fetch successful: {test_ticker.get('last', 'N/A')}")
+                else:
+                    logger.info("fetch_ticker exists but is not async")
+            else:
+                logger.error("Exchange does not have fetch_ticker method")
+        except Exception as e:
+            logger.error(f"Basic ticker fetch failed: {e}")
+            logger.error(f"This confirms an exchange connection problem")
+
     # map of ids returned by Kraken to human readable symbols
     id_map: Dict[str, str] = {}
     request_map = {_norm_symbol(s.replace("/", "")): _norm_symbol(s) for s in symbols}
@@ -574,6 +598,7 @@ async def filter_symbols(
                     break
         if not symbol:
             logger.warning("Unable to map ticker id %s to requested symbol", pair_id)
+            telemetry.inc("scan.unmapped_ticker_id")
             continue
 
         vol_usd, change_pct, spread_pct = _parse_metrics(symbol, ticker)
@@ -588,6 +613,7 @@ async def filter_symbols(
         local_min_volume = min_volume * 0.5 if symbol.endswith("/USDC") else min_volume
         if cache_map and vol_usd < local_min_volume * vol_mult:
             skipped += 1
+            telemetry.inc("scan.skip_low_volume_uncached")
             continue
         if vol_usd >= local_min_volume and spread_pct <= max_spread:
             metrics.append((symbol, vol_usd, change_pct, spread_pct))
@@ -605,12 +631,14 @@ async def filter_symbols(
         cached = cached_data.get(sym) or cached_data.get(norm_sym)
         if cached is None:
             skipped += 1
+            telemetry.inc("scan.skip_no_cache")
             continue
         vol_usd, spread_pct, _ = cached
         seen.add(norm_sym)
         local_min_volume = min_volume * 0.5 if norm_sym.endswith("/USDC") else min_volume
         if cache_map and vol_usd < local_min_volume * vol_mult:
             skipped += 1
+            telemetry.inc("scan.skip_low_volume_uncached")
             continue
         if vol_usd >= local_min_volume and spread_pct <= max_spread:
             metrics.append((norm_sym, vol_usd, 0.0, spread_pct))
@@ -629,6 +657,10 @@ async def filter_symbols(
             metrics.append((sym, vol_usd, change_pct, spread_pct))
         else:
             skipped += 1
+            if spread_pct > max_spread:
+                telemetry.inc("scan.skip_spread")
+            if vol_usd < vol_cut:
+                telemetry.inc("scan.skip_volume_percentile")
 
     if metrics and pct:
         threshold = np.percentile([abs(m[2]) for m in metrics], pct)
@@ -673,6 +705,7 @@ async def filter_symbols(
                 scored.append((sym, score))
             else:
                 skipped += 1
+                telemetry.inc("scan.skip_min_score")
     scored.sort(key=lambda x: x[1], reverse=True)
 
     corr_map: Dict[Tuple[str, str], float] = {}
@@ -734,7 +767,9 @@ async def filter_symbols(
             result.append((sym, score))
         else:
             skipped += 1
+            telemetry.inc("scan.skip_correlation")
 
+    telemetry.inc("scan.selected", len(result))
     telemetry.inc("scan.symbols_skipped", skipped)
     if cache_changed and cache_map is not None:
         try:

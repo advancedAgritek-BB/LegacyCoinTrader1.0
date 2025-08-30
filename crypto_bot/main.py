@@ -1,4 +1,3 @@
-from typing import Optional, Dict, List
 import os
 import asyncio
 import contextlib
@@ -8,26 +7,13 @@ from pathlib import Path
 from datetime import datetime
 from collections import deque, OrderedDict, defaultdict
 from dataclasses import dataclass, field
+from typing import Union, Optional
 import inspect
-import signal
 
 import aiohttp
 
 # Track WebSocket ping tasks
 WS_PING_TASKS: set[asyncio.Task] = set()
-
-# Global flag for graceful shutdown
-shutdown_requested = False
-
-def signal_handler(signum, frame):
-    """Handle shutdown signals gracefully."""
-    global shutdown_requested
-    logger.info(f"Received signal {signum}, initiating graceful shutdown...")
-    shutdown_requested = True
-
-# Set up signal handlers for graceful shutdown
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
 
 try:
     import ccxt  # type: ignore
@@ -40,11 +26,7 @@ import pandas as pd
 import numpy as np
 import yaml
 from dotenv import dotenv_values
-try:
-    from pydantic import ValidationError
-except Exception:  # pragma: no cover - fallback when pydantic missing
-    class ValidationError(Exception):
-        pass
+from pydantic import ValidationError
 
 from schema.scanner import (
     ScannerConfig,
@@ -53,7 +35,7 @@ from schema.scanner import (
 )
 
 from crypto_bot.utils.telegram import TelegramNotifier, send_test_message
-from crypto_bot.utils.trade_reporter import report_entry, report_exit
+from crypto_bot.utils.trade_reporter import report_entry
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 from crypto_bot.portfolio_rotator import PortfolioRotator
 from crypto_bot.wallet_manager import load_or_create
@@ -91,7 +73,7 @@ from crypto_bot.utils.market_loader import (
     fetch_order_book_async,
 )
 from crypto_bot.utils.eval_queue import build_priority_queue
-from crypto_bot.solana.scanner import get_solana_new_tokens
+from crypto_bot.solana import get_solana_new_tokens
 from crypto_bot.utils.symbol_utils import get_filtered_symbols, fix_symbol
 
 # Backwards compatibility for tests
@@ -157,11 +139,11 @@ TOTAL_ANALYSES = 0
 class SessionState:
     """Runtime session state shared across tasks."""
 
-    positions: Dict[str, dict] = field(default_factory=dict)
+    positions: dict[str, dict] = field(default_factory=dict)
     df_cache: dict[str, dict[str, pd.DataFrame]] = field(default_factory=dict)
     regime_cache: dict[str, dict[str, pd.DataFrame]] = field(default_factory=dict)
-    last_balance: Optional[float] = None
-    scan_task: Optional[asyncio.Task] = None
+    last_balance: Union[float, None] = None
+    scan_task: Union[asyncio.Task, None] = None
 
 
 def update_df_cache(
@@ -182,9 +164,9 @@ def update_df_cache(
         tf_cache.popitem(last=False)
 
 
-def compute_average_atr(symbols: List[str], df_cache: dict, timeframe: str) -> float:
+def compute_average_atr(symbols: list[str], df_cache: dict, timeframe: str) -> float:
     """Return the average ATR for symbols present in ``df_cache``."""
-    atr_values: List[float] = []
+    atr_values: list[float] = []
     tf_cache = df_cache.get(timeframe, {})
     for sym in symbols:
         df = tf_cache.get(sym)
@@ -195,7 +177,7 @@ def compute_average_atr(symbols: List[str], df_cache: dict, timeframe: str) -> f
 
 
 def is_market_pumping(
-    symbols: List[str], df_cache: dict, timeframe: str = "1h", lookback_hours: int = 24
+    symbols: list[str], df_cache: dict, timeframe: str = "1h", lookback_hours: int = 24
 ) -> bool:
     """Return ``True`` when the average % change over ``lookback_hours`` exceeds ~10%."""
 
@@ -205,7 +187,7 @@ def is_market_pumping(
 
     sec = timeframe_seconds(None, timeframe)
     candles = int(lookback_hours * 3600 / sec) if sec else 0
-    changes: List[float] = []
+    changes: list[float] = []
     for sym in symbols:
         df = tf_cache.get(sym)
         if df is None or df.empty or "close" not in df:
@@ -275,7 +257,7 @@ async def fetch_balance(exchange, paper_wallet, config):
         if asyncio.iscoroutinefunction(getattr(exchange, "fetch_balance", None)):
             bal = await exchange.fetch_balance()
         else:
-            bal = await asyncio.to_thread(exchange.fetch_balance)
+            bal = await asyncio.to_thread(exchange.fetch_balance_with_retry)
         return bal["USDT"]["free"] if isinstance(bal["USDT"], dict) else bal["USDT"]
     return paper_wallet.balance if paper_wallet else 0.0
 
@@ -440,7 +422,7 @@ def _emit_timing(
     ohlcv_t: float,
     analyze_t: float,
     total_t: float,
-    metrics_path: Optional[Path] = None,
+    metrics_path: Union[Path, None] = None,
     ohlcv_fetch_latency: float = 0.0,
     execution_latency: float = 0.0,
 ) -> None:
@@ -533,7 +515,7 @@ def maybe_reload_config(state: dict, config: dict) -> None:
 
 def _flatten_config(data: dict, parent: str = "") -> dict:
     """Flatten nested config keys to ENV_STYLE names."""
-    flat: Dict[str, str] = {}
+    flat: dict[str, str] = {}
     for key, value in data.items():
         new_key = f"{parent}_{key}" if parent else key
         if isinstance(value, dict):
@@ -642,7 +624,7 @@ async def initial_scan(
     exchange: object,
     config: dict,
     state: SessionState,
-    notifier: Optional[TelegramNotifier] = None,
+    notifier: Union[TelegramNotifier, None] = None,
 ) -> None:
     """Populate OHLCV and regime caches before trading begins."""
 
@@ -713,6 +695,7 @@ async def fetch_candidates(ctx: BotContext) -> None:
 
     try:
         symbols = await get_filtered_symbols(ctx.exchange, ctx.config)
+        logger.info(f"Symbol filtering completed: {len(symbols)} symbols passed filtering")
     finally:
         if pump:
             sf["min_volume_usd"] = orig_min_volume
@@ -720,7 +703,7 @@ async def fetch_candidates(ctx: BotContext) -> None:
 
     ctx.timing["symbol_time"] = time.perf_counter() - t0
 
-    solana_tokens: List[str] = []
+    solana_tokens: list[str] = []
     sol_cfg = ctx.config.get("solana_scanner", {})
     if sol_cfg.get("enabled"):
         try:
@@ -764,9 +747,9 @@ async def fetch_candidates(ctx: BotContext) -> None:
         ]
 
 
-async def scan_arbitrage(exchange: object, config: dict) -> List[str]:
+async def scan_arbitrage(exchange: object, config: dict) -> list[str]:
     """Return symbols with profitable Solana arbitrage opportunities."""
-    pairs: List[str] = config.get("arbitrage_pairs", [])
+    pairs: list[str] = config.get("arbitrage_pairs", [])
     if not pairs:
         return []
 
@@ -775,7 +758,7 @@ async def scan_arbitrage(exchange: object, config: dict) -> List[str]:
     except Exception:
         fetch_geckoterminal_ohlcv = None
 
-    gecko_prices: Dict[str, float] = {}
+    gecko_prices: dict[str, float] = {}
     if fetch_geckoterminal_ohlcv:
         for sym in pairs:
             try:
@@ -787,7 +770,7 @@ async def scan_arbitrage(exchange: object, config: dict) -> List[str]:
                 gecko_prices[sym] = price
 
     remaining = [s for s in pairs if s not in gecko_prices]
-    dex_prices: Dict[str, float] = gecko_prices.copy()
+    dex_prices: dict[str, float] = gecko_prices.copy()
     if remaining:
         try:
             from crypto_bot.solana import fetch_solana_prices
@@ -795,7 +778,7 @@ async def scan_arbitrage(exchange: object, config: dict) -> List[str]:
             fetch_solana_prices = None
         if fetch_solana_prices:
             dex_prices.update(await fetch_solana_prices(remaining))
-    results: List[str] = []
+    results: list[str] = []
     threshold = float(config.get("arbitrage_threshold", 0.0))
 
     for sym in pairs:
@@ -834,7 +817,7 @@ async def update_caches(ctx: BotContext) -> None:
     tf_minutes = int(
         pd.Timedelta(ctx.config.get("timeframe", "1h")).total_seconds() // 60
     )
-    limit = max(200, tf_minutes * 2)
+    limit = max(150, tf_minutes * 2)
     limit = int(ctx.config.get("cycle_lookback_limit") or limit)
 
     max_concurrent = ctx.config.get("max_concurrent_ohlcv")
@@ -1226,9 +1209,15 @@ async def execute_signals(ctx: BotContext) -> None:
         return
 
     # Prioritize by score
+    from crypto_bot.utils.telemetry import telemetry
+    initial = len(results)
     results = [r for r in results if not r.get("skip") and r.get("direction") != "none"]
+    filtered = initial - len(results)
+    if filtered > 0:
+        telemetry.inc("exec.filtered_non_actionable", filtered)
     if not results:
         logger.info("All signals filtered out - nothing actionable")
+        telemetry.inc("exec.no_actionable")
         return
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
     top_n = ctx.config.get("top_n_symbols", 3)
@@ -1238,10 +1227,12 @@ async def execute_signals(ctx: BotContext) -> None:
         logger.info("Analysis result: %s", candidate)
         if not ctx.position_guard or not ctx.position_guard.can_open(ctx.positions):
             logger.info("Max open trades reached; skipping remaining signals")
+            telemetry.inc("exec.blocked_max_open_trades")
             break
         sym = candidate["symbol"]
         if sym in ctx.positions:
             logger.info("Existing position for %s - skipping", sym)
+            telemetry.inc("exec.skip_existing_position")
             continue
 
         df = candidate["df"]
@@ -1251,6 +1242,7 @@ async def execute_signals(ctx: BotContext) -> None:
         allowed, reason = ctx.risk_manager.allow_trade(df, strategy)
         if not allowed:
             logger.info("Trade blocked for %s: %s", sym, reason)
+            telemetry.inc(f"exec.blocked_risk.{str(reason).strip().replace(' ', '_').lower()}")
             continue
 
         probs = candidate.get("probabilities", {})
@@ -1276,6 +1268,7 @@ async def execute_signals(ctx: BotContext) -> None:
         size = base_size * sentiment_boost
         if size <= 0:
             logger.info("Calculated size %.4f for %s - skipping", size, sym)
+            telemetry.inc("exec.blocked_zero_size")
             continue
 
         if not ctx.risk_manager.can_allocate(strategy, size, ctx.balance):
@@ -1285,11 +1278,13 @@ async def execute_signals(ctx: BotContext) -> None:
                 sym,
                 strategy,
             )
+            telemetry.inc("exec.blocked_insufficient_capital")
             continue
 
         side = direction_to_side(candidate["direction"])
         if side == "sell" and not ctx.config.get("allow_short", False):
             logger.info("Short selling disabled; skipping signal for %s", sym)
+            telemetry.inc("exec.blocked_short_disabled")
             continue
 
         # Execute trades asynchronously based on symbol type
@@ -1569,7 +1564,7 @@ async def _rotation_loop(
                 ):
                     bal = await exchange.fetch_balance()
                 else:
-                    bal = await asyncio.to_thread(exchange.fetch_balance)
+                    bal = await asyncio.to_thread(exchange.fetch_balance_with_retry)
                 current_balance = (
                     bal.get("USDT", {}).get("free", 0)
                     if isinstance(bal.get("USDT"), dict)
@@ -1701,10 +1696,10 @@ async def _main_impl() -> TelegramNotifier:
             )
         # Continue startup even if ccxt is missing for testing environments
 
-    if config.get("scan_markets", False) and not config.get("symbols"):
+    if config.get("scan_markets", False):
         attempt = 0
         delay = SYMBOL_SCAN_RETRY_DELAY
-        discovered: Optional[List[str]] = None
+        discovered: Union[list[str], None] = None
         while attempt < MAX_SYMBOL_SCAN_ATTEMPTS:
             start_scan = time.perf_counter()
             discovered = await load_kraken_symbols(
@@ -1736,17 +1731,29 @@ async def _main_impl() -> TelegramNotifier:
             delay = min(delay * 2, MAX_SYMBOL_SCAN_DELAY)
 
         if discovered:
-            config["symbols"] = discovered
+            # Combine discovered symbols with configured symbols instead of replacing
+            configured_symbols = config.get("symbols", [])
+            if configured_symbols:
+                # Merge discovered symbols with configured ones, avoiding duplicates
+                all_symbols = list(configured_symbols)
+                for sym in discovered:
+                    if sym not in all_symbols:
+                        all_symbols.append(sym)
+                config["symbols"] = all_symbols
+                logger.info(f"Combined {len(configured_symbols)} configured symbols with {len(discovered)} discovered symbols = {len(all_symbols)} total")
+            else:
+                # No configured symbols, use discovered ones
+                config["symbols"] = discovered
+                logger.info(f"Using {len(discovered)} discovered symbols")
         else:
             logger.error(
-                "No symbols discovered after %d attempts; aborting startup",
+                "No symbols discovered after %d attempts; using configured symbols only",
                 MAX_SYMBOL_SCAN_ATTEMPTS,
             )
             if status_updates:
                 notifier.notify(
-                    f"❌ Startup aborted after {MAX_SYMBOL_SCAN_ATTEMPTS} symbol scan attempts"
+                    f"⚠️ Symbol scan failed after {MAX_SYMBOL_SCAN_ATTEMPTS} attempts; using configured symbols only"
                 )
-            return notifier
 
     balance_threshold = config.get("balance_change_threshold", 0.01)
     previous_balance = 0.0
@@ -1759,18 +1766,25 @@ async def _main_impl() -> TelegramNotifier:
         previous_balance = new_balance
 
     try:
-        if asyncio.iscoroutinefunction(getattr(exchange, "fetch_balance", None)):
-            bal = await exchange.fetch_balance()
+        # Skip balance fetch in dry run mode - use paper wallet instead
+        if config.get("execution_mode") == "dry_run":
+            logger.info("Dry run mode detected - skipping exchange balance fetch")
+            init_bal = 0.0
+            last_balance = 0.0
+            previous_balance = 0.0
         else:
-            bal = await asyncio.to_thread(exchange.fetch_balance)
-        init_bal = (
-            bal.get("USDT", {}).get("free", 0)
-            if isinstance(bal.get("USDT"), dict)
-            else bal.get("USDT", 0)
-        )
-        log_balance(float(init_bal))
-        last_balance = float(init_bal)
-        previous_balance = float(init_bal)
+            if asyncio.iscoroutinefunction(getattr(exchange, "fetch_balance", None)):
+                bal = await exchange.fetch_balance()
+            else:
+                bal = await asyncio.to_thread(exchange.fetch_balance_with_retry)
+            init_bal = (
+                bal.get("USDT", {}).get("free", 0)
+                if isinstance(bal.get("USDT"), dict)
+                else bal.get("USDT", 0)
+            )
+            log_balance(float(init_bal))
+            last_balance = float(init_bal)
+            previous_balance = float(init_bal)
     except Exception as exc:  # pragma: no cover - network
         logger.error("Exchange API setup failed: %s", exc)
         if status_updates:
@@ -1800,15 +1814,59 @@ async def _main_impl() -> TelegramNotifier:
 
     paper_wallet = None
     if config.get("execution_mode") == "dry_run":
-        # Use default balance in non-interactive mode
-        if os.environ.get('NON_INTERACTIVE'):
-            start_bal = 10000.0
-            print(f"Using default paper trading balance: ${start_bal}")
-        else:
+        # Try to read from paper wallet config file first
+        # Check environment variable first
+        start_bal = 10000.0  # Default fallback
+        config_loaded = False
+        
+        # Check for environment variable
+        env_balance = os.getenv("PAPER_WALLET_BALANCE")
+        if env_balance:
             try:
-                start_bal = float(input("Enter paper trading balance in USDT: "))
-            except Exception:
-                start_bal = 1000.0
+                start_bal = float(env_balance)
+                logger.info(f"Loaded paper wallet balance from environment variable: ${start_bal:.2f}")
+                config_loaded = True
+            except ValueError:
+                logger.warning(f"Invalid PAPER_WALLET_BALANCE environment variable: {env_balance}")
+        
+        # If no environment variable, try main config file first
+        if not config_loaded and config.get("paper_wallet", {}).get("initial_balance"):
+            try:
+                start_bal = float(config["paper_wallet"]["initial_balance"])
+                logger.info(f"Loaded paper wallet balance from main config: ${start_bal:.2f}")
+                config_loaded = True
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Invalid paper wallet balance in main config: {e}")
+        
+        # If still no config loaded, try dedicated paper wallet config files
+        if not config_loaded:
+            possible_paths = [
+                Path("crypto_bot/paper_wallet_config.yaml"),  # Relative to current directory
+                Path(__file__).parent / "paper_wallet_config.yaml",  # Relative to main.py
+                Path.cwd() / "crypto_bot" / "paper_wallet_config.yaml",  # Relative to working directory
+                Path.home() / "Downloads" / "LegacyCoinTrader1.0" / "crypto_bot" / "paper_wallet_config.yaml",  # Absolute path fallback
+                Path("/Users/brandonburnette/Downloads/LegacyCoinTrader1.0/crypto_bot/paper_wallet_config.yaml"),  # Hardcoded fallback
+            ]
+            
+            for paper_wallet_config_path in possible_paths:
+                if paper_wallet_config_path.exists():
+                    try:
+                        import yaml
+                        with open(paper_wallet_config_path, 'r') as f:
+                            paper_config = yaml.safe_load(f) or {}
+                            start_bal = paper_config.get('initial_balance', 10000.0)
+                            logger.info(f"Loaded paper wallet balance from config {paper_wallet_config_path}: ${start_bal:.2f}")
+                            config_loaded = True
+                            break
+                    except Exception as e:
+                        logger.warning(f"Failed to read paper wallet config {paper_wallet_config_path}: {e}")
+                        continue
+        
+        if not config_loaded:
+            # Use default balance instead of prompting for user input on restart
+            logger.warning("No paper wallet config found, using default balance of $10,000")
+            start_bal = 10000.0
+        
         paper_wallet = PaperWallet(
             start_bal,
             config.get("max_open_trades", 1),
@@ -1836,7 +1894,7 @@ async def _main_impl() -> TelegramNotifier:
     state = {"running": True, "mode": mode}
     # Caches for OHLCV and regime data are stored on the session_state
     session_state = SessionState(last_balance=last_balance)
-    last_candle_ts: Dict[str, int] = {}
+    last_candle_ts: dict[str, int] = {}
 
     control_task = asyncio.create_task(console_control.control_loop(state))
     rotation_task = asyncio.create_task(
@@ -1849,7 +1907,7 @@ async def _main_impl() -> TelegramNotifier:
             check_balance_change,
         )
     )
-    solana_scan_task: Optional[asyncio.Task] = None
+    solana_scan_task: Union[asyncio.Task, None] = None
     if config.get("solana_scanner", {}).get("enabled"):
         solana_scan_task = asyncio.create_task(solana_scan_loop())
     print("Bot running. Type 'stop' to pause, 'start' to resume, 'quit' to exit.")
@@ -1896,8 +1954,6 @@ async def _main_impl() -> TelegramNotifier:
             pump_sniper_started = await start_pump_sniper_system(config)
             if pump_sniper_started:
                 logger.info("Advanced Pump Sniper System started successfully")
-
-
             else:
                 logger.warning("Advanced Pump Sniper System failed to start")
         except Exception as exc:
@@ -1933,10 +1989,6 @@ async def _main_impl() -> TelegramNotifier:
     ctx.paper_wallet = paper_wallet
     ctx.position_guard = position_guard
     ctx.balance = last_balance
-    
-    # High-priority sell request processor - will be started after context is ready
-    sell_processor_task = None
-    
     runner = PhaseRunner(
         [
             fetch_candidates,
@@ -1953,11 +2005,6 @@ async def _main_impl() -> TelegramNotifier:
 
     try:
         while True:
-            # Check for shutdown signal
-            if shutdown_requested:
-                logger.info("Shutdown requested, breaking main loop...")
-                break
-                
             maybe_reload_config(state, config)
             reload_config(
                 config,
@@ -1973,102 +2020,6 @@ async def _main_impl() -> TelegramNotifier:
                 await force_exit_all(ctx)
                 state["liquidate_all"] = False
 
-            # Start the high-priority sell request processor if not already started
-            if sell_processor_task is None:
-                async def process_sell_requests_loop():
-                    """Continuously process sell requests with high priority"""
-                    while True:
-                        try:
-                            sell_requests_file = LOG_DIR / 'sell_requests.json'
-                            if sell_requests_file.exists():
-                                with open(sell_requests_file, 'r') as f:
-                                    sell_requests = json.load(f)
-                                
-                                current_time = time.time()
-                                processed_requests = []
-                                unprocessed_requests = []
-                                
-                                for request in sell_requests:
-                                    request_age = current_time - request.get('timestamp', 0)
-                                    if request_age <= 60:  # 60 seconds old
-                                        symbol = request.get('symbol')
-                                        amount = request.get('amount')
-                                        
-                                        if symbol and amount and symbol in ctx.positions:
-                                            pos = ctx.positions[symbol]
-                                            sell_amount = min(float(amount), pos["size"])
-                                            
-                                            logger.info(f"Executing immediate sell request: {sell_amount} {symbol}")
-                                            
-                                            await cex_trade_async(
-                                                ctx.exchange,
-                                                ctx.ws_client,
-                                                symbol,
-                                                opposite_side(pos["side"]),
-                                                sell_amount,
-                                                ctx.notifier,
-                                                dry_run=ctx.config.get("execution_mode") == "dry_run",
-                                                use_websocket=ctx.config.get("use_websocket", False),
-                                                config=ctx.config,
-                                            )
-                                            
-                                            # Update paper wallet if in dry run mode
-                                            if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
-                                                try:
-                                                    tf = ctx.config.get("timeframe", "1h")
-                                                    tf_cache = ctx.df_cache.get(tf, {})
-                                                    df = tf_cache.get(symbol)
-                                                    exit_price = pos["entry_price"]
-                                                    if df is not None and not df.empty:
-                                                        exit_price = float(df["close"].iloc[-1])
-                                                    
-                                                    pnl = ctx.paper_wallet.close(symbol, sell_amount, exit_price)
-                                                    ctx.balance = ctx.paper_wallet.balance
-                                                    logger.info(f"Paper trade frontend sell: {pos['side']} {sell_amount} {symbol} @ ${exit_price:.6f}, PnL: ${pnl:.2f}, balance: ${ctx.balance:.2f}")
-                                                    
-                                                    if ctx.notifier and ctx.config.get("telegram", {}).get("trade_updates", True):
-                                                        pnl_emoji = "💰" if pnl >= 0 else "📉"
-                                                        frontend_sell_msg = f"📄 Frontend Market Sell {pnl_emoji}\n{pos['side'].upper()} {sell_amount:.4f} {symbol}\nEntry: ${pos['entry_price']:.6f}\nExit: ${exit_price:.6f}\nPnL: ${pnl:.2f}\nBalance: ${ctx.balance:.2f}"
-                                                        ctx.notifier.notify(frontend_sell_msg)
-                                                        
-                                                except Exception as e:
-                                                    logger.error(f"Failed to process frontend sell in paper wallet: {e}")
-                                            
-                                            # Update position size or remove if fully sold
-                                            if sell_amount >= pos["size"]:
-                                                ctx.positions.pop(symbol, None)
-                                                ctx.risk_manager.deallocate_capital(
-                                                    pos.get("strategy", ""), pos["size"] * pos["entry_price"]
-                                                )
-                                            else:
-                                                pos["size"] -= sell_amount
-                                                ctx.risk_manager.deallocate_capital(
-                                                    pos.get("strategy", ""), sell_amount * pos["entry_price"]
-                                                )
-                                            
-                                            logger.info(f"Frontend market sell executed: {sell_amount} {symbol}")
-                                            processed_requests.append(request)
-                                        else:
-                                            if symbol and amount:
-                                                logger.info(f"Position not found for {symbol}, available: {list(ctx.positions.keys())}")
-                                            processed_requests.append(request)
-                                    else:
-                                        unprocessed_requests.append(request)
-                                
-                                # Write back unprocessed requests
-                                with open(sell_requests_file, 'w') as f:
-                                    json.dump(unprocessed_requests, f)
-                            
-                            # Check every 2 seconds for new sell requests
-                            await asyncio.sleep(2)
-                            
-                        except Exception as e:
-                            logger.error(f"Error in sell request processor: {e}")
-                            await asyncio.sleep(5)  # Wait longer on error
-
-                sell_processor_task = asyncio.create_task(process_sell_requests_loop())
-                logger.info("Started high-priority sell request processor")
-
             if config.get("arbitrage_enabled", True):
                 try:
                     arb_syms = await scan_arbitrage(exchange, config)
@@ -2080,58 +2031,78 @@ async def _main_impl() -> TelegramNotifier:
                     logger.error("Arbitrage scan error: %s", exc)
 
             cycle_start = time.perf_counter()
-            ctx.timing = await runner.run(ctx)
+            try:
+                ctx.timing = await runner.run(ctx)
+            except Exception as exc:
+                logger.error("Error during cycle execution: %s", exc, exc_info=True)
+                # Continue with a minimal timing object to prevent further errors
+                ctx.timing = {"fetch_candidates": 0.0, "update_caches": 0.0, "analyse_batch": 0.0}
 
             # Clean up any completed trading tasks from previous cycle
-            await trade_manager.cleanup_completed()
+            try:
+                await trade_manager.cleanup_completed()
+            except Exception as exc:
+                logger.error("Error during trading task cleanup: %s", exc)
 
             # Update PnL for all positions after each trading cycle
-            update_position_pnl(ctx)
+            try:
+                update_position_pnl(ctx)
+            except Exception as exc:
+                logger.error("Error updating position PnL: %s", exc)
             
             loop_count += 1
 
-            if time.time() - last_weight_update >= 86400:
-                weights = compute_strategy_weights()
-                if weights:
-                    logger.info("Updating strategy allocation to %s", weights)
-                    risk_manager.update_allocation(weights)
-                    config["strategy_allocation"] = weights
-                last_weight_update = time.time()
+            try:
+                if time.time() - last_weight_update >= 86400:
+                    weights = compute_strategy_weights()
+                    if weights:
+                        logger.info("Updating strategy allocation to %s", weights)
+                        risk_manager.update_allocation(weights)
+                        config["strategy_allocation"] = weights
+                    last_weight_update = time.time()
+            except Exception as exc:
+                logger.error("Error updating strategy weights: %s", exc)
 
-            if config.get("optimization", {}).get("enabled"):
-                if (
-                    time.time() - last_optimize
-                    >= config["optimization"].get("interval_days", 7) * 86400
-                ):
-                    optimize_strategies()
-                    last_optimize = time.time()
+            try:
+                if config.get("optimization", {}).get("enabled"):
+                    if (
+                        time.time() - last_optimize
+                        >= config["optimization"].get("interval_days", 7) * 86400
+                    ):
+                        optimize_strategies()
+                        last_optimize = time.time()
+            except Exception as exc:
+                logger.error("Error during strategy optimization: %s", exc)
 
             if not state.get("running"):
                 await asyncio.sleep(1)
                 continue
 
-            balances = await asyncio.to_thread(
-                check_wallet_balances, user.get("wallet_address", "")
-            )
-            for token in detect_non_trade_tokens(balances):
-                amount = balances[token]
-                logger.info("Converting %s %s to USDC", amount, token)
-                await auto_convert_funds(
-                    user.get("wallet_address", ""),
-                    token,
-                    "USDC",
-                    amount,
-                    dry_run=config["execution_mode"] == "dry_run",
-                    slippage_bps=config.get("solana_slippage_bps", 50),
-                    notifier=notifier,
-                    paper_wallet=paper_wallet if config["execution_mode"] == "dry_run" else None,
+            try:
+                balances = await asyncio.to_thread(
+                    check_wallet_balances, user.get("wallet_address", "")
                 )
+                for token in detect_non_trade_tokens(balances):
+                    amount = balances[token]
+                    logger.info("Converting %s %s to USDC", amount, token)
+                    await auto_convert_funds(
+                        user.get("wallet_address", ""),
+                        token,
+                        "USDC",
+                        amount,
+                        dry_run=config["execution_mode"] == "dry_run",
+                        slippage_bps=config.get("solana_slippage_bps", 50),
+                        notifier=notifier,
+                        paper_wallet=paper_wallet if config["execution_mode"] == "dry_run" else None,
+                    )
+            except Exception as exc:
+                logger.error("Error during wallet balance checking: %s", exc)
                 if asyncio.iscoroutinefunction(
                     getattr(exchange, "fetch_balance", None)
                 ):
                     bal = await exchange.fetch_balance()
                 else:
-                    bal = await asyncio.to_thread(exchange.fetch_balance)
+                    bal = await asyncio.to_thread(exchange.fetch_balance_with_retry)
                 bal_val = (
                     bal.get("USDT", {}).get("free", 0)
                     if isinstance(bal.get("USDT"), dict)
@@ -2140,52 +2111,55 @@ async def _main_impl() -> TelegramNotifier:
                 check_balance_change(float(bal_val), "funds converted")
 
             # Refresh OHLCV for open positions if a new candle has formed
-            tf = config.get("timeframe", "1h")
-            tf_sec = timeframe_seconds(None, tf)
-            open_syms: List[str] = []
-            for sym in ctx.positions:
-                last_ts = last_candle_ts.get(sym, 0)
-                if time.time() - last_ts >= tf_sec:
-                    open_syms.append(sym)
-            
-            # Ensure paper wallet balance is synchronized
-            if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
-                ensure_paper_wallet_sync(ctx)
-                
-                # Log comprehensive wallet status every cycle
-                if loop_count % 10 == 0:  # Log every 10 cycles
-                    status = get_paper_wallet_status(ctx)
-                    if status:
-                        logger.info(f"Cycle {loop_count} - Paper wallet summary: {status}")
-            
-            if open_syms:
-                tf_cache = ctx.df_cache.get(tf, {})
-                tf_cache = await update_ohlcv_cache(
-                    exchange,
-                    tf_cache,
-                    open_syms,
-                    timeframe=tf,
-                    limit=2,
-                    use_websocket=config.get("use_websocket", False),
-                    force_websocket_history=config.get(
-                        "force_websocket_history", False
-                    ),
-                    max_concurrent=config.get("max_concurrent_ohlcv"),
-                )
-                ctx.df_cache[tf] = tf_cache
-                session_state.df_cache[tf] = tf_cache
-                for sym in open_syms:
-                    df = tf_cache.get(sym)
-                    if df is not None and not df.empty:
-                        last_candle_ts[sym] = int(df["timestamp"].iloc[-1])
-                        higher_df = ctx.df_cache.get(
-                            config.get("higher_timeframe", "1d"), {}
-                        ).get(sym)
-                        regime, _ = await classify_regime_async(df, higher_df)
-                        ctx.positions[sym]["regime"] = regime
-                        TOTAL_ANALYSES += 1
-                        if regime == "unknown":
-                            UNKNOWN_COUNT += 1
+            try:
+                tf = config.get("timeframe", "1h")
+                tf_sec = timeframe_seconds(None, tf)
+                open_syms: list[str] = []
+                for sym in ctx.positions:
+                    last_ts = last_candle_ts.get(sym, 0)
+                    if time.time() - last_ts >= tf_sec:
+                        open_syms.append(sym)
+
+                # Ensure paper wallet balance is synchronized
+                if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
+                    ensure_paper_wallet_sync(ctx)
+
+                    # Log comprehensive wallet status every cycle
+                    if loop_count % 10 == 0:  # Log every 10 cycles
+                        status = get_paper_wallet_status(ctx)
+                        if status:
+                            logger.info(f"Cycle {loop_count} - Paper wallet summary: {status}")
+
+                if open_syms:
+                    tf_cache = ctx.df_cache.get(tf, {})
+                    tf_cache = await update_ohlcv_cache(
+                        exchange,
+                        tf_cache,
+                        open_syms,
+                        timeframe=tf,
+                        limit=2,
+                        use_websocket=config.get("use_websocket", False),
+                        force_websocket_history=config.get(
+                            "force_websocket_history", False
+                        ),
+                        max_concurrent=config.get("max_concurrent_ohlcv"),
+                    )
+                    ctx.df_cache[tf] = tf_cache
+                    session_state.df_cache[tf] = tf_cache
+                    for sym in open_syms:
+                        df = tf_cache.get(sym)
+                        if df is not None and not df.empty:
+                            last_candle_ts[sym] = int(df["timestamp"].iloc[-1])
+                            higher_df = ctx.df_cache.get(
+                                config.get("higher_timeframe", "1d"), {}
+                            ).get(sym)
+                            regime, _ = await classify_regime_async(df, higher_df)
+                            ctx.positions[sym]["regime"] = regime
+                            TOTAL_ANALYSES += 1
+                            if regime == "unknown":
+                                UNKNOWN_COUNT += 1
+            except Exception as exc:
+                logger.error("Error during position refresh: %s", exc)
 
             total_time = time.perf_counter() - cycle_start
             timing = getattr(ctx, "timing", {})
@@ -2217,25 +2191,11 @@ async def _main_impl() -> TelegramNotifier:
             unknown_rate = UNKNOWN_COUNT / max(TOTAL_ANALYSES, 1)
             if unknown_rate > 0.2 and ctx.notifier:
                 ctx.notifier.notify(f"⚠️ Unknown regime rate {unknown_rate:.1%}")
-            delay = config["loop_interval_minutes"] / max(ctx.volatility_factor, 1e-6)
+            delay = config.get("loop_interval_minutes", 1) / max(ctx.volatility_factor, 1e-6)
             logger.info("Sleeping for %.2f minutes", delay)
             await asyncio.sleep(delay * 60)
 
     finally:
-        # Close the WebSocket client if it exists
-        if ws_client and hasattr(ws_client, 'close_async'):
-            try:
-                await ws_client.close_async()
-                logger.info("WebSocket client closed successfully")
-            except Exception as exc:
-                logger.error("Error closing WebSocket client: %s", exc)
-        elif ws_client and hasattr(ws_client, 'close'):
-            try:
-                ws_client.close()
-                logger.info("WebSocket client closed successfully")
-            except Exception as exc:
-                logger.error("Error closing WebSocket client: %s", exc)
-        
         if hasattr(exchange, "close"):
             if asyncio.iscoroutinefunction(getattr(exchange, "close")):
                 with contextlib.suppress(Exception):
@@ -2314,11 +2274,31 @@ async def _main_impl() -> TelegramNotifier:
 
 async def main() -> None:
     """Entry point for running the trading bot with error handling."""
-    notifier: Optional[TelegramNotifier] = None
+    notifier: Union[TelegramNotifier, None] = None
     try:
         notifier = await _main_impl()
     except Exception as exc:  # pragma: no cover - error path
         logger.exception("Unhandled error in main: %s", exc)
+        
+        # Check if it's a rate limiting error
+        if "Too many requests" in str(exc) or "rate limit" in str(exc).lower():
+            logger.error("Rate limiting detected - this is expected with aggressive scanning")
+            if notifier:
+                notifier.notify("⚠️ Rate limiting detected - consider increasing loop_interval_minutes")
+            
+            # Add a delay before restarting to respect rate limits
+            logger.info("Waiting 30 seconds before restarting to respect rate limits...")
+            await asyncio.sleep(30)
+            
+        elif "EGeneral" in str(exc):
+            logger.error("Kraken API error detected - this may be temporary")
+            if notifier:
+                notifier.notify("⚠️ Kraken API error - this may be temporary")
+            
+            # Add a delay for API errors too
+            logger.info("Waiting 15 seconds before restarting due to API error...")
+            await asyncio.sleep(15)
+        
         if notifier:
             notifier.notify(f"❌ Bot stopped: {exc}")
     finally:

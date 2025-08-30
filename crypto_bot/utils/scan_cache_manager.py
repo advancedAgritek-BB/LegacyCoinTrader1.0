@@ -1,715 +1,402 @@
-"""
-Enhanced Scan Cache Manager for continuous strategy review and trade execution.
+"""Adaptive cache management for trading bot data."""
 
-This module provides persistent caching of scan results with intelligent
-review cycles for strategy fit and trade execution opportunities.
-"""
-
-import asyncio
-import json
-import logging
-import time
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Any, Callable
 from collections import defaultdict, deque
-import threading
-import pickle
+from typing import Dict, Any, Optional, List
+import time
+import asyncio
+from dataclasses import dataclass, field
+import logging
 
-import pandas as pd
-import numpy as np
-from cachetools import TTLCache, LRUCache
-
-from .logger import LOG_DIR, setup_logger
-from .telemetry import telemetry
-
-logger = setup_logger(__name__, LOG_DIR / "scan_cache.log")
-
-# Cache file paths
-CACHE_DIR = Path(__file__).resolve().parents[2] / "cache"
-SCAN_CACHE_FILE = CACHE_DIR / "scan_results_cache.json"
-STRATEGY_CACHE_FILE = CACHE_DIR / "strategy_fit_cache.json"
-EXECUTION_CACHE_FILE = CACHE_DIR / "execution_opportunities.json"
-
-# Ensure cache directory exists
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
+from .logger import setup_logger
 
 
 @dataclass
-class ScanResult:
-    """Represents a cached scan result with metadata."""
-    
-    symbol: str
+class CacheEntry:
+    """Represents a single cache entry with metadata."""
+    data: Any
     timestamp: float
-    data: Dict[str, Any]  # OHLCV data, indicators, etc.
-    score: float
-    regime: str
-    strategy_fit: Dict[str, float]  # Strategy -> fit score mapping
-    market_conditions: Dict[str, Any]  # Volatility, volume, sentiment, etc.
-    last_review: float
-    review_count: int = 0
-    execution_attempts: int = 0
-    last_execution_attempt: Optional[float] = None
-    status: str = "active"  # active, executed, expired, blocked
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    access_count: int = 0
+    last_access: float = field(default_factory=time.time)
+    size_bytes: int = 0
 
 
-@dataclass
-class StrategyFit:
-    """Represents strategy fit analysis for a symbol."""
+class AdaptiveCacheManager:
+    """Intelligent cache management with adaptive sizing based on usage patterns."""
     
-    symbol: str
-    strategy: str
-    fit_score: float
-    confidence: float
-    last_analysis: float
-    market_regime: str
-    conditions_met: List[str]
-    conditions_failed: List[str]
-    recommendation: str  # STRONG_BUY, BUY, HOLD, AVOID, STRONG_SELL
-
-
-@dataclass
-class ExecutionOpportunity:
-    """Represents a trade execution opportunity."""
-    
-    symbol: str
-    strategy: str
-    direction: str  # long, short
-    confidence: float
-    entry_price: float
-    stop_loss: float
-    take_profit: float
-    position_size: float
-    risk_reward_ratio: float
-    market_conditions: Dict[str, Any]
-    timestamp: float
-    status: str = "pending"  # pending, executed, expired, cancelled
-    execution_metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-class ScanCacheManager:
-    """
-    Manages persistent caching of scan results with continuous review.
-    
-    Features:
-    - Persistent storage of scan results
-    - Continuous strategy fit analysis
-    - Execution opportunity tracking
-    - Intelligent cache refresh and cleanup
-    - Integration with existing strategy routing
-    """
-    
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.cache_config = config.get("scan_cache", {})
+    def __init__(
+        self,
+        initial_size: int = 1000,
+        max_size: int = 10000,
+        min_size: int = 100,
+        hit_rate_window: int = 100,
+        eviction_policy: str = "lru",
+        enable_compression: bool = False
+    ):
+        """
+        Initialize the adaptive cache manager.
         
-        # Cache settings
-        self.max_cache_size = self.cache_config.get("max_cache_size", 1000)
-        self.review_interval = self.cache_config.get("review_interval_minutes", 15)
-        self.max_age_hours = self.cache_config.get("max_age_hours", 24)
-        self.min_score_threshold = self.cache_config.get("min_score_threshold", 0.3)
+        Args:
+            initial_size: Initial cache size for each cache type
+            max_size: Maximum cache size allowed
+            min_size: Minimum cache size allowed
+            hit_rate_window: Number of accesses to track for hit rate calculation
+            eviction_policy: Cache eviction policy ('lru', 'lfu', 'adaptive')
+            enable_compression: Whether to enable data compression
+        """
+        self.initial_size = initial_size
+        self.max_size = max_size
+        self.min_size = min_size
+        self.hit_rate_window = hit_rate_window
+        self.eviction_policy = eviction_policy
+        self.enable_compression = enable_compression
         
-        # In-memory caches
-        self.scan_cache: Dict[str, ScanResult] = {}
-        self.strategy_fit_cache: Dict[str, StrategyFit] = {}
-        self.execution_cache: Dict[str, ExecutionOpportunity] = {}
+        # Cache storage
+        self.caches: Dict[str, Dict[str, CacheEntry]] = defaultdict(dict)
         
-        # TTL caches for performance
-        self.performance_cache = TTLCache(maxsize=1000, ttl=300)  # 5 min TTL
-        self.regime_cache = TTLCache(maxsize=500, ttl=1800)  # 30 min TTL
+        # Hit rate tracking
+        self.hit_rates = defaultdict(lambda: deque(maxlen=hit_rate_window))
+        self.access_patterns = defaultdict(int)
+        self.total_accesses = defaultdict(int)
+        self.total_hits = defaultdict(int)
         
-        # Review queue and locks
-        self.review_queue: deque[str] = deque()
-        self.cache_lock = threading.RLock()
-        self.review_lock = threading.Lock()
+        # Performance metrics
+        self.cache_sizes = defaultdict(lambda: initial_size)
+        self.eviction_counts = defaultdict(int)
+        self.compression_ratios = defaultdict(float)
         
-        # Background tasks
-        self.review_task: Optional[asyncio.Task] = None
-        self.cleanup_task: Optional[asyncio.Task] = None
-        self.running = False
-        
-        # Load existing cache
-        self._load_cache()
-        
-        # Start background tasks
-        self.start()
-    
-    def start(self):
-        """Start background review and cleanup tasks."""
-        if self.running:
-            return
-            
-        self.running = True
-        
-        # Start background tasks
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            self.review_task = asyncio.create_task(self._review_loop())
-            self.cleanup_task = asyncio.create_task(self._cleanup_loop())
-        else:
-            # For testing or non-async contexts
-            threading.Thread(target=self._start_background_tasks, daemon=True).start()
-    
-    def stop(self):
-        """Stop background tasks."""
-        self.running = False
-        if self.review_task:
-            self.review_task.cancel()
-        if self.cleanup_task:
-            self.cleanup_task.cancel()
-    
-    def _start_background_tasks(self):
-        """Start background tasks in a separate thread."""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(self._review_loop())
-        except asyncio.CancelledError:
-            pass
-        finally:
-            loop.close()
-    
-    async def _review_loop(self):
-        """Continuous loop for reviewing cached scan results."""
-        while self.running:
-            try:
-                await self._review_batch()
-                await asyncio.sleep(self.review_interval * 60)
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.error(f"Error in review loop: {exc}")
-                await asyncio.sleep(60)  # Wait before retrying
-    
-    async def _cleanup_loop(self):
-        """Continuous loop for cleaning up expired cache entries."""
-        while self.running:
-            try:
-                await self._cleanup_expired()
-                await asyncio.sleep(3600)  # Cleanup every hour
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.error(f"Error in cleanup loop: {exc}")
-                await asyncio.sleep(300)  # Wait before retrying
-    
-    async def _review_batch(self):
-        """Review a batch of cached scan results for strategy fit."""
-        with self.review_lock:
-            if not self.review_queue:
-                return
-            
-            batch_size = min(10, len(self.review_queue))
-            batch = [self.review_queue.popleft() for _ in range(batch_size)]
-        
-        logger.info(f"Reviewing batch of {len(batch)} scan results")
-        
-        for symbol in batch:
-            try:
-                await self._review_symbol(symbol)
-            except Exception as exc:
-                logger.error(f"Failed to review {symbol}: {exc}")
-                # Re-queue for later review
-                self.review_queue.append(symbol)
-    
-    async def _review_symbol(self, symbol: str):
-        """Review a single symbol for strategy fit and execution opportunities."""
-        scan_result = self.scan_cache.get(symbol)
-        if not scan_result:
-            return
-        
-        # Check if review is needed
-        now = time.time()
-        if now - scan_result.last_review < self.review_interval * 60:
-            return
-        
-        # Update review timestamp
-        scan_result.last_review = now
-        scan_result.review_count += 1
-        
-        # Analyze strategy fit
-        await self._analyze_strategy_fit(scan_result)
-        
-        # Check for execution opportunities
-        await self._check_execution_opportunities(scan_result)
-        
-        # Update cache
-        self._update_scan_cache(symbol, scan_result)
-        
-        logger.debug(f"Reviewed {symbol} (review #{scan_result.review_count})")
-    
-    async def _analyze_strategy_fit(self, scan_result: ScanResult):
-        """Analyze strategy fit for a scan result."""
-        try:
-            # Get current market data
-            current_data = scan_result.data
-            if not current_data or not isinstance(current_data, dict):
-                return
-            
-            # Analyze with different strategies
-            strategies = self._get_available_strategies()
-            
-            for strategy_name in strategies:
-                try:
-                    fit_score, confidence, conditions = await self._evaluate_strategy_fit(
-                        strategy_name, scan_result
-                    )
-                    
-                    # Create or update strategy fit record
-                    fit_key = f"{scan_result.symbol}_{strategy_name}"
-                    strategy_fit = StrategyFit(
-                        symbol=scan_result.symbol,
-                        strategy=strategy_name,
-                        fit_score=fit_score,
-                        confidence=confidence,
-                        last_analysis=time.time(),
-                        market_regime=scan_result.regime,
-                        conditions_met=conditions.get("met", []),
-                        conditions_failed=conditions.get("failed", []),
-                        recommendation=self._get_recommendation(fit_score, confidence)
-                    )
-                    
-                    self.strategy_fit_cache[fit_key] = strategy_fit
-                    
-                    # Update scan result
-                    scan_result.strategy_fit[strategy_name] = fit_score
-                    
-                except Exception as exc:
-                    logger.debug(f"Failed to analyze {strategy_name} for {scan_result.symbol}: {exc}")
-            
-        except Exception as exc:
-            logger.error(f"Failed to analyze strategy fit for {scan_result.symbol}: {exc}")
-    
-    async def _evaluate_strategy_fit(self, strategy_name: str, scan_result: ScanResult) -> Tuple[float, float, Dict[str, List[str]]]:
-        """Evaluate how well a strategy fits the current market conditions."""
-        try:
-            # This would integrate with your existing strategy evaluation system
-            # For now, we'll use a simplified scoring approach
-            
-            base_score = scan_result.score
-            regime_match = self._calculate_regime_match(strategy_name, scan_result.regime)
-            volatility_score = self._calculate_volatility_score(scan_result.market_conditions)
-            volume_score = self._calculate_volume_score(scan_result.market_conditions)
-            
-            # Combine scores
-            fit_score = (
-                base_score * 0.4 +
-                regime_match * 0.3 +
-                volatility_score * 0.2 +
-                volume_score * 0.1
-            )
-            
-            # Calculate confidence based on data quality and consistency
-            confidence = min(1.0, scan_result.review_count * 0.1 + 0.5)
-            
-            # Determine conditions met/failed
-            conditions = {
-                "met": [],
-                "failed": []
-            }
-            
-            if base_score >= self.min_score_threshold:
-                conditions["met"].append("minimum_score")
-            else:
-                conditions["failed"].append("minimum_score")
-            
-            if regime_match >= 0.7:
-                conditions["met"].append("regime_match")
-            else:
-                conditions["failed"].append("regime_match")
-            
-            if volatility_score >= 0.6:
-                conditions["met"].append("volatility_suitable")
-            else:
-                conditions["failed"].append("volatility_suitable")
-            
-            return fit_score, confidence, conditions
-            
-        except Exception as exc:
-            logger.error(f"Strategy fit evaluation failed for {strategy_name}: {exc}")
-            return 0.0, 0.0, {"met": [], "failed": ["evaluation_error"]}
-    
-    def _calculate_regime_match(self, strategy_name: str, regime: str) -> float:
-        """Calculate how well a strategy matches the current market regime."""
-        # Strategy-regime compatibility matrix
-        regime_compatibility = {
-            "trend_bot": {"trending": 0.9, "ranging": 0.3, "volatile": 0.7},
-            "grid_bot": {"trending": 0.2, "ranging": 0.9, "volatile": 0.4},
-            "mean_bot": {"trending": 0.3, "ranging": 0.8, "volatile": 0.6},
-            "breakout_bot": {"trending": 0.8, "ranging": 0.6, "volatile": 0.9},
-            "sniper_bot": {"trending": 0.7, "ranging": 0.5, "volatile": 0.8},
-            "dex_scalper": {"trending": 0.6, "ranging": 0.7, "volatile": 0.9},
+        # Statistics
+        self.stats = {
+            "total_memory_usage": 0,
+            "total_entries": 0,
+            "compression_enabled": enable_compression
         }
         
-        return regime_compatibility.get(strategy_name, {}).get(regime, 0.5)
-    
-    def _calculate_volatility_score(self, market_conditions: Dict[str, Any]) -> float:
-        """Calculate volatility suitability score."""
-        atr = market_conditions.get("atr", 0)
-        atr_percent = market_conditions.get("atr_percent", 0)
+        self.logger = setup_logger("adaptive_cache_manager")
         
-        if atr_percent > 0:
-            # Prefer moderate volatility (not too low, not too high)
-            if 0.02 <= atr_percent <= 0.08:
-                return 0.9
-            elif 0.01 <= atr_percent <= 0.12:
-                return 0.7
-            else:
-                return 0.3
+    def get_cache_size(self, cache_type: str) -> int:
+        """
+        Get adaptive cache size based on hit rates and usage patterns.
         
-        return 0.5
-    
-    def _calculate_volume_score(self, market_conditions: Dict[str, Any]) -> float:
-        """Calculate volume suitability score."""
-        volume = market_conditions.get("volume", 0)
-        volume_ma = market_conditions.get("volume_ma", 1)
+        Args:
+            cache_type: Type of cache (e.g., 'ohlcv', 'orderbook', 'regime')
+            
+        Returns:
+            Recommended cache size
+        """
+        hit_rate = self._calculate_hit_rate(cache_type)
+        access_frequency = self._calculate_access_frequency(cache_type)
         
-        if volume > 0 and volume_ma > 0:
-            volume_ratio = volume / volume_ma
-            if 0.8 <= volume_ratio <= 2.0:
-                return 0.9
-            elif 0.5 <= volume_ratio <= 3.0:
-                return 0.7
-            else:
-                return 0.4
+        # Base size calculation
+        base_size = self.cache_sizes[cache_type]
         
-        return 0.5
-    
-    def _get_recommendation(self, fit_score: float, confidence: float) -> str:
-        """Get trading recommendation based on fit score and confidence."""
-        if fit_score >= 0.8 and confidence >= 0.7:
-            return "STRONG_BUY"
-        elif fit_score >= 0.6 and confidence >= 0.6:
-            return "BUY"
-        elif fit_score >= 0.4 and confidence >= 0.5:
-            return "HOLD"
-        elif fit_score < 0.3 or confidence < 0.4:
-            return "AVOID"
+        # Adjust based on hit rate
+        if hit_rate > 0.8:  # High hit rate - increase size
+            size_multiplier = 1.5
+            self.logger.debug(f"High hit rate ({hit_rate:.2f}) for {cache_type}, increasing cache size")
+        elif hit_rate < 0.3:  # Low hit rate - decrease size
+            size_multiplier = 0.7
+            self.logger.debug(f"Low hit rate ({hit_rate:.2f}) for {cache_type}, decreasing cache size")
         else:
-            return "NEUTRAL"
+            size_multiplier = 1.0
+        
+        # Adjust based on access frequency
+        if access_frequency > 0.8:  # High access frequency - increase size
+            size_multiplier *= 1.2
+        elif access_frequency < 0.2:  # Low access frequency - decrease size
+            size_multiplier *= 0.8
+        
+        new_size = int(base_size * size_multiplier)
+        new_size = max(self.min_size, min(self.max_size, new_size))
+        
+        # Update cache size if it changed significantly
+        if abs(new_size - base_size) / base_size > 0.1:  # 10% change threshold
+            self.cache_sizes[cache_type] = new_size
+            self.logger.info(f"Adjusted {cache_type} cache size from {base_size} to {new_size}")
+        
+        return new_size
     
-    async def _check_execution_opportunities(self, scan_result: ScanResult):
-        """Check for trade execution opportunities."""
-        try:
-            # Find best strategy fit
-            best_strategy = None
-            best_score = 0.0
-            
-            for strategy_name, fit_score in scan_result.strategy_fit.items():
-                if fit_score > best_score and fit_score >= 0.7:
-                    best_score = fit_score
-                    best_strategy = strategy_name
-            
-            if not best_strategy:
-                return
-            
-            # Check if conditions are right for execution
-            if not self._should_execute(scan_result, best_strategy):
-                return
-            
-            # Create execution opportunity
-            opportunity = await self._create_execution_opportunity(
-                scan_result, best_strategy, best_score
-            )
-            
-            if opportunity:
-                self.execution_cache[opportunity.symbol] = opportunity
-                logger.info(f"Created execution opportunity for {opportunity.symbol} via {best_strategy}")
-            
-        except Exception as exc:
-            logger.error(f"Failed to check execution opportunities for {scan_result.symbol}: {exc}")
-    
-    def _should_execute(self, scan_result: ScanResult, strategy: str) -> bool:
-        """Determine if conditions are right for trade execution."""
-        # Check if already attempted recently
-        if scan_result.last_execution_attempt:
-            time_since_attempt = time.time() - scan_result.last_execution_attempt
-            if time_since_attempt < 3600:  # 1 hour cooldown
-                return False
+    def get(self, cache_type: str, key: str) -> Optional[Any]:
+        """
+        Retrieve data from cache with hit tracking.
         
-        # Check execution count
-        if scan_result.execution_attempts >= 3:  # Max 3 attempts
-            return False
+        Args:
+            cache_type: Type of cache
+            key: Cache key
+            
+        Returns:
+            Cached data or None if not found
+        """
+        self.total_accesses[cache_type] += 1
         
-        # Check market conditions
-        conditions = scan_result.market_conditions
-        if conditions.get("spread_pct", 0) > 0.5:  # Spread too high
-            return False
-        
-        if conditions.get("volume_ratio", 0) < 0.5:  # Volume too low
-            return False
-        
-        return True
-    
-    async def _create_execution_opportunity(self, scan_result: ScanResult, strategy: str, fit_score: float) -> Optional[ExecutionOpportunity]:
-        """Create an execution opportunity for a scan result."""
-        try:
-            # Get current price and calculate levels
-            current_price = scan_result.data.get("close", 0)
-            if not current_price:
-                return None
+        if key in self.caches[cache_type]:
+            # Cache hit
+            entry = self.caches[cache_type][key]
+            entry.access_count += 1
+            entry.last_access = time.time()
             
-            # Calculate position sizing and risk levels
-            atr = scan_result.market_conditions.get("atr", 0)
-            if not atr:
-                return None
+            self.total_hits[cache_type] += 1
+            self.hit_rates[cache_type].append(True)
             
-            # Risk management parameters
-            risk_per_trade = self.config.get("risk", {}).get("risk_per_trade", 0.02)
-            stop_loss_atr = self.config.get("risk", {}).get("stop_loss_atr_mult", 2.0)
-            take_profit_atr = self.config.get("risk", {}).get("take_profit_atr_mult", 4.0)
-            
-            # Calculate levels
-            stop_loss = current_price - (atr * stop_loss_atr)
-            take_profit = current_price + (atr * take_profit_atr)
-            
-            # Calculate position size (simplified)
-            account_balance = self.config.get("account_balance", 10000)
-            risk_amount = account_balance * risk_per_trade
-            position_size = risk_amount / (current_price - stop_loss)
-            
-            # Calculate risk/reward ratio
-            risk_reward_ratio = (take_profit - current_price) / (current_price - stop_loss)
-            
-            # Determine direction (simplified - would integrate with your signal system)
-            direction = "long"  # Default to long for now
-            
-            opportunity = ExecutionOpportunity(
-                symbol=scan_result.symbol,
-                strategy=strategy,
-                direction=direction,
-                confidence=fit_score,
-                entry_price=current_price,
-                stop_loss=stop_loss,
-                take_profit=take_profit,
-                position_size=position_size,
-                risk_reward_ratio=risk_reward_ratio,
-                market_conditions=scan_result.market_conditions,
-                timestamp=time.time()
-            )
-            
-            return opportunity
-            
-        except Exception as exc:
-            logger.error(f"Failed to create execution opportunity: {exc}")
+            return entry.data
+        else:
+            # Cache miss
+            self.hit_rates[cache_type].append(False)
             return None
     
-    def add_scan_result(self, symbol: str, data: Dict[str, Any], score: float, regime: str, market_conditions: Dict[str, Any]):
-        """Add a new scan result to the cache."""
-        with self.cache_lock:
-            # Check if symbol already exists
-            existing = self.scan_cache.get(symbol)
-            
-            scan_result = ScanResult(
-                symbol=symbol,
-                timestamp=time.time(),
-                data=data,
-                score=score,
-                regime=regime,
-                strategy_fit={},
-                market_conditions=market_conditions,
-                last_review=time.time(),
-                review_count=0,
-                execution_attempts=0
-            )
-            
-            self.scan_cache[symbol] = scan_result
-            
-            # Add to review queue
-            if symbol not in self.review_queue:
-                self.review_queue.append(symbol)
-            
-            # Maintain cache size
-            if len(self.scan_cache) > self.max_cache_size:
-                self._evict_oldest()
-            
-            logger.debug(f"Added scan result for {symbol} (score: {score:.3f})")
-    
-    def get_scan_result(self, symbol: str) -> Optional[ScanResult]:
-        """Get a cached scan result."""
-        return self.scan_cache.get(symbol)
-    
-    def get_strategy_fit(self, symbol: str, strategy: str) -> Optional[StrategyFit]:
-        """Get strategy fit analysis for a symbol."""
-        key = f"{symbol}_{strategy}"
-        return self.strategy_fit_cache.get(key)
-    
-    def get_execution_opportunities(self, min_confidence: float = 0.7) -> List[ExecutionOpportunity]:
-        """Get all execution opportunities above a confidence threshold."""
-        opportunities = []
-        for opportunity in self.execution_cache.values():
-            if opportunity.confidence >= min_confidence and opportunity.status == "pending":
-                opportunities.append(opportunity)
+    def set(self, cache_type: str, key: str, data: Any, ttl: Optional[int] = None) -> None:
+        """
+        Store data in cache with adaptive sizing.
         
-        # Sort by confidence
-        opportunities.sort(key=lambda x: x.confidence, reverse=True)
-        return opportunities
-    
-    def mark_execution_attempted(self, symbol: str):
-        """Mark that an execution was attempted for a symbol."""
-        scan_result = self.scan_cache.get(symbol)
-        if scan_result:
-            scan_result.execution_attempts += 1
-            scan_result.last_execution_attempt = time.time()
-            self._update_scan_cache(symbol, scan_result)
-    
-    def mark_execution_completed(self, symbol: str, success: bool = True):
-        """Mark that an execution was completed for a symbol."""
-        opportunity = self.execution_cache.get(symbol)
-        if opportunity:
-            if success:
-                opportunity.status = "executed"
-                opportunity.execution_metadata["completed_at"] = time.time()
-            else:
-                opportunity.status = "expired"
-                opportunity.execution_metadata["failed_at"] = time.time()
-    
-    def _evict_oldest(self):
-        """Evict oldest cache entries to maintain size limit."""
-        if len(self.scan_cache) <= self.max_cache_size:
-            return
+        Args:
+            cache_type: Type of cache
+            key: Cache key
+            data: Data to cache
+            ttl: Time to live in seconds (optional)
+        """
+        # Check if we need to evict entries
+        current_size = len(self.caches[cache_type])
+        max_size = self.get_cache_size(cache_type)
         
-        # Sort by timestamp and remove oldest
-        sorted_items = sorted(
-            self.scan_cache.items(),
-            key=lambda x: x[1].timestamp
+        if current_size >= max_size:
+            self._evict_entries(cache_type, current_size - max_size + 1)
+        
+        # Create cache entry
+        entry = CacheEntry(
+            data=data,
+            timestamp=time.time(),
+            access_count=1,
+            last_access=time.time(),
+            size_bytes=self._estimate_size(data)
         )
         
-        items_to_remove = len(sorted_items) - self.max_cache_size
-        for i in range(items_to_remove):
-            symbol, _ = sorted_items[i]
-            del self.scan_cache[symbol]
+        self.caches[cache_type][key] = entry
+        self.stats["total_entries"] += 1
+        self.stats["total_memory_usage"] += entry.size_bytes
+    
+    def invalidate(self, cache_type: str, key: str) -> bool:
+        """
+        Remove a specific entry from cache.
+        
+        Args:
+            cache_type: Type of cache
+            key: Cache key
             
-            # Also remove related caches
-            self._remove_related_caches(symbol)
+        Returns:
+            True if entry was found and removed
+        """
+        if key in self.caches[cache_type]:
+            entry = self.caches[cache_type][key]
+            self.stats["total_memory_usage"] -= entry.size_bytes
+            self.stats["total_entries"] -= 1
+            del self.caches[cache_type][key]
+            return True
+        return False
     
-    def _remove_related_caches(self, symbol: str):
-        """Remove related cache entries for a symbol."""
-        # Remove strategy fit entries
-        keys_to_remove = [k for k in self.strategy_fit_cache.keys() if k.startswith(f"{symbol}_")]
-        for key in keys_to_remove:
-            del self.strategy_fit_cache[key]
+    def clear(self, cache_type: Optional[str] = None) -> None:
+        """
+        Clear cache entries.
         
-        # Remove execution opportunity
-        if symbol in self.execution_cache:
-            del self.execution_cache[symbol]
-    
-    async def _cleanup_expired(self):
-        """Clean up expired cache entries."""
-        now = time.time()
-        max_age_seconds = self.max_age_hours * 3600
-        
-        expired_symbols = []
-        
-        for symbol, scan_result in self.scan_cache.items():
-            if now - scan_result.timestamp > max_age_seconds:
-                expired_symbols.append(symbol)
-        
-        if expired_symbols:
-            logger.info(f"Cleaning up {len(expired_symbols)} expired scan results")
-            
-            for symbol in expired_symbols:
-                with self.cache_lock:
-                    del self.scan_cache[symbol]
-                    self._remove_related_caches(symbol)
-    
-    def _get_available_strategies(self) -> List[str]:
-        """Get list of available trading strategies."""
-        return [
-            "trend_bot",
-            "grid_bot", 
-            "mean_bot",
-            "breakout_bot",
-            "sniper_bot",
-            "dex_scalper",
-            "sniper_solana",
-            "meme_wave_bot",
-            "momentum_bot",
-            "cross_chain_arb_bot"
-        ]
-    
-    def _update_scan_cache(self, symbol: str, scan_result: ScanResult):
-        """Update scan cache and persist to disk."""
-        self.scan_cache[symbol] = scan_result
-        self._persist_cache()
-    
-    def _load_cache(self):
-        """Load cache from disk."""
-        try:
-            if SCAN_CACHE_FILE.exists():
-                with open(SCAN_CACHE_FILE, 'r') as f:
-                    data = json.load(f)
-                    for symbol, item in data.items():
-                        scan_result = ScanResult(**item)
-                        self.scan_cache[symbol] = scan_result
-                        # Add to review queue
-                        self.review_queue.append(symbol)
+        Args:
+            cache_type: Specific cache type to clear, or None for all
+        """
+        if cache_type is None:
+            # Clear all caches
+            for ct in list(self.caches.keys()):
+                self.clear(ct)
+        else:
+            if cache_type in self.caches:
+                # Update memory usage
+                for entry in self.caches[cache_type].values():
+                    self.stats["total_memory_usage"] -= entry.size_bytes
                 
-                logger.info(f"Loaded {len(self.scan_cache)} scan results from cache")
-        except Exception as exc:
-            logger.warning(f"Failed to load scan cache: {exc}")
+                self.stats["total_entries"] -= len(self.caches[cache_type])
+                self.caches[cache_type].clear()
+                self.logger.info(f"Cleared {cache_type} cache")
     
-    def _persist_cache(self):
-        """Persist cache to disk."""
-        try:
-            # Convert to serializable format
-            cache_data = {}
-            for symbol, scan_result in self.scan_cache.items():
-                cache_data[symbol] = asdict(scan_result)
+    def get_stats(self, cache_type: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get cache statistics.
+        
+        Args:
+            cache_type: Specific cache type, or None for all
             
-            with open(SCAN_CACHE_FILE, 'w') as f:
-                json.dump(cache_data, f, indent=2, default=str)
-                
-        except Exception as exc:
-            logger.error(f"Failed to persist scan cache: {exc}")
-    
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """Get cache statistics."""
-        with self.cache_lock:
+        Returns:
+            Dictionary with cache statistics
+        """
+        if cache_type is None:
+            # Return aggregate stats
+            stats = {
+                "total_memory_usage_mb": self.stats["total_memory_usage"] / (1024 * 1024),
+                "total_entries": self.stats["total_entries"],
+                "cache_types": list(self.caches.keys()),
+                "compression_enabled": self.stats["compression_enabled"]
+            }
+            
+            # Aggregate hit rates
+            total_hits = sum(self.total_hits.values())
+            total_accesses = sum(self.total_accesses.values())
+            stats["overall_hit_rate"] = total_hits / max(total_accesses, 1)
+            
+            return stats
+        else:
+            # Return specific cache stats
+            if cache_type not in self.caches:
+                return {}
+            
+            cache = self.caches[cache_type]
+            total_accesses = self.total_accesses.get(cache_type, 0)
+            total_hits = self.total_hits.get(cache_type, 0)
+            
             return {
-                "scan_results": len(self.scan_cache),
-                "strategy_fits": len(self.strategy_fit_cache),
-                "execution_opportunities": len(self.execution_cache),
-                "review_queue_size": len(self.review_queue),
-                "cache_size_limit": self.max_cache_size,
-                "oldest_entry": min([sr.timestamp for sr in self.scan_cache.values()]) if self.scan_cache else 0,
-                "newest_entry": max([sr.timestamp for sr in self.scan_cache.values()]) if self.scan_cache else 0
+                "entries": len(cache),
+                "max_size": self.get_cache_size(cache_type),
+                "hit_rate": self._calculate_hit_rate(cache_type),
+                "access_frequency": self._calculate_access_frequency(cache_type),
+                "memory_usage_mb": sum(e.size_bytes for e in cache.values()) / (1024 * 1024),
+                "eviction_count": self.eviction_counts.get(cache_type, 0),
+                "total_accesses": total_accesses,
+                "total_hits": total_hits
             }
     
-    def clear_cache(self):
-        """Clear all caches."""
-        with self.cache_lock:
-            self.scan_cache.clear()
-            self.strategy_fit_cache.clear()
-            self.execution_cache.clear()
-            self.review_queue.clear()
-            
-            # Remove cache files
-            for cache_file in [SCAN_CACHE_FILE, STRATEGY_CACHE_FILE, EXECUTION_CACHE_FILE]:
-                if cache_file.exists():
-                    cache_file.unlink()
-            
-            logger.info("All caches cleared")
-
-
-# Global instance
-_scan_cache_manager: Optional[ScanCacheManager] = None
-
-
-def get_scan_cache_manager(config: Dict[str, Any]) -> ScanCacheManager:
-    """Get or create the global scan cache manager instance."""
-    global _scan_cache_manager
+    def _calculate_hit_rate(self, cache_type: str) -> float:
+        """Calculate hit rate for a cache type."""
+        if not self.hit_rates[cache_type]:
+            return 0.0
+        
+        hits = sum(1 for hit in self.hit_rates[cache_type] if hit)
+        return hits / len(self.hit_rates[cache_type])
     
-    if _scan_cache_manager is None:
-        _scan_cache_manager = ScanCacheManager(config)
+    def _calculate_access_frequency(self, cache_type: str) -> float:
+        """Calculate access frequency for a cache type."""
+        total_accesses = self.total_accesses.get(cache_type, 0)
+        if total_accesses == 0:
+            return 0.0
+        
+        # Calculate frequency based on recent activity
+        recent_window = 300  # 5 minutes
+        current_time = time.time()
+        
+        recent_accesses = 0
+        for entry in self.caches[cache_type].values():
+            if current_time - entry.last_access < recent_window:
+                recent_accesses += entry.access_count
+        
+        return recent_accesses / max(total_accesses, 1)
     
-    return _scan_cache_manager
+    def _evict_entries(self, cache_type: str, count: int) -> None:
+        """Evict entries based on the configured policy."""
+        cache = self.caches[cache_type]
+        
+        if self.eviction_policy == "lru":
+            # Least Recently Used
+            entries = sorted(cache.items(), key=lambda x: x[1].last_access)
+        elif self.eviction_policy == "lfu":
+            # Least Frequently Used
+            entries = sorted(cache.items(), key=lambda x: x[1].access_count)
+        else:  # adaptive
+            # Adaptive: combination of LRU and LFU
+            current_time = time.time()
+            entries = sorted(
+                cache.items(),
+                key=lambda x: (x[1].access_count, current_time - x[1].last_access)
+            )
+        
+        # Evict the specified number of entries
+        for i in range(min(count, len(entries))):
+            key, entry = entries[i]
+            self.stats["total_memory_usage"] -= entry.size_bytes
+            self.stats["total_entries"] -= 1
+            del cache[key]
+        
+        self.eviction_counts[cache_type] += count
+        self.logger.debug(f"Evicted {count} entries from {cache_type} cache")
+    
+    def _estimate_size(self, data: Any) -> int:
+        """Estimate the size of data in bytes."""
+        try:
+            import sys
+            return sys.getsizeof(data)
+        except:
+            # Fallback estimation
+            return 1024  # Default 1KB estimate
+    
+    async def cleanup_expired_entries(self, ttl: int = 3600) -> None:
+        """
+        Remove expired entries from all caches.
+        
+        Args:
+            ttl: Time to live in seconds
+        """
+        current_time = time.time()
+        expired_count = 0
+        
+        for cache_type, cache in self.caches.items():
+            expired_keys = []
+            for key, entry in cache.items():
+                if current_time - entry.timestamp > ttl:
+                    expired_keys.append(key)
+            
+            for key in expired_keys:
+                entry = cache[key]
+                self.stats["total_memory_usage"] -= entry.size_bytes
+                self.stats["total_entries"] -= 1
+                del cache[key]
+                expired_count += 1
+        
+        if expired_count > 0:
+            self.logger.info(f"Cleaned up {expired_count} expired cache entries")
 
 
-def get_scan_cache_stats() -> Dict[str, Any]:
-    """Get cache statistics if manager exists."""
-    if _scan_cache_manager:
-        return _scan_cache_manager.get_cache_stats()
-    return {"error": "Scan cache manager not initialized"}
+# Global cache manager instance
+_global_cache_manager: Optional[AdaptiveCacheManager] = None
+
+
+def get_cache_manager() -> AdaptiveCacheManager:
+    """
+    Get or create the global cache manager instance.
+    
+    Returns:
+        AdaptiveCacheManager instance
+    """
+    global _global_cache_manager
+    if _global_cache_manager is None:
+        _global_cache_manager = AdaptiveCacheManager()
+    return _global_cache_manager
+
+
+def configure_cache_manager(
+    initial_size: Optional[int] = None,
+    max_size: Optional[int] = None,
+    min_size: Optional[int] = None,
+    hit_rate_window: Optional[int] = None,
+    eviction_policy: Optional[str] = None,
+    enable_compression: Optional[bool] = None
+) -> None:
+    """
+    Configure the global cache manager with new settings.
+    
+    Args:
+        initial_size: Initial cache size for each cache type
+        max_size: Maximum cache size allowed
+        min_size: Minimum cache size allowed
+        hit_rate_window: Number of accesses to track for hit rate calculation
+        eviction_policy: Cache eviction policy ('lru', 'lfu', 'adaptive')
+        enable_compression: Whether to enable data compression
+    """
+    global _global_cache_manager
+    
+    if _global_cache_manager is None:
+        _global_cache_manager = AdaptiveCacheManager()
+    
+    if initial_size is not None:
+        _global_cache_manager.initial_size = initial_size
+    if max_size is not None:
+        _global_cache_manager.max_size = max_size
+    if min_size is not None:
+        _global_cache_manager.min_size = min_size
+    if hit_rate_window is not None:
+        _global_cache_manager.hit_rate_window = hit_rate_window
+    if eviction_policy is not None:
+        _global_cache_manager.eviction_policy = eviction_policy
+    if enable_compression is not None:
+        _global_cache_manager.enable_compression = enable_compression

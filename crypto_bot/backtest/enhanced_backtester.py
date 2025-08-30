@@ -395,9 +395,10 @@ class ContinuousBacktestingEngine:
                 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
                 
             else:
-                # CEX pairs - use existing logic
-                import ccxt
-                exchange = ccxt.kraken()  # Use Kraken instead of Binance
+                # CEX pairs - use existing logic with nonce improvements
+                from crypto_bot.execution.cex_executor import get_exchange
+                config = {"exchange": "kraken", "enable_nonce_improvements": True}
+                exchange, _ = get_exchange(config)
                 ohlcv = exchange.fetch_ohlcv(pair, timeframe=timeframe, limit=1000)
                 df = pd.DataFrame(
                     ohlcv,

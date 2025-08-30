@@ -53,7 +53,7 @@ class TradingBotController:
         }
         self.logger = setup_logger(__name__, LOG_DIR / "bot_controller.log")
 
-    # ------------------------------------------------------------------
+
     def _load_config(self) -> dict:
         if self.config_path.exists():
             with open(self.config_path) as f:

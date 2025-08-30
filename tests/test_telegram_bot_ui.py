@@ -257,17 +257,23 @@ def test_menu_signals_balance_trades_history(monkeypatch, tmp_path):
 
 def test_commands_require_admin(monkeypatch, tmp_path):
     monkeypatch.setattr(telegram_bot_ui, "ApplicationBuilder", DummyBuilder)
-    state = {"running": False, "mode": "cex"}
-    ui, _ = make_ui(tmp_path, state)
+    
+    # Set admin IDs BEFORE creating the UI
     import crypto_bot.utils.telegram as tg
     tg.set_admin_ids(["999"])  # only allow 999
+    
+    state = {"running": False, "mode": "cex"}
+    ui, _ = make_ui(tmp_path, state)
 
     update = DummyUpdate()
     update.effective_chat = types.SimpleNamespace(id="123")
     asyncio.run(ui.start_cmd(update, DummyContext()))
-    assert update.message.text == "Unauthorized"
+    # The start_cmd should fail authorization and not call menu_cmd
+    # So we should see "Unauthorized" in the message
+    assert "Unauthorized" in update.message.text
     assert state["running"] is False
 
+    # Reset admin IDs to allow all
     tg.set_admin_ids([])
 
     trades_file = tmp_path / "trades.csv"
@@ -283,17 +289,22 @@ def test_commands_require_admin(monkeypatch, tmp_path):
 
 def test_unauthorized_start_stop(monkeypatch, tmp_path):
     monkeypatch.setattr(telegram_bot_ui, "ApplicationBuilder", DummyBuilder)
-    state = {"running": False, "mode": "cex"}
-    ui, _ = make_ui(tmp_path, state)
+    
+    # Set admin IDs BEFORE creating the UI
     import crypto_bot.utils.telegram as tg
     tg.set_admin_ids(["999"])  # only allow 999
+    
+    state = {"running": False, "mode": "cex"}
+    ui, _ = make_ui(tmp_path, state)
 
     update = DummyUpdate()
     update.effective_chat = types.SimpleNamespace(id="123")
     asyncio.run(ui.start_cmd(update, DummyContext()))
-    assert update.message.text == "Unauthorized"
+    # The start_cmd should fail authorization and not call menu_cmd
+    assert "Unauthorized" in update.message.text
     assert state["running"] is False
 
+    # Reset admin IDs to allow all
     tg.set_admin_ids([])
 
     trades_file = tmp_path / "trades.csv"

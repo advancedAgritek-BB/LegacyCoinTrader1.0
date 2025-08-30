@@ -10,10 +10,7 @@ except Exception:  # pragma: no cover - fallback stub
             safe_dump=lambda *a, **k: '',
             dump=lambda *a, **k: ''
         )
-<<<<<<< Current (Your changes)
-=======
 
->>>>>>> Incoming (Background Agent changes)
 # Provide lightweight fallbacks for heavy deps if not installed
 try:  # prefer real numpy
     import numpy  # type: ignore

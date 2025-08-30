@@ -100,6 +100,48 @@ def _get_strategy_function(strategy_name: str):
         elif strategy_name in ["dca", "dca_bot"]:
             from crypto_bot.strategy import dca_bot
             return dca_bot.generate_signal
+        elif strategy_name in ["momentum", "momentum_bot"]:
+            from crypto_bot.strategy import momentum_bot
+            return momentum_bot.generate_signal
+        elif strategy_name in ["lstm", "lstm_bot"]:
+            from crypto_bot.strategy import lstm_bot
+            return lstm_bot.generate_signal
+        elif strategy_name in ["ultra_scalp", "ultra_scalp_bot"]:
+            from crypto_bot.strategy import ultra_scalp_bot
+            return ultra_scalp_bot.generate_signal
+        elif strategy_name in ["volatility_harvester"]:
+            from crypto_bot.strategy import volatility_harvester
+            return volatility_harvester.generate_signal
+        elif strategy_name in ["hft_engine"]:
+            from crypto_bot.strategy import hft_engine
+            return hft_engine.generate_signal
+        elif strategy_name in ["maker_spread"]:
+            from crypto_bot.strategy import maker_spread
+            return maker_spread.generate_signal
+        elif strategy_name in ["flash_crash_bot"]:
+            from crypto_bot.strategy import flash_crash_bot
+            return flash_crash_bot.generate_signal
+        elif strategy_name in ["meme_wave_bot"]:
+            from crypto_bot.strategy import meme_wave_bot
+            return meme_wave_bot.generate_signal
+        elif strategy_name in ["cross_chain_arb_bot"]:
+            from crypto_bot.strategy import cross_chain_arb_bot
+            return cross_chain_arb_bot.generate_signal
+        elif strategy_name in ["dip_hunter"]:
+            from crypto_bot.strategy import dip_hunter
+            return dip_hunter.generate_signal
+        elif strategy_name in ["range_arb_bot"]:
+            from crypto_bot.strategy import range_arb_bot
+            return range_arb_bot.generate_signal
+        elif strategy_name in ["stat_arb_bot"]:
+            from crypto_bot.strategy import stat_arb_bot
+            return stat_arb_bot.generate_signal
+        elif strategy_name in ["momentum_exploiter"]:
+            from crypto_bot.strategy import momentum_exploiter
+            return momentum_exploiter.generate_signal
+        elif strategy_name in ["arbitrage_engine"]:
+            from crypto_bot.strategy import arbitrage_engine
+            return arbitrage_engine.generate_signal
         else:
             return None
     except ImportError:
@@ -134,6 +176,23 @@ def get_strategy_by_name(
             "solana_scalping_bot": _get_strategy_function("solana_scalping_bot"),
             "dca": _get_strategy_function("dca"),
             "dca_bot": _get_strategy_function("dca_bot"),
+            "momentum": _get_strategy_function("momentum"),
+            "momentum_bot": _get_strategy_function("momentum_bot"),
+            "lstm": _get_strategy_function("lstm"),
+            "lstm_bot": _get_strategy_function("lstm_bot"),
+            "ultra_scalp": _get_strategy_function("ultra_scalp"),
+            "ultra_scalp_bot": _get_strategy_function("ultra_scalp_bot"),
+            "volatility_harvester": _get_strategy_function("volatility_harvester"),
+            "hft_engine": _get_strategy_function("hft_engine"),
+            "maker_spread": _get_strategy_function("maker_spread"),
+            "flash_crash_bot": _get_strategy_function("flash_crash_bot"),
+            "meme_wave_bot": _get_strategy_function("meme_wave_bot"),
+            "cross_chain_arb_bot": _get_strategy_function("cross_chain_arb_bot"),
+            "dip_hunter": _get_strategy_function("dip_hunter"),
+            "range_arb_bot": _get_strategy_function("range_arb_bot"),
+            "stat_arb_bot": _get_strategy_function("stat_arb_bot"),
+            "momentum_exploiter": _get_strategy_function("momentum_exploiter"),
+            "arbitrage_engine": _get_strategy_function("arbitrage_engine"),
         })
     
     return _STRATEGY_FN_MAP.get(name)

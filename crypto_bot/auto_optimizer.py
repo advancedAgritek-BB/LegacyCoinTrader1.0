@@ -38,17 +38,12 @@ def optimize_strategies() -> Dict[str, Dict[str, float]]:
     bot_cfg = _load_config()
     results: Dict[str, Dict[str, float]] = {}
 
-    # Initialize exchange based on config
+    # Initialize exchange based on config using get_exchange for nonce improvements
     exchange = None
     try:
-        import ccxt
-        exchange_name = bot_cfg.get("exchange", "kraken").lower()
-        if hasattr(ccxt, exchange_name):
-            exchange = getattr(ccxt, exchange_name)()
-            logger.info(f"Using {exchange_name} exchange for backtesting")
-        else:
-            logger.warning(f"Exchange {exchange_name} not found, using kraken as fallback")
-            exchange = ccxt.kraken()
+        from crypto_bot.execution.cex_executor import get_exchange
+        exchange, _ = get_exchange(bot_cfg)
+        logger.info(f"Using {exchange.id} exchange for backtesting with nonce improvements")
     except Exception as e:
         logger.error(f"Failed to initialize exchange: {e}")
         # Continue without exchange - will use simulated data

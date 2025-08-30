@@ -96,7 +96,15 @@ def compute_performance(df: pd.DataFrame) -> Dict[str, float]:
     total_pnl = sum(perf.values())
     
     # Calculate average trade size
-    avg_trade_size = df['amount'].mean() if 'amount' in df.columns else 0.0
+    try:
+        if 'amount' in df.columns and not df.empty:
+            # Check if the amount column contains numeric data
+            numeric_amounts = pd.to_numeric(df['amount'], errors='coerce')
+            avg_trade_size = numeric_amounts.mean() if not numeric_amounts.isna().all() else 0.0
+        else:
+            avg_trade_size = 0.0
+    except Exception:
+        avg_trade_size = 0.0
     
     return {
         'total_trades': total_trades,

@@ -23,6 +23,38 @@ from .pair_cache import load_liquid_pairs
 try:
     from .symbol_utils import get_filtered_symbols, fix_symbol
     from .symbol_pre_filter import filter_symbols, has_enough_history
+    
+    # Create synchronous wrappers for tests
+    def filter_symbols_sync(*args, **kwargs):
+        """Synchronous wrapper for filter_symbols for testing purposes."""
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                # If we're in an async context, return the async function
+                return filter_symbols
+            else:
+                # If no loop is running, run the async function
+                return asyncio.run(filter_symbols(*args, **kwargs))
+        except RuntimeError:
+            # No event loop, create one
+            return asyncio.run(filter_symbols(*args, **kwargs))
+    
+    def has_enough_history_sync(*args, **kwargs):
+        """Synchronous wrapper for has_enough_history for testing purposes."""
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                # If we're in an async context, return the async function
+                return has_enough_history
+            else:
+                # If no loop is running, run the async function
+                return asyncio.run(has_enough_history(*args, **kwargs))
+        except RuntimeError:
+            # No event loop, create one
+            return asyncio.run(has_enough_history(*args, **kwargs))
+            
 except Exception:  # pragma: no cover - optional during tests
     def get_filtered_symbols(*a, **k):  # type: ignore
         return []
@@ -34,6 +66,12 @@ except Exception:  # pragma: no cover - optional during tests
         return {}
 
     def has_enough_history(*a, **k):  # type: ignore
+        return True
+        
+    def filter_symbols_sync(*a, **k):  # type: ignore
+        return {}
+        
+    def has_enough_history_sync(*a, **k):  # type: ignore
         return True
 from .strategy_analytics import compute_metrics, write_scores, write_stats
 try:

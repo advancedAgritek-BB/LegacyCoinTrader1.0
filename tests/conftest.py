@@ -193,31 +193,20 @@ def fix_imports():
     # Mock problematic modules
     with patch.dict('sys.modules', {
         'crypto_bot.utils.telegram': Mock(),
-        'crypto_bot.utils.telegram.send_message': Mock(),
         'crypto_bot.volatility_filter': Mock(),
         'crypto_bot.volatility_filter.requests': Mock(),
         'crypto_bot.main': Mock(),
-        'crypto_bot.main.main': Mock(),
         'crypto_bot.fund_manager': Mock(),
-        'crypto_bot.fund_manager.fund_manager': Mock(),
         'crypto_bot.portfolio_rotator': Mock(),
-        'crypto_bot.portfolio_rotator.portfolio_rotator': Mock(),
-        'crypto_bot.utils.symbol_pre_filter': Mock(),
-        'crypto_bot.utils.symbol_pre_filter.symbol_pre_filter': Mock(),
-        'crypto_bot.telegram_bot_ui': Mock(),
-        'crypto_bot.telegram_bot_ui.telegram_bot_ui': Mock(),
         'crypto_bot.regime': Mock(),
-        'crypto_bot.regime.regime': Mock(),
         'crypto_bot.utils.regime_pnl_tracker': Mock(),
-        'crypto_bot.utils.regime_pnl_tracker.regime_pnl_tracker': Mock(),
         'crypto_bot.utils.market_analyzer': Mock(),
-        'crypto_bot.utils.market_analyzer.market_analyzer': Mock(),
         'crypto_bot.strategy.grid_bot': Mock(),
-        'crypto_bot.strategy.grid_bot.breakout_bot': Mock(),
         'crypto_bot.execution': Mock(),
-        'crypto_bot.execution.execution': Mock(),
     }):
-        yield
+        # Mock specific functions that tests expect
+        with patch('crypto_bot.utils.telegram.send_message', Mock()) as mock_send:
+            yield
 
 # Async test support
 @pytest.fixture(scope="session")

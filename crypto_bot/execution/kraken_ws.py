@@ -426,13 +426,14 @@ class KrakenWSClient:
 
         self.exchange = None
         if self.api_key and self.api_secret:
-            self.exchange = ccxt.kraken(
-                {
-                    "apiKey": self.api_key,
-                    "secret": self.api_secret,
-                    "enableRateLimit": True,
-                }
-            )
+            # Use get_exchange to get nonce improvements
+            from .cex_executor import get_exchange
+            config = {
+                "exchange": "kraken",
+                "enable_nonce_improvements": True,
+                "api_retry_attempts": 3
+            }
+            self.exchange, _ = get_exchange(config)
 
         self.token: Optional[str] = self.ws_token
         self.token_created: Optional[datetime] = None

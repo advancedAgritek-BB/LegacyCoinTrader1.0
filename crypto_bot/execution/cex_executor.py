@@ -12,10 +12,8 @@ import asyncio
 from typing import Dict, Optional, Tuple, List
 from pathlib import Path
 
-try:
-    import ccxt.pro as ccxtpro  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
-    ccxtpro = None
+# Remove CCXTpro import - user doesn't have license
+ccxtpro = None
 
 from crypto_bot.utils.telegram import TelegramNotifier, send_message
 from crypto_bot.utils.notifier import Notifier
@@ -28,13 +26,92 @@ from crypto_bot.utils.logger import LOG_DIR, setup_logger
 logger = setup_logger(__name__, LOG_DIR / "execution.log")
 
 
+# Thread-safe nonce management for Kraken
+import threading
+nonce_lock = threading.Lock()
+last_nonce = 0
+
+
+def custom_nonce():
+    """Thread-safe custom nonce function for Kraken to prevent nonce errors."""
+    global last_nonce
+    with nonce_lock:
+        current_time = int(time.time() * 1000)
+        # Add a small buffer to ensure we're ahead of server time
+        current_time += 100  # 100ms buffer
+        # Ensure nonce is always increasing
+        if current_time <= last_nonce:
+            current_time = last_nonce + 1
+        last_nonce = current_time
+        return current_time
+
+
+def setup_kraken_nonce_improvements(exchange, config):
+    """Apply Kraken-specific nonce improvements to the exchange instance."""
+    if exchange.id.lower() != 'kraken':
+        return
+
+    kraken_settings = config.get("kraken_settings", {})
+    enable_improvements = kraken_settings.get("enable_nonce_improvements", True)
+
+    if enable_improvements:
+        # Set custom nonce function
+        exchange.nonce = custom_nonce
+
+        # Set time synchronization
+        time_sync_threshold = kraken_settings.get("time_sync_threshold", 1000)
+        exchange.options['timeSyncThreshold'] = time_sync_threshold
+        
+        # Enable automatic time synchronization
+        exchange.options['adjustForTimeDifference'] = True
+        
+        # Try to synchronize time with Kraken server
+        try:
+            server_time = exchange.fetch_time()
+            local_time = int(time.time() * 1000)
+            time_diff = abs(server_time - local_time)
+            if time_diff > 1000:  # If difference is more than 1 second
+                logger.warning(f"Time difference with Kraken server: {time_diff}ms")
+                # Adjust the nonce buffer based on time difference
+                global last_nonce
+                with nonce_lock:
+                    last_nonce = max(last_nonce, server_time + 100)
+        except Exception as e:
+            logger.warning(f"Could not synchronize time with Kraken server: {e}")
+
+        logger.info("Applied Kraken nonce improvements: custom nonce function, time sync, and auto-adjustment")
+
+
+def fetch_balance_with_retry(exchange, max_retries=3):
+    """Fetch balance with retry mechanism for nonce errors."""
+    for attempt in range(max_retries):
+        try:
+            return exchange.fetch_balance()
+        except Exception as e:
+            error_str = str(e)
+            if "Invalid nonce" in error_str and attempt < max_retries - 1:
+                logger.warning(f"Nonce error on attempt {attempt + 1}, retrying...")
+                # Reset nonce for next attempt
+                if hasattr(exchange, 'nonce') and callable(exchange.nonce):
+                    exchange.nonce()  # Call to reset internal state
+                time.sleep(2.0)  # Longer delay for nonce errors
+                continue
+            elif "Rate limit" in error_str and attempt < max_retries - 1:
+                logger.warning(f"Rate limit on attempt {attempt + 1}, retrying...")
+                time.sleep(3.0)  # Longer delay for rate limits
+                continue
+            else:
+                # Re-raise the exception if it's not a nonce error or we've exhausted retries
+                raise e
+    return None
+
+
 def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
     """Instantiate and return a ccxt exchange and optional websocket client.
 
-    When ``use_websocket`` is enabled and ``ccxtpro`` is available, an
-    asynchronous ``ccxt.pro`` instance is returned. Otherwise the standard
-    ``ccxt`` exchange is used. ``KrakenWSClient`` is retained for backward
-    compatibility when WebSocket trading is desired without ccxt.pro.
+    Uses standard ``ccxt`` exchange with enhanced Kraken nonce improvements
+    for better reliability. ``KrakenWSClient`` is retained for backward
+    compatibility when WebSocket trading is desired.
     """
 
     supported_exchanges = ("coinbase", "kraken")
@@ -54,10 +131,8 @@ def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
     ws_token = os.getenv("KRAKEN_WS_TOKEN")
     api_token = os.getenv("KRAKEN_API_TOKEN")
 
-    if use_ws and ccxtpro:
-        ccxt_mod = ccxtpro
-    else:
-        ccxt_mod = ccxt
+    # Always use regular CCXT - no CCXTpro
+    ccxt_mod = ccxt
 
     if exchange_name == "coinbase":
         exchange = ccxt_mod.coinbase(
@@ -68,13 +143,12 @@ def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
                 "enableRateLimit": True,
             }
         )
+        
+        # Add retry method to exchange instance
+        exchange.fetch_balance_with_retry = lambda: fetch_balance_with_retry(exchange)
     elif exchange_name == "kraken":
         if use_ws:
-            if ccxtpro:
-                if (api_key and api_secret) or ws_token:
-                    ws_client = KrakenWSClient(api_key, api_secret, ws_token, api_token)
-            else:
-                ws_client = KrakenWSClient(api_key, api_secret)
+            ws_client = KrakenWSClient(api_key, api_secret, ws_token, api_token)
 
         exchange = ccxt_mod.kraken(
             {
@@ -83,6 +157,12 @@ def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
                 "enableRateLimit": True,
             }
         )
+
+        # Apply Kraken nonce improvements
+        setup_kraken_nonce_improvements(exchange, config)
+        
+        # Add retry method to exchange instance
+        exchange.fetch_balance_with_retry = lambda: fetch_balance_with_retry(exchange)
     else:
         raise ValueError(
             "Unsupported exchange: {}. Supported exchanges: {}".format(
@@ -400,12 +480,7 @@ async def execute_trade_async(
             order["price"] = t.get("last") or t.get("bid") or t.get("ask") or 0.0
         except Exception:
             order["price"] = 0.0
-    
-    # Debug logging before calling log_trade
-    logger.info(f"About to log trade (async): {order}")
     log_trade(order)
-    logger.info(f"Trade logged successfully (async): {order}")
-    
     logger.info(
         "Order executed - id=%s side=%s amount=%s price=%s dry_run=%s",
         order.get("id"),

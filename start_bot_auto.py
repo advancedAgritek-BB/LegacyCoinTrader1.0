@@ -19,26 +19,15 @@ def start_bot_automatically():
     process = subprocess.Popen([
         sys.executable, 'start_bot_noninteractive.py'
     ], 
-    stdin=subprocess.PIPE,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
     env=env,
     text=True,
-    bufsize=1
+    bufsize=1,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE
     )
     
-    # Send the paper trading balance and start command
-    commands = [
-        "10000\n",  # Paper trading balance
-        "start\n",   # Start trading
-    ]
-    
-    for cmd in commands:
-        process.stdin.write(cmd)
-        process.stdin.flush()
-        time.sleep(1)
-    
     print("Bot started automatically with trading enabled")
+    print("Note: Bot no longer prompts for paper trading balance - it uses config files automatically")
     return process
 
 if __name__ == "__main__":

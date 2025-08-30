@@ -80,6 +80,64 @@ exchange: kraken
 exchange_market_types:
 - spot
 - futures
+symbol: BTC/USD  # Fallback symbol for when filtering fails
+excluded_symbols:
+- So11111111111111111111111111111111111111112/USDC
+- So11111111111111111111111111111111111111112/USDT
+# Performance optimization settings
+performance:
+  # Memory management settings
+  memory:
+    max_memory_usage_pct: 80.0  # Increased threshold to allow more processing
+    adaptive_cache_sizing: true  # Enable adaptive cache sizing
+    memory_pressure_threshold: 80.0  # Memory pressure threshold for alerts
+    gc_threshold: 70.0  # Garbage collection threshold
+  
+  # Concurrency management settings
+  concurrency:
+    adaptive_concurrency: true  # Enable adaptive concurrency control
+    min_concurrent_requests: 1  # Minimum concurrent requests
+    max_concurrent_requests: 10  # Reduced from 25 to prevent rate limiting
+    success_rate_threshold: 0.8  # Success rate threshold for adjustments
+    response_time_threshold: 1.0  # Response time threshold in seconds
+  
+  # Rate limiting settings
+  rate_limiting:
+    adaptive_rate_limiting: true  # Enable adaptive rate limiting
+    base_request_delay: 1.0  # Base delay between requests in seconds
+    max_request_delay: 10.0  # Maximum delay between requests
+    error_backoff_multiplier: 2.0  # Exponential backoff multiplier
+    max_requests_per_minute: 10  # Maximum requests per minute
+  
+  # Caching settings
+  caching:
+    adaptive_cache_ttl: true  # Enable adaptive cache TTL
+    min_cache_ttl: 60  # Minimum cache TTL in seconds
+    max_cache_ttl: 3600  # Maximum cache TTL in seconds
+    cache_hit_rate_threshold: 0.7  # Cache hit rate threshold
+    cache_size_multiplier: 2.0  # Cache size multiplier for high hit rates
+  
+  # Monitoring settings
+  monitoring:
+    enable_performance_monitoring: true  # Enable performance monitoring
+    metrics_export_interval: 300  # Metrics export interval in seconds
+    alert_enabled: true  # Enable performance alerts
+    performance_log_level: "INFO"  # Performance logging level
+  
+  # Database settings
+  database:
+    enabled: false  # Enable database storage for metrics
+    host: "localhost"  # Database host
+    port: 5432  # Database port
+    database: "crypto_bot"  # Database name
+    user: "postgres"  # Database user
+    password: ""  # Database password
+    min_connections: 5  # Minimum connection pool size
+    max_connections: 20  # Maximum connection pool size
+    command_timeout: 30  # Command timeout in seconds
+
+# Loop and execution settings
+loop_interval_minutes: 10     # Increased to reduce rate limiting
 exec:
   allow_market_orders: true
   order_retry_interval: 0.5
@@ -175,12 +233,12 @@ liquidity_check: true
 liquidity_depth: 3
 max_age_days: 60
 max_change_pct: 30
-max_concurrent_ohlcv: 8
+max_concurrent_ohlcv: 5       # Reduced from 10 to prevent rate limiting
 max_drawdown: 0.35
 max_latency_ms: 300
 max_ohlcv_failures: 8
-max_open_trades: 30
-max_parallel: 100
+max_open_trades: 40    # Increased from 30 for more concurrent opportunities
+max_parallel: 120             # Increased from 100 for more parallel processing
 max_slippage_pct: 0.3
 max_spread_pct: 4
 max_vol: 100000000
@@ -191,12 +249,12 @@ metrics_output_file: crypto_bot/logs/metrics.csv
 micro_scalp:
   atr_period: 8
   confirm_bars: 0
-  cooldown_seconds: 30
+  cooldown_seconds: 20        # Reduced from 30 for faster trading
   ema_fast: 1
   ema_slow: 3
   fresh_cross_only: false
   imbalance_filter: false
-  max_concurrent_signals: 25
+  max_concurrent_signals: 30  # Increased from 25 for more scalps
   max_drawdown: 0.2
   min_atr_pct: 0.0003
   min_score: 0.06
@@ -348,10 +406,10 @@ sl_pct: 0.008
 sniper_bot:
   atr_window: 8
   breakout_pct: 0.011236940825431006
-  cooldown_seconds: 45
+  cooldown_seconds: 30        # Reduced from 45 for faster re-entry
   fallback_atr_mult: 1.0
   fallback_volume_mult: 1.0
-  max_concurrent_signals: 15
+  max_concurrent_signals: 20  # Increased from 15 for more opportunities
   max_drawdown: 0.25
   max_history: 15
   max_slippage_bps: 15
@@ -374,18 +432,20 @@ solana_scanner:
     moralis: YOUR_KEY
   enabled: true
   gecko_search: true
-  interval_minutes: 0.15
+  interval_minutes: 5  # Increased from 0.15 to 5 minutes to prevent rate limiting
   max_tokens_per_scan: 150
   min_volume_usd: 100
 solana_slippage_bps: 15
 solana_symbols: []
-stop_loss_pct: 0.008
+stop_loss_pct: 0.005   # Tightened from 0.008 for better risk/reward
 strategy_allocation:
-  bounce_scalper: 15
-  grid_bot: 15
-  micro_scalp_bot: 30
-  sniper_bot: 25
-  trend_bot: 15
+  sniper_bot: 35      # Increased from 25% for pump catching
+  micro_scalp_bot: 25 # Reduced slightly to reallocate
+  bounce_scalper: 20  # Increased from 15% for quick scalps
+  momentum_bot: 10    # Added for trend acceleration opportunities
+  volatility_harvester: 10  # Added for high-volatility fast profits
+  trend_bot: 0        # Remove/reduce slower strategy
+  grid_bot: 0         # Remove/reduce slower strategy
 strategy_router:
   bandit_enabled: true
   bounce_timeframe: 3m
@@ -428,19 +488,19 @@ strategy_router:
   trending_timeframe: 45m
   volatile_timeframe: 1m
 symbol_filter:
-  change_pct_percentile: 3
+  change_pct_percentile: 30
   correlation_max_pairs: 250
   http_timeout: 3
   kraken_batch_size: 300
   log_ticker_exceptions: true
   max_correlation: 0.85
   max_spread_pct: 5
-  min_volume_usd: 25
+  min_volume_usd: 25000
   ticker_retry_attempts: 3
   uncached_volume_multiplier: 1.2
-  volume_percentile: 10
-symbol_refresh_minutes: 0.15
-take_profit_pct: 0.045
+  volume_percentile: 20
+symbol_refresh_minutes: 5  # Increased from 0.15 to 5 minutes to prevent rate limiting
+take_profit_pct: 0.06  # Increased from 0.045 for bigger wins
 tax_tracking:
   enabled: true
   export_path: crypto_bot/logs/tax_trades.csv
@@ -475,7 +535,7 @@ timeframes:
 top_n_symbols: 150
 tp_mult: 2.5
 tp_pct: 0.045
-trade_size_pct: 0.25
+trade_size_pct: 0.4    # Increased from 0.25 for higher profit potential
 trend:
   atr_period: 8
   k: 0.9

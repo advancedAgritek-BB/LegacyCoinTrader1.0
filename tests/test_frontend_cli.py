@@ -1,15 +1,15 @@
-from frontend import app
+from frontend.app import app
 import subprocess
 
 
 def test_cli_get():
-    client = app.app.test_client()
+    client = app.test_client()
     resp = client.get('/cli')
     assert resp.status_code == 200
 
 
 def test_cli_post_runs_command(monkeypatch):
-    client = app.app.test_client()
+    client = app.test_client()
 
     def fake_run(cmd, shell, capture_output, text, check):
         class Result:
@@ -39,7 +39,7 @@ class FakeProc:
 
 
 def test_start_stop_bot_json(monkeypatch):
-    client = app.app.test_client()
+    client = app.test_client()
 
     monkeypatch.setattr(subprocess, 'Popen', lambda *a, **kw: FakeProc())
     app.bot_proc = None

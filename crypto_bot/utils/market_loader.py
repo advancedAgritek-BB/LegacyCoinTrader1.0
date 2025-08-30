@@ -13,9 +13,200 @@ import aiohttp
 import base58
 import warnings
 import contextlib
+from collections import deque
 
 from .telegram import TelegramNotifier
 from .logger import LOG_DIR, setup_logger
+
+
+class AdaptiveRateLimiter:
+    """Intelligent rate limiting for API calls with adaptive delays."""
+    
+    def __init__(
+        self,
+        max_requests_per_minute: int = 10,
+        base_delay: float = 1.0,
+        max_delay: float = 60.0,
+        error_backoff_multiplier: float = 2.0,
+        success_recovery_factor: float = 0.8,
+        window_size: int = 1000
+    ):
+        """
+        Initialize the adaptive rate limiter.
+        
+        Args:
+            max_requests_per_minute: Maximum requests allowed per minute
+            base_delay: Base delay in seconds between requests
+            max_delay: Maximum delay in seconds
+            error_backoff_multiplier: Multiplier for delay on errors
+            success_recovery_factor: Factor to reduce delay on success
+            window_size: Size of the request history window
+        """
+        self.max_requests_per_minute = max_requests_per_minute
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.error_backoff_multiplier = error_backoff_multiplier
+        self.success_recovery_factor = success_recovery_factor
+        
+        # Request tracking
+        self.request_times = deque(maxlen=window_size)
+        self.error_count = 0
+        self.consecutive_errors = 0
+        self.current_delay = base_delay
+        self.last_request_time = 0
+        
+        # Statistics
+        self.total_requests = 0
+        self.total_errors = 0
+        self.logger = setup_logger("adaptive_rate_limiter")
+    
+    async def wait_if_needed(self) -> None:
+        """
+        Wait if necessary to respect rate limits and apply adaptive delays.
+        """
+        now = time.time()
+        
+        # Calculate current request rate over the last 60 seconds
+        cutoff_time = now - 60
+        recent_requests = sum(1 for req_time in self.request_times if req_time > cutoff_time)
+        
+        # Apply rate limiting if we're exceeding the limit
+        if recent_requests >= self.max_requests_per_minute:
+            wait_time = 60 - (now - self.request_times[0]) if self.request_times else 60
+            if wait_time > 0:
+                self.logger.debug(f"Rate limit exceeded, waiting {wait_time:.2f}s")
+                await asyncio.sleep(wait_time)
+        
+        # Apply adaptive delay based on current delay setting
+        if self.current_delay > 0:
+            time_since_last = now - self.last_request_time
+            if time_since_last < self.current_delay:
+                wait_time = self.current_delay - time_since_last
+                self.logger.debug(f"Applying adaptive delay: {wait_time:.2f}s")
+                await asyncio.sleep(wait_time)
+        
+        # Record this request
+        self.request_times.append(now)
+        self.last_request_time = now
+        self.total_requests += 1
+    
+    def record_error(self) -> None:
+        """
+        Record an error and increase the backoff delay.
+        """
+        self.total_errors += 1
+        self.error_count += 1
+        self.consecutive_errors += 1
+        
+        # Apply exponential backoff for consecutive errors
+        if self.consecutive_errors > 0:
+            backoff_delay = self.base_delay * (self.error_backoff_multiplier ** self.consecutive_errors)
+            self.current_delay = min(self.max_delay, backoff_delay)
+            
+            self.logger.warning(
+                f"API error recorded. Consecutive errors: {self.consecutive_errors}, "
+                f"delay increased to {self.current_delay:.2f}s"
+            )
+    
+    def record_success(self) -> None:
+        """
+        Record a successful request and gradually reduce the delay.
+        """
+        self.consecutive_errors = 0
+        
+        # Gradually reduce delay on success
+        if self.current_delay > self.base_delay:
+            self.current_delay = max(
+                self.base_delay,
+                self.current_delay * self.success_recovery_factor
+            )
+            self.logger.debug(f"Success recorded, delay reduced to {self.current_delay:.2f}s")
+    
+    def get_current_delay(self) -> float:
+        """
+        Get the current delay value.
+        
+        Returns:
+            Current delay in seconds
+        """
+        return self.current_delay
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get current statistics.
+        
+        Returns:
+            Dictionary with current statistics
+        """
+        now = time.time()
+        recent_requests = sum(1 for req_time in self.request_times if req_time > now - 60)
+        
+        return {
+            "total_requests": self.total_requests,
+            "total_errors": self.total_errors,
+            "error_rate": self.total_errors / max(self.total_requests, 1),
+            "consecutive_errors": self.consecutive_errors,
+            "current_delay": self.current_delay,
+            "requests_last_minute": recent_requests,
+            "max_requests_per_minute": self.max_requests_per_minute
+        }
+
+
+# Global rate limiter instance
+_global_rate_limiter: Optional[AdaptiveRateLimiter] = None
+
+
+def get_rate_limiter() -> AdaptiveRateLimiter:
+    """
+    Get or create the global rate limiter instance.
+    
+    Returns:
+        AdaptiveRateLimiter instance
+    """
+    global _global_rate_limiter
+    if _global_rate_limiter is None:
+        _global_rate_limiter = AdaptiveRateLimiter()
+    return _global_rate_limiter
+
+
+def configure_rate_limiter(
+    max_requests_per_minute: Optional[int] = None,
+    base_delay: Optional[float] = None,
+    max_delay: Optional[float] = None,
+    error_backoff_multiplier: Optional[float] = None,
+    success_recovery_factor: Optional[float] = None,
+    window_size: Optional[int] = None
+) -> None:
+    """
+    Configure the global rate limiter with new settings.
+    
+    Args:
+        max_requests_per_minute: Maximum requests allowed per minute
+        base_delay: Base delay in seconds between requests
+        max_delay: Maximum delay in seconds
+        error_backoff_multiplier: Multiplier for delay on errors
+        success_recovery_factor: Factor to reduce delay on success
+        window_size: Size of the request history window
+    """
+    global _global_rate_limiter
+    
+    if _global_rate_limiter is None:
+        _global_rate_limiter = AdaptiveRateLimiter()
+    
+    if max_requests_per_minute is not None:
+        _global_rate_limiter.max_requests_per_minute = max_requests_per_minute
+    if base_delay is not None:
+        _global_rate_limiter.base_delay = base_delay
+    if max_delay is not None:
+        _global_rate_limiter.max_delay = max_delay
+    if error_backoff_multiplier is not None:
+        _global_rate_limiter.error_backoff_multiplier = error_backoff_multiplier
+    if success_recovery_factor is not None:
+        _global_rate_limiter.success_recovery_factor = success_recovery_factor
+    if window_size is not None:
+        # Create new deque with new window size
+        old_times = list(_global_rate_limiter.request_times)
+        _global_rate_limiter.request_times = deque(old_times, maxlen=window_size)
 
 
 _last_snapshot_time = 0
@@ -1031,6 +1222,11 @@ async def fetch_dex_ohlcv(
 ) -> Optional[list]:
     """Fetch DEX OHLCV with fallback to CoinGecko, Coinbase then Kraken."""
 
+    # Guard against None symbol values
+    if symbol is None or not isinstance(symbol, str):
+        logger.warning("Invalid symbol passed to fetch_dex_ohlcv: %s", symbol)
+        return None
+
     res = gecko_res
     if res is None and use_gecko:
         try:
@@ -1125,9 +1321,12 @@ async def load_ohlcv_parallel(
 
     since_map = since_map or {}
 
+    # Filter out None values to prevent downstream errors
+    valid_symbols = [s for s in symbols if s is not None and isinstance(s, str)]
+
     now = time.time()
     filtered_symbols: List[str] = []
-    for s in symbols:
+    for s in valid_symbols:
         info = failed_symbols.get(s)
         if not info:
             filtered_symbols.append(s)
@@ -1172,6 +1371,8 @@ async def load_ohlcv_parallel(
 
         return await _fetch_and_sleep()
 
+    # Ensure symbols is filtered again in case of None values
+    symbols = [s for s in symbols if s is not None and isinstance(s, str)]
     tasks = [asyncio.create_task(sem_fetch(s)) for s in symbols]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -1309,6 +1510,9 @@ async def update_ohlcv_cache(
     snapshot_due = now - _last_snapshot_time >= snapshot_interval
 
     logger.info("Starting OHLCV update for timeframe %s", timeframe)
+
+    # Filter out None values to prevent downstream errors
+    symbols = [s for s in symbols if s is not None and isinstance(s, str)]
 
     since_map: Dict[str, Optional[int]] = {}
     if snapshot_due:
@@ -1488,9 +1692,12 @@ async def update_multi_tf_ohlcv_cache(
         logger.info("Starting update for timeframe %s", tf)
         tf_cache = cache.get(tf, {})
 
+        # Filter out None values to prevent partition errors
+        valid_symbols = [s for s in symbols if s is not None and isinstance(s, str)]
+
         cex_symbols: List[str] = []
         dex_symbols: List[str] = []
-        for s in symbols:
+        for s in valid_symbols:
             base, _, quote = s.partition("/")
             if quote.upper() == "USDC" and _is_valid_base_token(base):
                 dex_symbols.append(s)

@@ -1,5 +1,6 @@
 import ast
 from pathlib import Path
+from typing import Optional
 from crypto_bot.utils.logger import setup_logger
 
 SOURCE = Path('crypto_bot/main.py').read_text()
@@ -14,7 +15,7 @@ for node in MODULE.body:
 def test_emit_timing_logs(monkeypatch, tmp_path):
     log_file = tmp_path / 'bot.log'
     logger = setup_logger('timing_test', str(log_file))
-    ns = {'log_cycle_metrics': lambda *a, **k: None, 'logger': logger, 'Path': Path}
+    ns = {'log_cycle_metrics': lambda *a, **k: None, 'logger': logger, 'Path': Path, 'Optional': Optional}
     exec(FUNC_SRC, ns)
     ns['_emit_timing'](0.1, 0.2, 0.3, 0.6)
     text = log_file.read_text()

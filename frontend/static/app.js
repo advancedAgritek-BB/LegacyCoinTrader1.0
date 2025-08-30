@@ -15,7 +15,7 @@ function initApp() {
     // Initialize any charts or data visualizations
     initCharts();
     
-    // Initialize real-time updates
+    // Initialize real-time updates (single interval)
     initRealTimeUpdates();
 }
 
@@ -165,13 +165,32 @@ function initCharts() {
     }
 }
 
-// Real-time updates
+// Real-time updates - SINGLE interval to prevent conflicts
 function initRealTimeUpdates() {
-    // Update bot status every 5 seconds
-    setInterval(updateBotStatus, 5000);
+    // Single update interval every 10 seconds to prevent conflicts
+    setInterval(updateAllData, 10000);
     
-    // Update metrics every 10 seconds
-    setInterval(updateMetrics, 10000);
+    // Initial update
+    updateAllData();
+}
+
+// Update all data in one function to prevent conflicts
+function updateAllData() {
+    // Update bot status
+    updateBotStatus();
+    
+    // Update dashboard metrics
+    updateDashboardMetrics();
+    
+    // Update live signals
+    updateLiveSignals();
+    
+    // Update open positions (throttled to prevent excessive updates)
+if (typeof window.updateOpenPositions === 'function') {
+    updateOpenPositionsThrottled();
+} else {
+    console.log('updateOpenPositions function not available yet, skipping update');
+}
 }
 
 // Update bot status
@@ -192,6 +211,12 @@ function updateBotStatus() {
                     statusIndicator.classList.add('offline');
                     statusText.textContent = 'Bot Offline';
                 }
+            }
+            
+            // Update uptime display
+            const uptimeElement = document.getElementById('uptime');
+            if (uptimeElement && data.uptime) {
+                uptimeElement.textContent = data.uptime;
             }
         })
         .catch(error => console.error('Error updating bot status:', error));
@@ -257,6 +282,33 @@ function updateLiveSignals() {
         .catch(error => console.error('Error updating live signals:', error));
 }
 
+// Throttled version of updateOpenPositions to prevent excessive updates
+let lastOpenPositionsUpdate = 0;
+const OPEN_POSITIONS_UPDATE_INTERVAL = 10000; // 10 seconds minimum between updates
+
+function updateOpenPositionsThrottled() {
+    const now = Date.now();
+    if (now - lastOpenPositionsUpdate < OPEN_POSITIONS_UPDATE_INTERVAL) {
+        console.log('Skipping open positions update - too soon since last update');
+        return;
+    }
+    
+    lastOpenPositionsUpdate = now;
+    updateOpenPositions();
+}
+
+// Update open positions function
+function updateOpenPositions() {
+    console.log('updateOpenPositions called from app.js');
+    // This function is defined in the HTML template
+    // We just need to ensure it exists before calling it
+    if (typeof window.updateOpenPositions === 'function') {
+        window.updateOpenPositions();
+    } else {
+        console.log('updateOpenPositions function not available yet');
+    }
+}
+
 // Update performance metrics
 function updatePerformanceMetrics(performance) {
     // Update P&L
@@ -312,18 +364,25 @@ function startBot() {
     })
     .then(response => response.json())
     .then(data => {
-        if (data.status === 'started') {
-            showToast('Bot started successfully!', 'success');
-            setTimeout(() => window.location.reload(), 1000);
-        } else if (data.status === 'conflict') {
-            showToast('Bot conflict detected. Use "Stop Conflicts" button first.', 'warning');
+        console.log('Bot start response:', data);
+
+        if (data.status === 'started' || data.status === 'already_running') {
+            if (data.status === 'started') {
+                showToast('Bot started successfully!', 'success');
+            } else {
+                showToast('Bot is already running', 'info');
+            }
+            // Update status without page reload
+            setTimeout(() => updateAllData(), 1000);
+        } else if (data.status && data.status.startsWith('error:')) {
+            showToast('Error starting bot: ' + data.status.substring(6), 'error');
         } else {
-            showToast('Bot is already running', 'info');
+            showToast('Unexpected response: ' + data.status, 'warning');
         }
     })
     .catch(error => {
         console.error('Error starting bot:', error);
-        showToast('Error starting bot', 'error');
+        showToast('Error starting bot: ' + error.message, 'error');
     });
 }
 
@@ -334,7 +393,8 @@ function stopBot() {
     .then(response => response.json())
     .then(data => {
         showToast('Bot stopped successfully!', 'success');
-        setTimeout(() => window.location.reload(), 1000);
+        // Update status without page reload
+        setTimeout(() => updateAllData(), 1000);
     })
     .catch(error => {
         console.error('Error stopping bot:', error);
@@ -349,7 +409,8 @@ function stopConflicts() {
     .then(response => response.json())
     .then(data => {
         showToast('Conflicting processes stopped', 'success');
-        setTimeout(() => window.location.reload(), 1000);
+        // Update status without page reload
+        setTimeout(() => updateAllData(), 1000);
     })
     .catch(error => {
         console.error('Error stopping conflicts:', error);
@@ -406,44 +467,8 @@ function getToastIcon(type) {
     return icons[type] || 'info-circle';
 }
 
-// Add toast styles to the page
-function addToastStyles() {
-    const style = document.createElement('style');
-    style.textContent = `
-        .toast {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 0.5rem;
-            padding: 1rem 1.5rem;
-            color: var(--text-primary);
-            z-index: 9999;
-            box-shadow: var(--shadow-lg);
-            min-width: 300px;
-        }
-        
-        .toast-content {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
-        
-        .toast i {
-            font-size: 1.25rem;
-        }
-        
-        .toast-success i { color: var(--success-color); }
-        .toast-error i { color: var(--danger-color); }
-        .toast-warning i { color: var(--warning-color); }
-        .toast-info i { color: var(--info-color); }
-    `;
-    document.head.appendChild(style);
-}
-
-// Initialize toast styles
-addToastStyles();
+// Toast styles are now in CSS file
+// No need to add styles dynamically
 
 // Export functions for use in other scripts
 window.LegacyCoinTrader = {
@@ -452,3 +477,6 @@ window.LegacyCoinTrader = {
     formatPercentage,
     formatNumber
 };
+
+// Log successful initialization
+console.log('LegacyCoinTrader initialized successfully');
