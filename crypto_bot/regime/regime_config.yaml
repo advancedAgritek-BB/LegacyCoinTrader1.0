@@ -17,6 +17,16 @@ ema_distance_mean_rev_max: 0.04  # Reduced from 0.05 for tighter ranges
 atr_volatility_mult: 1.3      # Reduced from 1.5 for earlier volatility detection
 normalized_range_volatility_min: 1.3  # Reduced from 1.5 for earlier detection
 
+# Bounce Regime Detection - New parameters
+rsi_bounce_max: 30            # Maximum RSI for bounce detection
+bounce_volume_mult: 1.2       # Volume multiplier for bounce confirmation
+
+# Scalp Regime Detection - New parameters
+adx_scalp_max: 15             # Maximum ADX for scalp detection
+bb_width_scalp_max: 0.02     # Maximum BB width for scalp detection
+scalp_volume_mult: 1.5        # Volume multiplier for scalp confirmation
+ema_distance_scalp_max: 0.005 # Maximum EMA distance for scalp detection
+
 # Moving Average Windows - Faster response
 ema_fast: 6                    # Reduced from 8 for faster trend detection
 ema_slow: 18                   # Reduced from 21 for faster trend detection
@@ -30,13 +40,13 @@ ma_window: 18                  # Reduced from 20 for faster MA signals
 higher_timeframe: "1h"         # Changed from 4h for faster confirmation
 confirm_trend_with_higher_tf: true  # Enable higher timeframe confirmation
 
-# Machine Learning Integration
-use_ml_regime_classifier: true
-ml_min_bars: 15                # Reduced from 20 for earlier ML usage
-ml_blend_weight: 0.6           # Increased from 0.5 for better ML integration
+# ML Integration
+use_ml_regime_classifier: true # Enable ML fallback
+ml_min_bars: 200              # Minimum bars for ML classification
+ml_blend_weight: 0.5          # Weight for ML vs rule-based classification
 
 # Pattern Detection
-pattern_min_conf: 0.12         # Reduced from 0.15 for more pattern detection
+pattern_min_conf: 0.3          # Minimum confidence for pattern detection
 log_level: INFO
 
 # Score Weights - Balanced for all regimes

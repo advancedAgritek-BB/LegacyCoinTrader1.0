@@ -2,7 +2,7 @@ from typing import Optional, Tuple
 
 import pandas as pd
 import numpy as np
-import ta
+
 try:  # pragma: no cover - optional dependency
     from scipy import stats as scipy_stats
     if not hasattr(scipy_stats, "norm"):
@@ -26,8 +26,18 @@ from crypto_bot.utils.volatility import normalize_score_by_volatility
 logger = setup_logger(__name__, LOG_DIR / "trend_bot.log")
 
 
-def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[float, str]:
+def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
     """Trend following signal with ADX, volume and optional Donchian filters."""
+    # Handle type conversion from dict to DataFrame
+    if isinstance(df, dict):
+        try:
+            df = pd.DataFrame.from_dict(df)
+        except Exception:
+            return 0.0, "none"
+
+    if df is None or not isinstance(df, pd.DataFrame):
+        return 0.0, "none"
+
     if df.empty or len(df) < 50:
         return 0.0, "none"
 
@@ -44,12 +54,26 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     volume_mult = float(params.get("volume_mult", 1.0))
     adx_threshold = float(params.get("adx_threshold", 25))
 
-    df["ema_fast"] = ta.trend.ema_indicator(df["close"], window=fast_window)
-    df["ema_slow"] = ta.trend.ema_indicator(df["close"], window=slow_window)
-    df["rsi"] = ta.momentum.rsi(df["close"], window=14)
+    # Calculate indicators manually
+    df["ema_fast"] = df["close"].ewm(span=fast_window, adjust=False).mean()
+    df["ema_slow"] = df["close"].ewm(span=slow_window, adjust=False).mean()
+
+    # Calculate RSI manually
+    delta = df["close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df["rsi"] = 100 - (100 / (1 + rs))
+
     df["rsi_z"] = stats.zscore(df["rsi"], lookback_cfg)
     df["volume_ma"] = df["volume"].rolling(window=volume_window).mean()
-    df["atr"] = ta.volatility.average_true_range(df["high"], df["low"], df["close"], window=atr_period)
+
+    # Calculate ATR manually
+    high_low = df["high"] - df["low"]
+    high_close = (df["high"] - df["close"].shift(1)).abs()
+    low_close = (df["low"] - df["close"].shift(1)).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df["atr"] = tr.rolling(window=atr_period).mean()
     
     # Use indicator_lookback if provided, otherwise use default calculation
     if lookback_cfg is not None:
@@ -59,9 +83,17 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     
     recent = df.iloc[-(lookback + 1) :]
 
-    ema20 = ta.trend.ema_indicator(recent["close"], window=20)
-    ema50 = ta.trend.ema_indicator(recent["close"], window=50)
-    rsi = ta.momentum.rsi(recent["close"], window=14)
+    # Calculate indicators manually for recent data
+    ema20 = recent["close"].ewm(span=20, adjust=False).mean()
+    ema50 = recent["close"].ewm(span=50, adjust=False).mean()
+
+    # Calculate RSI manually for recent data
+    delta_recent = recent["close"].diff()
+    gain_recent = (delta_recent.where(delta_recent > 0, 0)).rolling(window=14).mean()
+    loss_recent = (-delta_recent.where(delta_recent < 0, 0)).rolling(window=14).mean()
+    rs_recent = gain_recent / loss_recent
+    rsi = 100 - (100 / (1 + rs_recent))
+
     vol_ma = recent["volume"].rolling(window=volume_window).mean()
 
     # Convert numpy arrays to pandas Series with proper indices
@@ -86,8 +118,24 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     df["rsi_z"] = stats.zscore(rsi, lookback_cfg)
     df["volume_ma"] = vol_ma
 
-    adx_ind = ta.trend.ADXIndicator(df["high"], df["low"], df["close"], window=7)
-    df["adx"] = adx_ind.adx()
+    # Calculate ADX manually (simplified)
+    high_diff = df["high"].diff()
+    low_diff = df["low"].diff()
+
+    dm_plus = ((high_diff > low_diff) & (high_diff > 0)) * high_diff
+    dm_minus = ((low_diff > high_diff) & (low_diff > 0)) * (-low_diff)
+
+    tr = pd.concat([
+        df["high"] - df["low"],
+        (df["high"] - df["close"].shift(1)).abs(),
+        (df["low"] - df["close"].shift(1)).abs()
+    ], axis=1).max(axis=1)
+
+    atr = tr.rolling(window=7).mean()
+    di_plus = 100 * (dm_plus.rolling(window=7).mean() / atr)
+    di_minus = 100 * (dm_minus.rolling(window=7).mean() / atr)
+    dx = 100 * ((di_plus - di_minus).abs() / (di_plus + di_minus))
+    df["adx"] = dx.rolling(window=7).mean()
 
     latest = df.iloc[-1]
     score = 0.0

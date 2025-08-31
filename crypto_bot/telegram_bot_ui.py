@@ -128,7 +128,6 @@ class TelegramBotUI:
         self.app.add_handler(CommandHandler("config", self.show_config))
         self.app.add_handler(CommandHandler("pnl_stats", self.show_pnl_stats))
         self.app.add_handler(CommandHandler("panic_sell", self.panic_sell_cmd))
-        # self.app.add_handler(CommandHandler("clear_cache", self.clear_cache_cmd))  # Moved to after method definition
         self.app.add_handler(CallbackQueryHandler(self.start_cmd, pattern=f"^{START}$"))
         self.app.add_handler(CallbackQueryHandler(self.stop_cmd, pattern=f"^{STOP}$"))
         self.app.add_handler(CallbackQueryHandler(self.status_cmd, pattern=f"^{STATUS}$"))
@@ -173,9 +172,10 @@ class TelegramBotUI:
         self.app.add_handler(
             CallbackQueryHandler(self.show_pnl_stats, pattern=f"^{PNL_STATS}$")
         )
-        # self.app.add_handler(
-        #     CallbackQueryHandler(self.clear_cache_cmd, pattern="^clear_cache$")
-        # )  # Moved to after method definition
+        self.app.add_handler(CommandHandler("clear_cache", self.clear_cache_cmd))
+        self.app.add_handler(
+            CallbackQueryHandler(self.clear_cache_cmd, pattern="^clear_cache$")
+        )
 
         self.scheduler_thread: Optional[threading.Thread] = None
 
@@ -186,6 +186,41 @@ class TelegramBotUI:
         self.scheduler_thread.start()
 
         self.task: Optional[asyncio.Task] = None
+
+    async def clear_cache_cmd(self, update: Update, context: Any) -> None:
+        """Clear the paper trading cache to start fresh."""
+        if not await self._check_cooldown(update, "clear_cache"):
+            return
+        if not await self._check_admin(update):
+            return
+
+        try:
+            from crypto_bot.utils.telegram import clear_paper_trading_cache
+
+            # Get the paper wallet from the controller or direct reference
+            paper_wallet = getattr(self, 'paper_wallet', None)
+
+            # Try to get context from the controller if available
+            context = None
+            if hasattr(self.controller, 'get_context'):
+                context = self.controller.get_context()
+
+            # Clear the cache
+            result = clear_paper_trading_cache(paper_wallet=paper_wallet, context=context)
+
+            await self._reply(
+                update,
+                f"🔄 Cache Clear Results:\n\n{result}",
+                reply_markup=_back_to_menu_markup()
+            )
+
+        except Exception as e:
+            error_msg = f"❌ Failed to clear cache: {str(e)}"
+            await self._reply(
+                update,
+                error_msg,
+                reply_markup=_back_to_menu_markup()
+            )
 
     def run_async(self) -> None:
         """Start polling within the current event loop."""
@@ -697,44 +732,3 @@ def _process_trades_for_display(trades_file: Path) -> str:
         
     except Exception as e:
         return f"Error processing trades: {e}"
-
-        # Add clear_cache handlers after method definition
-        self.app.add_handler(CommandHandler("clear_cache", self.clear_cache_cmd))
-        self.app.add_handler(
-            CallbackQueryHandler(self.clear_cache_cmd, pattern="^clear_cache$")
-        )
-        
-    async def clear_cache_cmd(self, update: Update, context: Any) -> None:
-        """Clear the paper trading cache to start fresh."""
-        if not await self._check_cooldown(update, "clear_cache"):
-            return
-        if not await self._check_admin(update):
-            return
-        
-        try:
-            from crypto_bot.utils.telegram import clear_paper_trading_cache
-            
-            # Get the paper wallet from the controller or direct reference
-            paper_wallet = getattr(self, 'paper_wallet', None)
-            
-            # Try to get context from the controller if available
-            context = None
-            if hasattr(self.controller, 'get_context'):
-                context = self.controller.get_context()
-            
-            # Clear the cache
-            result = clear_paper_trading_cache(paper_wallet=paper_wallet, context=context)
-            
-            await self._reply(
-                update, 
-                f"🔄 Cache Clear Results:\n\n{result}", 
-                reply_markup=_back_to_menu_markup()
-            )
-            
-        except Exception as e:
-            error_msg = f"❌ Failed to clear cache: {str(e)}"
-            await self._reply(
-                update, 
-                error_msg, 
-                reply_markup=_back_to_menu_markup()
-            )

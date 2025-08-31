@@ -133,11 +133,20 @@ class BacktestRunner:
             )
             if not df_raw.empty:
                 df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], unit="ms")
+        # Ensure df_raw is a DataFrame before preparing
+        if not isinstance(df_raw, pd.DataFrame):
+            df_raw = pd.DataFrame(df_raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            if not df_raw.empty:
+                df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], unit="ms")
         self.df_prepared = self._prepare_data(df_raw)
+
+        # Ensure df_prepared is always a DataFrame
+        if not isinstance(self.df_prepared, pd.DataFrame):
+            raise ValueError(f"df_prepared should be DataFrame, got {type(self.df_prepared)}")
 
     @staticmethod
     @lru_cache(maxsize=None)
-    def _cached_fetch(symbol: str, timeframe: str, since: int, limit: int) -> pd.DataFrame:
+    def _cached_fetch(symbol: str, timeframe: str, since: int, limit: int, exchange=None) -> pd.DataFrame:
         if symbol.endswith("/USDC"):
             res = asyncio.run(
                 fetch_geckoterminal_ohlcv(symbol, timeframe=timeframe, limit=limit)
@@ -150,8 +159,8 @@ class BacktestRunner:
             if not df.empty:
                 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
             return df
-        if self.exchange:
-            exch = self.exchange
+        if exchange:
+            exch = exchange
         else:
             from crypto_bot.execution.cex_executor import get_exchange
             config = {"exchange": "kraken", "enable_nonce_improvements": True}
@@ -178,13 +187,22 @@ class BacktestRunner:
             if not df.empty:
                 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
             return df
+
         if self.exchange is None:
-            return self._cached_fetch(
+            df = self._cached_fetch(
                 self.config.symbol,
                 self.config.timeframe,
                 self.config.since,
                 self.config.limit,
+                exchange=None,
             )
+            # Ensure we return a DataFrame
+            if not isinstance(df, pd.DataFrame):
+                df = pd.DataFrame(df, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                if not df.empty:
+                    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+            return df
+
         ohlcv = self.exchange.fetch_ohlcv(
             self.config.symbol,
             timeframe=self.config.timeframe,
@@ -196,27 +214,82 @@ class BacktestRunner:
         return df
 
     def _prepare_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        # Ensure we have a DataFrame
+        if not isinstance(df, pd.DataFrame):
+            raise ValueError(f"Expected pandas DataFrame, got {type(df)}")
+
         cfg = {**_DEFAULT_CFG, **CONFIG}
         df = df.copy()
-        df["ema_fast"] = ta.trend.ema_indicator(df["close"], window=cfg["ema_fast"])
-        df["ema_slow"] = ta.trend.ema_indicator(df["close"], window=cfg["ema_slow"])
-        df["adx"] = ta.trend.adx(df["high"], df["low"], df["close"], window=cfg["indicator_window"])
-        df["rsi"] = ta.momentum.rsi(df["close"], window=cfg["indicator_window"])
-        df["atr"] = ta.volatility.average_true_range(
-            df["high"], df["low"], df["close"], window=cfg["indicator_window"]
-        )
+
+        # Check if we have the required columns
+        required_cols = ["close", "high", "low", "volume"]
+        if not all(col in df.columns for col in required_cols):
+            raise ValueError(f"Missing required columns. Expected {required_cols}, got {list(df.columns)}")
+
+        # Calculate indicators manually to avoid ta library issues
+        df["ema_fast"] = df["close"].ewm(span=cfg["ema_fast"], adjust=False).mean()
+        df["ema_slow"] = df["close"].ewm(span=cfg["ema_slow"], adjust=False).mean()
+
+        # Calculate RSI manually
+        delta = df["close"].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=cfg["indicator_window"]).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=cfg["indicator_window"]).mean()
+        rs = gain / loss
+        df["rsi"] = 100 - (100 / (1 + rs))
+
+        # Calculate ATR manually
+        high_low = df["high"] - df["low"]
+        high_close = (df["high"] - df["close"].shift(1)).abs()
+        low_close = (df["low"] - df["close"].shift(1)).abs()
+        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        df["atr"] = tr.rolling(window=cfg["indicator_window"]).mean()
+
+        # Calculate ADX manually (simplified version)
+        dm_plus = ((df["high"] - df["high"].shift(1)).where((df["high"] - df["high"].shift(1)) > (df["low"].shift(1) - df["low"]), 0))
+        dm_minus = ((df["low"].shift(1) - df["low"]).where((df["low"].shift(1) - df["low"]) > (df["high"] - df["high"].shift(1)), 0))
+        atr_smooth = df["atr"].rolling(window=cfg["indicator_window"]).mean()
+        di_plus = 100 * (dm_plus.rolling(window=cfg["indicator_window"]).mean() / atr_smooth)
+        di_minus = 100 * (dm_minus.rolling(window=cfg["indicator_window"]).mean() / atr_smooth)
+        dx = 100 * ((di_plus - di_minus).abs() / (di_plus + di_minus))
+        df["adx"] = dx.rolling(window=cfg["indicator_window"]).mean()
         df["normalized_range"] = (df["high"] - df["low"]) / df["atr"]
-        bb = ta.volatility.BollingerBands(df["close"], window=cfg["bb_window"])
-        df["bb_width"] = bb.bollinger_wband()
+
+        # Calculate Bollinger Bands manually to avoid ta library issues
+        ma = df["close"].rolling(cfg["bb_window"]).mean()
+        std = df["close"].rolling(cfg["bb_window"]).std()
+        upper = ma + (std * 2)
+        lower = ma - (std * 2)
+        df["bb_width"] = (upper - lower) / ma
+
         df["volume_ma"] = df["volume"].rolling(cfg["ma_window"]).mean()
         df["atr_ma"] = df["atr"].rolling(cfg["ma_window"]).mean()
         return df
 
     def _precompute_regimes(self, df_prepared: pd.DataFrame) -> List[str]:
+        # Ensure df_prepared is a DataFrame
+        if not isinstance(df_prepared, pd.DataFrame):
+            raise ValueError(f"Expected pandas DataFrame, got {type(df_prepared)} in _precompute_regimes")
+
         if classify_regime.__module__ != "crypto_bot.regime.regime_classifier":
-            return [classify_regime(df_prepared.iloc[: i + 1])[0] for i in range(len(df_prepared))]
+            regimes = []
+            for i in range(len(df_prepared)):
+                subset = df_prepared.iloc[: i + 1]
+                # Ensure subset is a DataFrame
+                if not isinstance(subset, pd.DataFrame):
+                    subset = pd.DataFrame(subset, columns=df_prepared.columns)
+                try:
+                    regime_result = classify_regime(subset)
+                    if isinstance(regime_result, tuple):
+                        regimes.append(regime_result[0])
+                    else:
+                        regimes.append(str(regime_result))
+                except Exception as e:
+                    # Log error but continue with unknown regime
+                    regimes.append("unknown")
+            return regimes
 
         cfg = {**_DEFAULT_CFG, **CONFIG}
+
         trending = (df_prepared["adx"] > cfg["adx_trending_min"]) & (
             df_prepared["ema_fast"] > df_prepared["ema_slow"]
         )
@@ -251,6 +324,10 @@ class BacktestRunner:
         take_profit: float,
         rng: np.random.Generator,
     ) -> dict:
+        # Ensure df_prepared is a DataFrame
+        if not isinstance(df_prepared, pd.DataFrame):
+            raise ValueError(f"Expected pandas DataFrame, got {type(df_prepared)} in _run_single")
+
         cfg = self.config
         position: Optional[str] = None
         entry_price = 0.0
@@ -461,7 +538,7 @@ class BacktestRunner:
     # Public APIs
     # ------------------------------------------------------------------
     def run_grid(self) -> pd.DataFrame:
-        """Bayesian optimisation over stop loss and take profit."""
+        """Grid search over stop loss and take profit parameters."""
         cfg = self.config
 
         if len(cfg.stop_loss_range) == 1 and len(cfg.take_profit_range) == 1:
@@ -473,41 +550,33 @@ class BacktestRunner:
             )
             return pd.DataFrame([metrics])
 
-        from skopt import BayesSearchCV
-        from skopt.space import Real
-        from sklearn.base import BaseEstimator
         from tqdm import tqdm
-        from joblib import Parallel, delayed
 
-        class Estimator(BaseEstimator):
-            def __init__(self, runner: BacktestRunner, stop_loss: float = 0.02, take_profit: float = 0.04) -> None:
-                self.runner = runner
-                self.stop_loss = stop_loss
-                self.take_profit = take_profit
+        # Simple grid search instead of Bayesian optimization
+        results = []
+        total_combinations = len(cfg.stop_loss_range) * len(cfg.take_profit_range)
 
-            def fit(self, X, y=None):  # noqa: D401 - sklearn API
-                return self
+        with tqdm(total=total_combinations, desc="optimising") as bar:
+            for sl in cfg.stop_loss_range:
+                for tp in cfg.take_profit_range:
+                    try:
+                        metrics = self._run_single(self.df_prepared, sl, tp, self.rng)
+                        results.append(metrics)
+                    except Exception as e:
+                        print(f"Error with sl={sl}, tp={tp}: {e}")
+                        continue
+                    bar.update(1)
 
-            def score(self, X, y=None):  # noqa: D401 - sklearn API
-                res = self.runner._run_single(self.runner.df_prepared, self.stop_loss, self.take_profit, self.runner.rng)
-                return res["sharpe"]
+        if not results:
+            return pd.DataFrame()
 
-        search_spaces = {
-            "stop_loss": Real(min(cfg.stop_loss_range), max(cfg.stop_loss_range)),
-            "take_profit": Real(min(cfg.take_profit_range), max(cfg.take_profit_range)),
-        }
-        est = Estimator(self)
-        opt = BayesSearchCV(est, search_spaces, n_iter=10, n_jobs=-1, cv=[(slice(None), slice(None))])
-        dummy_X = np.zeros((1, 1))
-        with tqdm(total=opt.n_iter, desc="optimising") as bar:
-            opt.fit(dummy_X, [0], callback=lambda res: bar.update())
+        df = pd.DataFrame(results)
+        if df.empty:
+            return df
 
-        metrics = Parallel(n_jobs=-1)(
-            delayed(self._run_single)(self.df_prepared, p["stop_loss"], p["take_profit"], self.rng)
-            for p in opt.cv_results_["params"]
-        )
-        df = pd.DataFrame(metrics)
-        return df.sort_values("sharpe", ascending=False).reset_index(drop=True)
+        # Sort by sharpe ratio, handle potential column name issues
+        sort_col = "sharpe" if "sharpe" in df.columns else df.columns[0]
+        return df.sort_values(sort_col, ascending=False).reset_index(drop=True)
 
     def run_walk_forward(self, rolling: bool = True) -> pd.DataFrame:
         """Perform walk-forward optimisation."""

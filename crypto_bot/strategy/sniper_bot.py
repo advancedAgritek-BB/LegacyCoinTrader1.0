@@ -1,7 +1,7 @@
 from typing import Dict, Optional, Tuple, Union
 
 import pandas as pd
-import ta
+
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.pair_cache import load_liquid_pairs
@@ -108,10 +108,14 @@ def generate_signal(
     vol_ratio = df["volume"].iloc[-1] / base_volume if base_volume > 0 else 0
 
     atr_window = min(atr_window, len(df))
-    atr_series = ta.volatility.average_true_range(
-        df["high"], df["low"], df["close"], window=atr_window
-    )
-    atr = float(atr_series.iloc[-1]) if len(atr_series) else 0.0
+
+    # Calculate ATR manually
+    high_low = df["high"] - df["low"]
+    high_close = (df["high"] - df["close"].shift(1)).abs()
+    low_close = (df["low"] - df["close"].shift(1)).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr_series = tr.rolling(window=atr_window).mean()
+    atr = float(atr_series.iloc[-1]) if len(atr_series) and not pd.isna(atr_series.iloc[-1]) else 0.0
 
     if len(df) > volume_window:
         prev_vol = df["volume"].iloc[-(volume_window + 1):-1]

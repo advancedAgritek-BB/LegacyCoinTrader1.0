@@ -18,28 +18,31 @@ logger = setup_logger(__name__, LOG_DIR / "bot.log")
 @dataclass
 class MomentumExitConfig:
     """Configuration for momentum-aware exit strategy."""
-    
+
+    # Enable/disable momentum features
+    enabled: bool = True
+
     # Momentum thresholds
     weak_momentum: float = 0.3
     moderate_momentum: float = 0.6
     strong_momentum: float = 0.8
     very_strong_momentum: float = 0.9
-    
+
     # Take profit scaling
     momentum_tp_multipliers: Dict[str, float] = None
-    
+
     # Partial exit settings
     partial_exit_momentum_thresholds: List[Dict] = None
-    
+
     # Trailing stop adjustments
     momentum_trailing_adjustments: Dict[str, float] = None
-    
+
     # Momentum continuation
     rsi_momentum_threshold: float = 65.0
     volume_momentum_threshold: float = 1.5
     price_acceleration_threshold: float = 0.002
     macd_momentum_threshold: float = 0.001
-    
+
     # Breakout detection
     breakout_threshold: float = 0.015
     momentum_extension_multiplier: float = 2.5

@@ -7,7 +7,7 @@ from crypto_bot import cooldown_manager
 
 import pandas as pd
 import numpy as np
-import ta
+
 try:  # pragma: no cover - optional dependency
     from scipy import stats as scipy_stats
     if not hasattr(scipy_stats, "norm"):
@@ -225,15 +225,28 @@ def generate_signal(
     lookback = min(cfg.lookback, len(df)) if cfg.lookback else len(df)
 
     df = df.copy()
-    df["rsi"] = ta.momentum.rsi(df["close"], window=rsi_window)
+
+    # Calculate RSI manually
+    delta = df["close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=rsi_window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_window).mean()
+    rs = gain / loss
+    df["rsi"] = 100 - (100 / (1 + rs))
+
     df["rsi_z"] = stats.zscore(df["rsi"], cfg.lookback)
     df["vol_ma"] = df["volume"].rolling(window=vol_window).mean()
     df["vol_std"] = df["volume"].rolling(window=vol_window).std()
-    df["ema"] = ta.trend.ema_indicator(df["close"], window=ema_window)
+
+    # Calculate EMA manually
+    df["ema"] = df["close"].ewm(span=ema_window, adjust=False).mean()
+
+    # Calculate ATR manually
     atr_window_used = min(atr_window, len(df))
-    df["atr"] = ta.volatility.average_true_range(
-        df["high"], df["low"], df["close"], window=atr_window_used
-    )
+    high_low = df["high"] - df["low"]
+    high_close = (df["high"] - df["close"].shift(1)).abs()
+    low_close = (df["low"] - df["close"].shift(1)).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df["atr"] = tr.rolling(window=atr_window_used).mean()
 
     latest = df.iloc[-1]
     prev_close = df["close"].iloc[-2]
@@ -259,7 +272,14 @@ def generate_signal(
     trend_ok_short = pd.isna(latest["ema"]) or latest["close"] < latest["ema"]
 
     recent = df.iloc[-(lookback + 1) :]
-    rsi_series = ta.momentum.rsi(recent["close"], window=rsi_window)
+
+    # Calculate RSI manually for recent data
+    delta_recent = recent["close"].diff()
+    gain_recent = (delta_recent.where(delta_recent > 0, 0)).rolling(window=rsi_window).mean()
+    loss_recent = (-delta_recent.where(delta_recent < 0, 0)).rolling(window=rsi_window).mean()
+    rs_recent = gain_recent / loss_recent
+    rsi_series = 100 - (100 / (1 + rs_recent))
+
     vol_ma = recent["volume"].rolling(window=vol_window).mean()
     rsi_series = cache_series("rsi", df, rsi_series, lookback)
     vol_ma = cache_series("vol_ma", df, vol_ma, lookback)

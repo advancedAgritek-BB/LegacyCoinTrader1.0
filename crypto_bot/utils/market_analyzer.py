@@ -28,7 +28,7 @@ from crypto_bot.signals.signal_scoring import evaluate_async, evaluate_strategie
 from crypto_bot.utils.rank_logger import log_second_place
 from crypto_bot.strategy import grid_bot
 from crypto_bot.volatility_filter import calc_atr
-from ta.volatility import BollingerBands
+# BollingerBands will be calculated manually
 from .stats import zscore
 from crypto_bot.utils.telemetry import telemetry
 

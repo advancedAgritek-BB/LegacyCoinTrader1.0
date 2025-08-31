@@ -30,7 +30,9 @@ def _fetch_solana_fee_lamports(url: str = DEFAULT_SOL_FEE_URL) -> float:
         data = resp.json()
         if isinstance(data, dict):
             return float(data.get("fee", 0.0))
-    except Exception:
+    except Exception as e:
+        # Jupiter API appears to be unavailable/deprecated, skip silently
+        # This avoids repeated DNS error messages in the terminal
         pass
     return 0.0
 

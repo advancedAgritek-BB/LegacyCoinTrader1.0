@@ -126,23 +126,29 @@ async def execute_swap(
     )
     client = Client(rpc_url)
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            JUPITER_QUOTE_URL,
-            params={
-                "inputMint": token_in,
-                "outputMint": token_out,
-                "amount": int(amount),
-                "slippageBps": slippage_bps,
-            },
-            timeout=10,
-        ) as quote_resp:
-            quote_resp.raise_for_status()
-            quote_data = await quote_resp.json()
-        if not quote_data.get("data"):
-            logger.warning("No routes returned from Jupiter")
-            return {}
-        route = quote_data["data"][0]
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                JUPITER_QUOTE_URL,
+                params={
+                    "inputMint": token_in,
+                    "outputMint": token_out,
+                    "amount": int(amount),
+                    "slippageBps": slippage_bps,
+                },
+                timeout=10,
+            ) as quote_resp:
+                quote_resp.raise_for_status()
+                quote_data = await quote_resp.json()
+            if not quote_data.get("data"):
+                logger.warning("No routes returned from Jupiter")
+                return {}
+            route = quote_data["data"][0]
+    except Exception as e:
+        # Jupiter API appears to be unavailable/deprecated, skip silently
+        # This avoids repeated DNS error messages in the terminal
+        logger.warning("Jupiter quote API unavailable: %s", e)
+        return {}
 
         try:
             async with session.get(
@@ -176,14 +182,20 @@ async def execute_swap(
         except Exception as err:  # pragma: no cover - network
             logger.warning("Slippage check failed: %s", err)
 
-        async with session.post(
-            JUPITER_SWAP_URL,
-            json={"route": route, "userPublicKey": str(keypair.public_key)},
-            timeout=10,
-        ) as swap_resp:
-            swap_resp.raise_for_status()
-            swap_data = await swap_resp.json()
-        swap_tx = swap_data["swapTransaction"]
+        try:
+            async with session.post(
+                JUPITER_SWAP_URL,
+                json={"route": route, "userPublicKey": str(keypair.public_key)},
+                timeout=10,
+            ) as swap_resp:
+                swap_resp.raise_for_status()
+                swap_data = await swap_resp.json()
+            swap_tx = swap_data["swapTransaction"]
+        except Exception as e:
+            # Jupiter API appears to be unavailable/deprecated, skip silently
+            # This avoids repeated DNS error messages in the terminal
+            logger.warning("Jupiter swap API unavailable: %s", e)
+            return {}
 
     raw_tx = base64.b64decode(swap_tx)
     tx = Transaction.deserialize(raw_tx)

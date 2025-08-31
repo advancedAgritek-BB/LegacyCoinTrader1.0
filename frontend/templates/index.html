@@ -40,9 +40,7 @@
           <button class="btn btn-info btn-sm me-2" onclick="forceRefresh()" title="Force refresh page">
             <i class="fas fa-sync-alt"></i> Refresh
           </button>
-          <button class="btn btn-secondary btn-sm" onclick="generateSampleData()" title="Generate sample data for testing">
-            <i class="fas fa-database"></i> Sample Data
-          </button>
+
         </div>
       </div>
     </div>
@@ -59,9 +57,15 @@
           {{ "${:,.2f}".format(pnl) if pnl else "$0.00" }}
         </div>
         <div class="metric-label">Total P&L</div>
-        <div class="metric-change positive">
+        <div class="metric-change {{ 'positive' if pnl_data and pnl_data.get('pnl_percentage', 0) >= 0 else 'negative' }}">
           <i class="fas fa-arrow-up"></i>
-          <span>+12.5%</span>
+          <span id="totalPnlPercentage">
+            {% if pnl_data and pnl_data.get('pnl_percentage') is not none %}
+              {{ "{:+.2f}%".format(pnl_data.pnl_percentage) }}
+            {% else %}
+              +0.00%
+            {% endif %}
+          </span>
         </div>
       </div>
     </div>
@@ -77,7 +81,7 @@
         <div class="metric-label">Total Trades</div>
         <div class="metric-change positive">
           <i class="fas fa-arrow-up"></i>
-          <span>+5 today</span>
+          <span id="tradesToday">+0 today</span>
         </div>
       </div>
     </div>
@@ -93,7 +97,7 @@
         <div class="metric-label">Win Rate</div>
         <div class="metric-change positive">
           <i class="fas fa-arrow-up"></i>
-          <span>+2.1%</span>
+          <span id="winRateChange">+0.0%</span>
         </div>
       </div>
     </div>
@@ -735,10 +739,21 @@ function updateDashboard() {
 }
 
 function updatePerformanceMetrics(performance) {
-  // Update P&L
+  // Update P&L - use wallet PnL instead of performance PnL
   const totalPnl = document.getElementById('totalPnl');
-  if (totalPnl && performance.total_pnl !== undefined) {
-    totalPnl.textContent = `$${performance.total_pnl.toFixed(2)}`;
+  if (totalPnl) {
+    // Get PnL from wallet calculation instead of performance
+    fetch('/api/wallet-pnl')
+      .then(response => response.json())
+      .then(data => {
+        if (data.total_pnl !== undefined) {
+          totalPnl.textContent = `$${data.total_pnl.toFixed(2)}`;
+          totalPnl.className = `metric-value ${data.total_pnl >= 0 ? 'text-success' : 'text-danger'}`;
+        }
+      })
+      .catch(error => {
+        console.error('Error updating total PnL:', error);
+      });
   }
   
   // Update total trades
@@ -746,11 +761,24 @@ function updatePerformanceMetrics(performance) {
   if (totalTrades && performance.total_trades !== undefined) {
     totalTrades.textContent = performance.total_trades;
   }
-  
+
+  // Update trades today (simplified - just show total for now)
+  const tradesToday = document.getElementById('tradesToday');
+  if (tradesToday && performance.total_trades !== undefined) {
+    tradesToday.textContent = `+${performance.total_trades} total`;
+  }
+
   // Update win rate
   const winRate = document.getElementById('winRate');
   if (winRate && performance.win_rate !== undefined) {
     winRate.textContent = `${(performance.win_rate * 100).toFixed(1)}%`;
+  }
+
+  // Update win rate change (simplified - just show current rate)
+  const winRateChange = document.getElementById('winRateChange');
+  if (winRateChange && performance.win_rate !== undefined) {
+    const rate = (performance.win_rate * 100).toFixed(1);
+    winRateChange.textContent = `+${rate}%`;
   }
 }
 
@@ -814,7 +842,28 @@ function updateWalletPnl() {
         return;
       }
       
-      // Update PnL display
+      // Update total PnL display
+      const totalPnl = document.getElementById('totalPnl');
+      if (totalPnl) {
+        const pnl = data.total_pnl || 0;
+        totalPnl.textContent = `$${pnl.toFixed(2)}`;
+        totalPnl.className = `metric-value ${pnl >= 0 ? 'text-success' : 'text-danger'}`;
+      }
+
+      // Update total PnL percentage display
+      const totalPnlPercentage = document.getElementById('totalPnlPercentage');
+      if (totalPnlPercentage) {
+        const percentage = data.pnl_percentage || 0;
+        const sign = percentage >= 0 ? '+' : '';
+        totalPnlPercentage.textContent = `${sign}${percentage.toFixed(2)}%`;
+        // Update the parent div class based on positive/negative
+        const metricChange = totalPnlPercentage.parentElement;
+        if (metricChange) {
+          metricChange.className = `metric-change ${percentage >= 0 ? 'positive' : 'negative'}`;
+        }
+      }
+      
+      // Update wallet PnL display
       const walletPnl = document.getElementById('walletPnl');
       if (walletPnl) {
         const pnl = data.unrealized_pnl || 0;
@@ -1149,38 +1198,7 @@ function forceRefresh() {
   console.log('=== END FORCE REFRESH DEBUG ===');
 }
 
-function generateSampleData() {
-  if (confirm('Are you sure you want to generate sample data for testing? This will overwrite existing data.')) {
-    const generateBtn = document.querySelector('button[onclick="generateSampleData()"]');
-    if (generateBtn) {
-      generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
-      generateBtn.disabled = true;
-    }
 
-    fetch('/api/generate_sample_trades', {
-      method: 'POST'
-    })
-    .then(response => response.json())
-    .then(data => {
-      if (data.success) {
-        window.LegacyCoinTrader.showToast('Sample data generated successfully!', 'success');
-        setTimeout(() => window.location.reload(), 1000);
-      } else {
-        window.LegacyCoinTrader.showToast(`Error generating sample data: ${data.error}`, 'error');
-      }
-    })
-    .catch(error => {
-      console.error('Error generating sample data:', error);
-      window.LegacyCoinTrader.showToast('Error generating sample data', 'error');
-    })
-    .finally(() => {
-      if (generateBtn) {
-        generateBtn.innerHTML = '<i class="fas fa-database"></i> Sample Data';
-        generateBtn.disabled = false;
-      }
-    });
-  }
-}
 
 // Ensure LegacyCoinTrader is available
 function ensureLegacyCoinTrader() {
@@ -1477,5 +1495,14 @@ document.addEventListener('DOMContentLoaded', function() {
   `;
   document.head.appendChild(style);
 });
+
+// Auto-refresh data every 30 seconds
+setInterval(() => {
+  updateOpenPositions();
+  updateWalletPnl();
+}, 30000);
+
+// Initial update of wallet PnL
+updateWalletPnl();
 </script>
 {% endblock %}

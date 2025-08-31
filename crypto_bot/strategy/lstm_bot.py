@@ -16,12 +16,19 @@ else:  # pragma: no cover - fallback
 
 
 def generate_signal(
-    df: pd.DataFrame,
+    df,
     symbol: Optional[str] = None,
     timeframe: Optional[str] = None,
     **kwargs,
 ) -> Tuple[float, str]:
     """Return LSTM-based momentum signal."""
+    # Handle type conversion from dict to DataFrame
+    if isinstance(df, dict):
+        try:
+            df = pd.DataFrame.from_dict(df)
+        except Exception:
+            return 0.0, "none"
+
     if isinstance(symbol, dict) and timeframe is None:
         kwargs.setdefault("config", symbol)
         symbol = None
@@ -30,7 +37,10 @@ def generate_signal(
         timeframe = None
     config = kwargs.get("config")
 
-    if df is None or df.empty:
+    if df is None or not isinstance(df, pd.DataFrame):
+        return 0.0, "none"
+
+    if df.empty:
         return 0.0, "none"
 
     params = config or {}

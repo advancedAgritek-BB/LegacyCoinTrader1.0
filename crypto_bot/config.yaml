@@ -18,7 +18,7 @@ bounce_scalper:
   lookback: 150
   max_concurrent_signals: 12
   max_drawdown: 0.25
-  min_score: 0.09673826786987336
+  min_score: 0.04
   pattern_timeframe: 1m
   rsi_overbought_pct: 80
   rsi_oversold_pct: 20
@@ -31,9 +31,9 @@ bounce_scalper:
   trend_ema_slow: 15
   up_candles: 1
   vol_window: 10
-  vol_zscore_threshold: 1.5
+  vol_zscore_threshold: 1.0
   volume_multiple: 2.340306476069623
-  zscore_threshold: 0.8
+  zscore_threshold: 0.6
 breakout:
   adx_threshold: 12
   atr_buffer_mult: 0.02
@@ -47,10 +47,30 @@ breakout:
   vol_multiplier: 1.5
   volume_window: 10
 cycle_bias:
-  enabled: true
+  enabled: false
   mvrv_url: https://api.alternative.me/v2/onchain/mvrv
   nupl_url: https://api.alternative.me/v2/onchain/nupl
   sopr_url: https://api.alternative.me/v2/onchain/sopr
+debug_mode:
+  enabled: false
+  execution_debug:
+    log_fee_calculation: true
+    log_order_placement: true
+    log_order_status: true
+    log_slippage_calculation: true
+  risk_debug:
+    log_capital_allocation: true
+    log_position_limits: true
+    log_risk_checks: true
+  strategy_debug:
+    log_strategy_performance: true
+    log_strategy_selection: true
+    log_strategy_weights: true
+  trade_pipeline:
+    log_execution_decisions: true
+    log_position_sizing: true
+    log_risk_calculations: true
+    log_signal_generation: true
 enhanced_backtesting:
   batch_size: 100
   continuous_mode: true
@@ -177,6 +197,43 @@ grid_bot:
 higher_timeframe: 1d
 liquidity_check: true
 liquidity_depth: 3
+logging:
+  console_logging: true
+  error_tracking:
+    enabled: true
+    log_api_errors: true
+    log_exceptions: true
+    log_validation_errors: true
+    log_websocket_errors: true
+  file_logging: true
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  level: INFO
+  live_trading:
+    enabled: true
+    level: INFO
+    log_api_calls: true
+    log_real_executions: true
+    log_websocket_events: true
+  log_directory: crypto_bot/logs
+  paper_trading:
+    enabled: true
+    level: DEBUG
+    log_balance_simulation: true
+    log_position_simulation: true
+    log_simulated_trades: true
+  performance:
+    enabled: true
+    log_api_latency: true
+    log_execution_times: true
+    log_memory_usage: true
+  trade_pipeline:
+    enabled: true
+    level: DEBUG
+    log_balance_changes: true
+    log_executions: true
+    log_position_updates: true
+    log_risk_checks: true
+    log_signals: true
 loop_interval_minutes: 30
 max_age_days: 60
 max_change_pct: 30
@@ -204,7 +261,7 @@ micro_scalp:
   max_concurrent_signals: 30
   max_drawdown: 0.2
   min_atr_pct: 0.0003
-  min_score: 0.06
+  min_score: 0.04
   stop_loss_pct: 0.005
   take_profit_pct: 0.02
   trend_fast: 10
@@ -227,6 +284,32 @@ momentum_exploiter:
   stop_loss_pct: 0.008
   take_profit_pct: 0.035
   threshold: 0.01
+monitoring:
+  performance_monitoring:
+    enabled: true
+    track_max_drawdown: true
+    track_profit_factor: true
+    track_sharpe_ratio: true
+    track_win_rate: true
+  position_monitoring:
+    enabled: true
+    log_position_changes: true
+    track_realized_pnl: true
+    track_unrealized_pnl: true
+  real_time:
+    enabled: true
+    update_interval: 5
+  risk_monitoring:
+    enabled: true
+    log_risk_events: true
+    track_drawdown: true
+    track_exposure: true
+  trade_monitoring:
+    enabled: true
+    log_all_trades: true
+    track_execution_time: true
+    track_fees: true
+    track_slippage: true
 ohlcv_quality:
   fallback_to_rest: true
   max_retry_attempts: 2
@@ -299,7 +382,7 @@ paper_wallet:
   config_file: crypto_bot/paper_wallet_config.yaml
   enabled: true
   initial_balance: 10000.0
-  max_open_trades: 10
+  max_open_trades: 20
 performance:
   caching:
     adaptive_cache_ttl: true
@@ -373,7 +456,7 @@ risk:
   take_profit_atr_mult: 4.0
   take_profit_pct: 0.02
   trade_size_pct: 0.1
-  volume_threshold_ratio: 0.1
+  volume_threshold_ratio: 0.05
 safety:
   max_error_count: 15
   restart_on_error: true
@@ -384,11 +467,11 @@ scan_markets: true
 signal_fusion:
   enabled: true
   fusion_method: weight
-  min_confidence: 0.015
+  min_confidence: 0.01
   strategies:
-  - - trend
+  - - trend_bot
     - 0.4
-  - - micro_scalp
+  - - micro_scalp_bot
     - 0.35
   - - sniper_bot
     - 0.25
@@ -447,6 +530,7 @@ strategy_router:
     trend_adx_threshold: 15
   mean_reverting_timeframe: 45m
   omega_based_timeframe: 5m
+  strategy_rotation_enabled: true  # Enable strategy rotation for balanced usage
   regimes:
     bounce:
     - bounce_scalper
@@ -478,7 +562,6 @@ strategy_router:
   sideways_timeframe: 45m
   trending_timeframe: 45m
   volatile_timeframe: 1m
-symbol: BTC/USD
 symbol_filter:
   change_pct_percentile: 30
   correlation_max_pairs: 250
@@ -524,10 +607,11 @@ timeframes:
 - 15m
 - 1h
 - 4h
-top_n_symbols: 150
+top_n_symbols: 200
+symbol_batch_size: 100
 tp_mult: 2.5
 tp_pct: 0.045
-trade_size_pct: 0.4
+trade_size_pct: 0.1
 trend:
   atr_period: 8
   k: 0.9
@@ -555,124 +639,1159 @@ volatility_harvester:
   ws_ohlcv_timeout: 30
   ws_ping_interval: 10
   ws_reconnect_delay: 15
-
-# Enhanced Logging and Debugging Configuration
-logging:
-  # Global logging configuration
-  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  
-  # File logging
-  file_logging: true
-  log_directory: "crypto_bot/logs"
-  
-  # Console logging
-  console_logging: true
-  
-  # Trade pipeline specific logging
-  trade_pipeline:
-    enabled: true
-    level: "DEBUG"  # More detailed logging for trade pipeline
-    log_executions: true
-    log_signals: true
-    log_risk_checks: true
-    log_position_updates: true
-    log_balance_changes: true
-    
-  # Paper trading specific logging
-  paper_trading:
-    enabled: true
-    level: "DEBUG"
-    log_simulated_trades: true
-    log_balance_simulation: true
-    log_position_simulation: true
-    
-  # Live trading specific logging
-  live_trading:
-    enabled: true
-    level: "INFO"  # More conservative for live trading
-    log_real_executions: true
-    log_api_calls: true
-    log_websocket_events: true
-    
-  # Performance monitoring
-  performance:
-    enabled: true
-    log_execution_times: true
-    log_memory_usage: true
-    log_api_latency: true
-    
-  # Error tracking
-  error_tracking:
-    enabled: true
-    log_exceptions: true
-    log_api_errors: true
-    log_websocket_errors: true
-    log_validation_errors: true
-
-# Debug Mode Configuration
-debug_mode:
-  enabled: false  # Set to true for development/debugging
-  
-  # Trade pipeline debugging
-  trade_pipeline:
-    log_signal_generation: true
-    log_risk_calculations: true
-    log_position_sizing: true
-    log_execution_decisions: true
-    
-  # Strategy debugging
-  strategy_debug:
-    log_strategy_selection: true
-    log_strategy_weights: true
-    log_strategy_performance: true
-    
-  # Risk management debugging
-  risk_debug:
-    log_risk_checks: true
-    log_capital_allocation: true
-    log_position_limits: true
-    
-  # Execution debugging
-  execution_debug:
-    log_order_placement: true
-    log_order_status: true
-    log_slippage_calculation: true
-    log_fee_calculation: true
-
-# Enhanced Monitoring Configuration
-monitoring:
-  # Real-time monitoring
-  real_time:
-    enabled: true
-    update_interval: 5  # seconds
-    
-  # Trade monitoring
-  trade_monitoring:
-    enabled: true
-    log_all_trades: true
-    track_slippage: true
-    track_fees: true
-    track_execution_time: true
-    
-  # Position monitoring
-  position_monitoring:
-    enabled: true
-    log_position_changes: true
-    track_unrealized_pnl: true
-    track_realized_pnl: true
-    
-  # Risk monitoring
-  risk_monitoring:
-    enabled: true
-    log_risk_events: true
-    track_drawdown: true
-    track_exposure: true
-    
-  # Performance monitoring
-  performance_monitoring:
-    enabled: true
-    track_win_rate: true
-    track_profit_factor: true
-    track_sharpe_ratio: true
-    track_max_drawdown: true
+symbols:
+- 1INCH/EUR
+- 1INCH/USD
+- AAVE/ETH
+- AAVE/EUR
+- AAVE/GBP
+- AAVE/BTC
+- AB/EUR
+- AB/USD
+- ACA/EUR
+- ACA/USD
+- ACH/EUR
+- ACH/USD
+- ACT/EUR
+- ACT/USD
+- ACX/EUR
+- ACX/USD
+- ADA/AUD
+- ADA/ETH
+- ADA/EUR
+- ADA/GBP
+- ADA/USDC
+- ADA/USDT
+- ADA/BTC
+- ADX/EUR
+- ADX/USD
+- AERO/EUR
+- AERO/USD
+- A/EUR
+- AEVO/EUR
+- AEVO/USD
+- AGLD/EUR
+- AGLD/USD
+- AI16Z/EUR
+- AI16Z/USDC
+- AI16Z/USDT
+- AI3/EUR
+- AI3/USD
+- AIOZ/EUR
+- AIOZ/USD
+- AIR/EUR
+- AIR/USD
+- AIBTC/EUR
+- AIBTC/USD
+- AKE/USD
+- AKT/EUR
+- AKT/USD
+- ALCH/EUR
+- ALCH/USD
+- ALCX/EUR
+- ALCX/USD
+- ALGO/ETH
+- ALGO/EUR
+- ALGO/GBP
+- ALGO/USD
+- ALGO/USDC
+- ALGO/USDT
+- ALGO/BTC
+- ALICE/EUR
+- ALICE/USD
+- ALKIMI/EUR
+- ALKIMI/USD
+- ALPHA/EUR
+- ALPHA/USD
+- ALT/EUR
+- ALT/USD
+- ANKR/EUR
+- ANKR/USD
+- ANKR/BTC
+- ANLOG/EUR
+- ANLOG/USD
+- ANON/EUR
+- ANON/USD
+- APE/EUR
+- APENFT/EUR
+- APENFT/USD
+- APE/USD
+- APE/USDC
+- APE/USDT
+- API3/EUR
+- API3/USD
+- APT/EUR
+- APT/USD
+- APU/EUR
+- APU/USD
+- ARC/EUR
+- ARC/USD
+- AR/EUR
+- ARKM/EUR
+- ARKM/USD
+- ARPA/EUR
+- ARPA/USD
+- AR/USD
+- ASRR/EUR
+- ASRR/USD
+- ASTR/EUR
+- ASTR/USD
+- ATH/EUR
+- ATH/USD
+- ATLAS/EUR
+- ATLAS/USD
+- ATOM/ETH
+- ATOM/EUR
+- ATOM/GBP
+- ATOM/USD
+- ATOM/USDC
+- ATOM/USDT
+- ATOM/BTC
+- AUCTION/EUR
+- AUCTION/USD
+- AUDIO/EUR
+- AUDIO/USD
+- AUD/JPY
+- AUD/USD
+- A/USD
+- AVAAI/EUR
+- AVAAI/USD
+- AVAX/EUR
+- AVAX/USD
+- AVAX/USDC
+- AVAX/USDT
+- AXS/EUR
+- AXS/USD
+- B3/EUR
+- B3/USD
+- BABY/EUR
+- BABY/USD
+- BADGER/EUR
+- BADGER/USD
+- BAL/EUR
+- BAL/USD
+- BANANAS31/EUR
+- BANANAS31/USD
+- BAND/EUR
+- BAND/USD
+- BAT/EUR
+- BAT/USD
+- BCH/AUD
+- BCH/ETH
+- BCH/GBP
+- BCH/JPY
+- BCH/USDC
+- BCH/USDT
+- BCH/BTC
+- BDXN/EUR
+- BDXN/USD
+- BEAM/EUR
+- BEAM/USD
+- BERA/EUR
+- BERA/USD
+- BERA/USDC
+- BERA/USDT
+- BICO/EUR
+- BICO/USD
+- BIGTIME/EUR
+- BIGTIME/USD
+- BIO/EUR
+- BIO/USD
+- BIT/EUR
+- BIT/USD
+- BLUR/EUR
+- BLUR/USD
+- BLZ/EUR
+- BLZ/USD
+- BMT/EUR
+- BMT/USD
+- BNB/EUR
+- BNB/USD
+- BNB/USDC
+- BNB/USDT
+- BNC/EUR
+- BNC/USD
+- BNT/EUR
+- BNT/USD
+- BOBA/EUR
+- BOBA/USD
+- BODEN/EUR
+- BODEN/USD
+- BOND/EUR
+- BOND/USD
+- BONK/EUR
+- BRICK/EUR
+- BRICK/USD
+- BSX/EUR
+- BSX/USD
+- BTR/EUR
+- BTR/USD
+- BTT/EUR
+- BTT/USD
+- C98/EUR
+- C98/USD
+- CAKE/EUR
+- CAKE/USD
+- CAMP/EUR
+- CAMP/USD
+- CARV/EUR
+- CARV/USD
+- CAT/EUR
+- CAT/USD
+- CCD/EUR
+- CCD/USD
+- CELO/EUR
+- CELO/USD
+- CELR/EUR
+- CELR/USD
+- CFG/EUR
+- CHEEMS/EUR
+- CHEEMS/USD
+- CHEX/EUR
+- CHEX/USD
+- CHILLHOUSE/EUR
+- CHILLHOUSE/USD
+- CHR/EUR
+- CHR/USD
+- CHZ/EUR
+- CHZ/USD
+- CLANKER/EUR
+- CLANKER/USD
+- CLOUD/EUR
+- CLOUD/USD
+- CLV/EUR
+- CLV/USD
+- CMETH/ETH
+- CMETH/USD
+- COMP/EUR
+- COMP/USD
+- COMP/BTC
+- COOKIE/EUR
+- COOKIE/USD
+- COQ/EUR
+- COQ/USD
+- CORN/EUR
+- CORN/USD
+- COTI/EUR
+- COTI/USD
+- COW/EUR
+- COW/USD
+- CPOOL/EUR
+- CPOOL/USD
+- CQT/EUR
+- CQT/USD
+- CRO/USDC
+- CRV/EUR
+- CSM/EUR
+- CSM/USD
+- CTSI/EUR
+- CTSI/USD
+- CVC/EUR
+- CVC/USD
+- CVX/EUR
+- CVX/USD
+- CXT/EUR
+- CXT/USD
+- CYBER/EUR
+- CYBER/USD
+- DAI/EUR
+- DAI/USD
+- DAI/USDT
+- DASH/EUR
+- DASH/USD
+- DBR/EUR
+- DBR/USD
+- DEEP/EUR
+- DEEP/USD
+- DEGEN/EUR
+- DEGEN/USD
+- DENT/EUR
+- DENT/USD
+- DMC/EUR
+- DMC/USD
+- DOG/EUR
+- DOGS/EUR
+- DOGS/USD
+- DOG/USD
+- DOLO/EUR
+- DOLO/USD
+- DOT/ETH
+- DOT/EUR
+- DOT/GBP
+- DOT/JPY
+- DOT/USD
+- DOT/USDC
+- DOT/USDT
+- DOT/BTC
+- DRIFT/EUR
+- DRIFT/USD
+- DRV/EUR
+- DRV/USD
+- DUCK/EUR
+- DUCK/USD
+- DYDX/EUR
+- DYDX/USD
+- DYM/EUR
+- DYM/USD
+- EDGE/EUR
+- EDGE/USD
+- EGLD/EUR
+- EGLD/USD
+- EIGEN/EUR
+- EIGEN/USD
+- ELX/EUR
+- ELX/USD
+- ENA/EUR
+- ENA/USD
+- ENJ/EUR
+- ENJ/USD
+- ENS/EUR
+- ENS/USD
+- EPT/EUR
+- EPT/USD
+- ES/EUR
+- ES/USD
+- ESX/EUR
+- ESX/USD
+- ETH/AUD
+- ETH/CHF
+- ETH/DAI
+- ETHFI/EUR
+- ETHFI/USD
+- ETH/PYUSD
+- ETH/USD1
+- ETH/USDC
+- ETH/USDT
+- ETHW/ETH
+- ETHW/EUR
+- ETHW/USD
+- EUL/EUR
+- EUL/USD
+- EUR/AUD
+- EUR/CAD
+- EUR/CHF
+- EUR/GBP
+- EUR/JPY
+- EUROP/EUR
+- EUROP/USD
+- EUROP/USDC
+- EURQ/EUR
+- EURQ/USD
+- EURR/EUR
+- EURR/USD
+- EURR/USDC
+- EURR/USDT
+- EWT/EUR
+- EWT/USD
+- FARM/EUR
+- FARM/USD
+- FARTCOIN/EUR
+- FARTCOIN/USD
+- FARTCOIN/USDC
+- FARTCOIN/USDT
+- FET/EUR
+- FET/USD
+- FHE/EUR
+- FHE/USD
+- FIDA/EUR
+- FIDA/USD
+- FIL/ETH
+- FIL/EUR
+- FIL/GBP
+- FIL/USD
+- FIL/BTC
+- FIS/EUR
+- FIS/USD
+- FLOKI/EUR
+- FLOKI/USD
+- FLOW/EUR
+- FLOW/USD
+- FLR/EUR
+- FLR/USD
+- FLUX/EUR
+- FLUX/USD
+- FLY/EUR
+- FLY/USD
+- FORTH/EUR
+- FXS/EUR
+- GALA/EUR
+- GALA/USD
+- GAL/EUR
+- GAL/USD
+- GARI/EUR
+- GARI/USD
+- G/EUR
+- GFI/EUR
+- GFI/USD
+- GHIBLI/EUR
+- GHIBLI/USD
+- GHST/EUR
+- GHST/USD
+- GIGA/EUR
+- GIGA/USD
+- GLMR/EUR
+- GLMR/USD
+- GMT/EUR
+- GMT/USD
+- GMX/EUR
+- GMX/USD
+- GNO/EUR
+- GNO/USD
+- GOAT/EUR
+- GOAT/USD
+- GOMINING/EUR
+- GOMINING/USD
+- GRASS/EUR
+- GRASS/USD
+- GRIFFAIN/EUR
+- GRIFFAIN/USD
+- GRT/EUR
+- GRT/GBP
+- GRT/USD
+- GRT/BTC
+- GST/EUR
+- GST/USD
+- GTC/EUR
+- GTC/USD
+- GUN/EUR
+- GUN/USD
+- G/USD
+- HBAR/EUR
+- HBAR/USD
+- HDX/EUR
+- HDX/USD
+- H/EUR
+- HFT/EUR
+- HFT/USD
+- HIPPO/EUR
+- HIPPO/USD
+- HMSTR/EUR
+- HMSTR/USD
+- HNT/EUR
+- HNT/USD
+- HONEY/EUR
+- HONEY/USD
+- HOUSE/EUR
+- HOUSE/USD
+- HPOS10I/EUR
+- HPOS10I/USD
+- H/USD
+- ICNT/EUR
+- ICNT/USD
+- ICP/EUR
+- ICP/USD
+- ICX/EUR
+- ICX/USD
+- IDEX/EUR
+- IDEX/USD
+- IMX/EUR
+- IMX/USD
+- INIT/EUR
+- INIT/USD
+- INJ/EUR
+- INJ/USD
+- INTR/EUR
+- INTR/USD
+- IP/EUR
+- JAILSTOOL/EUR
+- JAILSTOOL/USD
+- JASMY/EUR
+- JASMY/USD
+- JITOSOL/EUR
+- JITOSOL/SOL
+- JITOSOL/USD
+- JOE/EUR
+- JOE/USD
+- JST/EUR
+- JST/USD
+- JTO/EUR
+- JTO/USD
+- JUNO/EUR
+- JUNO/USD
+- JUP/EUR
+- JUP/USD
+- KAITO/EUR
+- KAITO/USD
+- KAR/EUR
+- KAR/USD
+- KAS/EUR
+- KAS/USD
+- KAS/USDT
+- KAVA/EUR
+- KAVA/USD
+- KERNEL/EUR
+- KERNEL/USD
+- KET/EUR
+- KET/USD
+- KEY/EUR
+- KEY/USD
+- KIN/EUR
+- KINT/EUR
+- KINT/USD
+- KIN/USD
+- KMNO/EUR
+- KMNO/USD
+- KNC/EUR
+- KNC/USD
+- KOBAN/EUR
+- KOBAN/USD
+- KP3R/EUR
+- KP3R/USD
+- KSM/EUR
+- KSM/GBP
+- KSM/USD
+- KTA/EUR
+- KTA/USD
+- L3/EUR
+- L3/USD
+- LAYER/EUR
+- LAYER/USD
+- LCX/EUR
+- LCX/USD
+- LDO/EUR
+- LDO/USD
+- LINK/AUD
+- LINK/ETH
+- LINK/EUR
+- LINK/GBP
+- LINK/JPY
+- LINK/USD
+- LINK/USDC
+- LINK/USDT
+- LINK/BTC
+- LIT/EUR
+- LIT/USD
+- LMWR/EUR
+- LMWR/USD
+- LOBO/USD
+- LOCKIN/EUR
+- LOCKIN/USD
+- LOFI/EUR
+- LOFI/USD
+- LPT/EUR
+- LPT/USD
+- LQTY/EUR
+- LQTY/USD
+- LRC/EUR
+- LRC/USD
+- LSETH/ETH
+- LSETH/EUR
+- LSETH/USD
+- LSK/EUR
+- LSK/USD
+- LTC/AUD
+- LTC/ETH
+- LTC/GBP
+- LTC/USDC
+- LTC/USDT
+- LUNA/EUR
+- LUNA/USD
+- LUNC/EUR
+- LUNC/USD
+- MANA/EUR
+- MANA/USD
+- MANA/USDC
+- MANA/USDT
+- MANA/BTC
+- MASK/EUR
+- MASK/USD
+- MAT/EUR
+- MAT/USD
+- MC/EUR
+- MC/USD
+- ME/EUR
+- MELANIA/EUR
+- MELANIA/USD
+- MELANIA/USDC
+- MELANIA/USDT
+- MEME/EUR
+- MEME/USD
+- MERL/EUR
+- MERL/USD
+- METH/ETH
+- METH/USD
+- METIS/EUR
+- METIS/USD
+- M/EUR
+- ME/USD
+- MEW/EUR
+- MEW/USD
+- MICHI/EUR
+- MICHI/USD
+- MIM/EUR
+- MIM/USD
+- MINA/EUR
+- MINA/GBP
+- MINA/USD
+- MINA/BTC
+- MIR/EUR
+- MIR/USD
+- MKR/EUR
+- MKR/USD
+- MKR/BTC
+- MNGO/EUR
+- MNGO/USD
+- MNT/EUR
+- MNT/USD
+- MOCA/EUR
+- MOCA/USD
+- MOG/EUR
+- MOG/USD
+- MOODENG/EUR
+- MOODENG/USD
+- MOON/EUR
+- MOON/USD
+- MORPHO/EUR
+- MORPHO/USD
+- MOVE/EUR
+- MOVE/USD
+- MOVR/EUR
+- MOVR/USD
+- MSOL/EUR
+- MSOL/USD
+- MUBARAK/EUR
+- MUBARAK/USD
+- MULTI/EUR
+- MULTI/USD
+- M/USD
+- MV/EUR
+- MV/USD
+- MXC/EUR
+- MXC/USD
+- NANO/EUR
+- NANO/USD
+- NEAR/EUR
+- NEAR/USD
+- NEIRO/EUR
+- NEIRO/USD
+- NIL/EUR
+- NIL/USD
+- NMR/EUR
+- NMR/USD
+- NODE/USD
+- NODL/EUR
+- NODL/USD
+- NOS/EUR
+- NOS/USD
+- NOT/EUR
+- NOT/USD
+- NPC/EUR
+- NPC/USD
+- NTRN/EUR
+- NTRN/USD
+- NYM/EUR
+- NYM/USD
+- OCEAN/EUR
+- OCEAN/USD
+- ODOS/EUR
+- ODOS/USD
+- OGN/EUR
+- OGN/USD
+- OM/EUR
+- OMG/EUR
+- OMG/USD
+- OMNI/EUR
+- OMNI/USD
+- OM/USD
+- ONDO/EUR
+- ONDO/USD
+- OP/EUR
+- OP/USD
+- ORCA/EUR
+- ORCA/USD
+- ORDER/EUR
+- ORDER/USD
+- OSMO/EUR
+- OSMO/USD
+- OXT/EUR
+- OXT/USD
+- OXY/EUR
+- OXY/USD
+- PARTI/EUR
+- PARTI/USD
+- PAXG/ETH
+- PAXG/EUR
+- PAXG/USD
+- PAXG/BTC
+- PDA/EUR
+- PDA/USD
+- PEAQ/EUR
+- PEAQ/USD
+- PEAQ/USDC
+- PENDLE/EUR
+- PENDLE/USD
+- PENGU/EUR
+- PENGU/USD
+- PENGU/USDC
+- PENGU/USDT
+- PEPE/AUD
+- PEPE/CAD
+- PEPE/EUR
+- PEPE/GBP
+- PEPE/USD
+- PERP/EUR
+- PERP/USD
+- PHA/EUR
+- PHA/USD
+- PLUME/EUR
+- PLUME/USD
+- PNUT/EUR
+- PNUT/USD
+- POL/EUR
+- POLIS/EUR
+- POLIS/USD
+- POLS/EUR
+- POLS/USD
+- POL/USD
+- POND/EUR
+- POND/USD
+- PONKE/EUR
+- PONKE/USD
+- POPCAT/EUR
+- POPCAT/GBP
+- POPCAT/USD
+- PORTAL/EUR
+- PORTAL/USD
+- POWR/EUR
+- POWR/USD
+- PRCL/EUR
+- PRCL/USD
+- PRIME/EUR
+- PRIME/USD
+- PROMPT/EUR
+- PROMPT/USD
+- PROVE/EUR
+- PROVE/USD
+- PSTAKE/EUR
+- PSTAKE/USD
+- PUFFER/EUR
+- PUFFER/USD
+- PUMP/EUR
+- PUMP/SOL
+- PUMP/USD
+- PUPS/EUR
+- PUPS/USD
+- PYTH/EUR
+- PYUSD/EUR
+- PYUSD/USD
+- QI/EUR
+- QI/USD
+- QNT/EUR
+- QNT/USD
+- QTUM/EUR
+- QTUM/USD
+- RAD/EUR
+- RAD/USD
+- RAIIN/EUR
+- RAIIN/USD
+- RARE/EUR
+- RARE/USD
+- RARI/EUR
+- RARI/USD
+- RAY/EUR
+- RAY/USD
+- RBC/EUR
+- RBC/USD
+- RED/EUR
+- RED/USD
+- REKT/EUR
+- REKT/USD
+- RENDER/EUR
+- RENDER/USD
+- REN/EUR
+- REN/USD
+- REP/EUR
+- REP/USD
+- REQ/EUR
+- REQ/USD
+- RETARDIO/EUR
+- RETARDIO/USD
+- REZ/EUR
+- REZ/USD
+- RIZE/EUR
+- RIZE/USD
+- RLC/EUR
+- RLC/USD
+- RLUSD/USD
+- RLUSD/USDC
+- RLUSD/USDT
+- ROOK/EUR
+- ROOK/USD
+- RPL/EUR
+- RPL/USD
+- RSR/EUR
+- RSR/USD
+- RUJI/EUR
+- RUJI/USD
+- RUNE/EUR
+- RUNE/USD
+- SAFE/EUR
+- SAFE/USD
+- SAGA/EUR
+- SAGA/USD
+- SAHARA/EUR
+- SAHARA/USD
+- SAMO/EUR
+- SAMO/USD
+- SAND/EUR
+- SAND/GBP
+- SAND/USD
+- SAND/BTC
+- SAPIEN/EUR
+- SBR/EUR
+- SBR/USD
+- SC/EUR
+- SCRT/EUR
+- SCRT/USD
+- SC/USD
+- SC/BTC
+- SDN/EUR
+- SDN/USD
+- SEI/EUR
+- SEI/USD
+- S/EUR
+- SGB/EUR
+- SGB/USD
+- SHIB/EUR
+- SHIB/USD
+- SHIB/USDC
+- SHIB/USDT
+- SIGMA/EUR
+- SIGMA/USD
+- SKY/EUR
+- SKY/USD
+- SLAY/EUR
+- SLAY/USD
+- SNEK/EUR
+- SNEK/USD
+- SNX/EUR
+- SNX/USD
+- SNX/BTC
+- SOGNI/EUR
+- SOGNI/USD
+- SOL/AUD
+- SOL/CAD
+- SOL/ETH
+- SOL/EUR
+- SOL/GBP
+- SOL/USD1
+- SOL/USDC
+- SOL/USDT
+- SOL/BTC
+- SONIC/EUR
+- SONIC/USD
+- SOSO/EUR
+- SOSO/USD
+- SPELL/EUR
+- SPELL/USD
+- SPICE/EUR
+- SPICE/USD
+- SPK/EUR
+- SPK/USD
+- SPX/EUR
+- SPX/USD
+- SRM/EUR
+- SRM/USD
+- SSV/EUR
+- SSV/USD
+- STEP/EUR
+- STEP/USD
+- STG/EUR
+- STG/USD
+- STORJ/EUR
+- STORJ/USD
+- STRD/EUR
+- STRD/USD
+- STRK/EUR
+- STRK/USD
+- STX/EUR
+- STX/USD
+- SUI/EUR
+- SUI/GBP
+- SUI/USD
+- SUNDOG/EUR
+- SUNDOG/USD
+- SUN/EUR
+- SUN/USD
+- SUPER/EUR
+- SUPER/USD
+- S/USD
+- S/USDC
+- S/USDT
+- SUSHI/EUR
+- SUSHI/USD
+- SWARMS/EUR
+- SWARMS/USD
+- SWEAT/EUR
+- SWEAT/USD
+- SWELL/EUR
+- SWELL/USD
+- SXT/EUR
+- SXT/USD
+- SYN/EUR
+- SYN/USD
+- SYRUP/EUR
+- SYRUP/USD
+- TAC/EUR
+- TAC/USD
+- TANSSI/EUR
+- TANSSI/USD
+- TAO/EUR
+- TAO/USD
+- TBTC/EUR
+- TBTC/USD
+- TBTC/BTC
+- TEER/EUR
+- TEER/USD
+- TERM/EUR
+- TERM/USD
+- T/EUR
+- TIA/EUR
+- TIA/USD
+- TITCOIN/EUR
+- TITCOIN/USD
+- TLM/EUR
+- TLM/USD
+- TNSR/EUR
+- TNSR/USD
+- TOKE/EUR
+- TOKEN/EUR
+- TOKEN/USD
+- TOKE/USD
+- TON/EUR
+- TON/USD
+- TON/USDC
+- TON/USDT
+- TOSHI/EUR
+- TOSHI/USD
+- TRAC/EUR
+- TRAC/USD
+- TREE/EUR
+- TREE/USD
+- TREMP/EUR
+- TREMP/USD
+- TRU/EUR
+- TRUMP/EUR
+- TRUMP/USD
+- TRUMP/USDC
+- TRUMP/USDT
+- TRU/USD
+- TRX/ETH
+- TRX/EUR
+- TRX/USD
+- TRX/USDD
+- TRX/BTC
+- TURBO/EUR
+- TURBO/USD
+- T/USD
+- TUSD/EUR
+- TUSD/USD
+- TVK/EUR
+- TVK/USD
+- UFD/EUR
+- UFD/USD
+- UMA/EUR
+- UMA/USD
+- UNFI/EUR
+- UNFI/USD
+- UNI/ETH
+- UNI/EUR
+- UNITE/EUR
+- UNITE/USD
+- UNI/USD
+- UNI/BTC
+- USD1/USD
+- USD1/USDC
+- USDC/AUD
+- USDC/CAD
+- USDC/CHF
+- USDC/EUR
+- USDC/GBP
+- USD/CHF
+- USDC/USD
+- USDC/USDT
+- USDD/EUR
+- USDD/USD
+- USDG/USD
+- USDG/USDC
+- USDG/USDT
+- USDQ/EUR
+- USDQ/USD
+- USDQ/USDC
+- USDQ/USDT
+- USDR/EUR
+- USDR/USD
+- USDR/USDC
+- USDR/USDT
+- USDS/EUR
+- USDS/USD
+- USDT/AUD
+- USDT/CAD
+- USDT/CHF
+- USDT/EUR
+- USDT/GBP
+- USDT/JPY
+- USDT/USD
+- USDUC/EUR
+- USDUC/USD
+- USELESS/EUR
+- USELESS/USD
+- USTC/EUR
+- USTC/USD
+- USTC/USDC
+- USTC/USDT
+- USUAL/EUR
+- USUAL/USD
+- VANRY/EUR
+- VANRY/USD
+- VELODROME/EUR
+- VELODROME/USD
+- VINE/EUR
+- VINE/USD
+- VIRTUAL/EUR
+- VIRTUAL/USD
+- VIRTUAL/USDC
+- VIRTUAL/USDT
+- VSN/EUR
+- VSN/USD
+- VVV/EUR
+- VVV/USD
+- WAL/EUR
+- WAL/USD
+- WAXL/EUR
+- WAXL/USD
+- WBTC/EUR
+- WBTC/USD
+- WBTC/BTC
+- WCT/EUR
+- WCT/USD
+- WELL/EUR
+- WELL/USD
+- WEN/EUR
+- WEN/USD
+- W/EUR
+- WIF/EUR
+- WIF/GBP
+- WIN/EUR
+- WIN/USD
+- WLD/EUR
+- WLD/USD
+- WOO/EUR
+- WOO/USD
+- W/USD
+- BTC/AUD
+- BTC/CHF
+- BTC/DAI
+- BTC/PYUSD
+- BTC/USD1
+- BTC/USDC
+- BTC/USDT
+- XCN/EUR
+- XCN/USD
+- DOGE/AUD
+- DOGE/CAD
+- DOGE/EUR
+- DOGE/GBP
+- DOGE/USD
+- DOGE/USDC
+- DOGE/USDT
+- ETC/ETH
+- ETC/BTC
+- ETC/EUR
+- ETC/USD
+- ETH/BTC
+- ETH/CAD
+- ETH/EUR
+- ETH/GBP
+- ETH/JPY
+- ETH/USD
+- LTC/BTC
+- LTC/EUR
+- LTC/JPY
+- LTC/USD
+- MLN/BTC
+- MLN/EUR
+- MLN/USD
+- XMR/USDC
+- XMR/USDT
+- XNY/EUR
+- XNY/USD
+- REPV1/USD
+- XRP/AUD
+- XRP/ETH
+- XRP/GBP
+- XRP/RLUSD
+- XRP/USDC
+- XRP/USDT
+- XRT/EUR
+- XRT/USD
+- XTER/EUR
+- XTER/USD
+- XTZ/EUR
+- XTZ/USD
+- XTZ/USDC
+- XTZ/USDT
+- BTC/USDQ
+- BTC/USDR
+- BTC/CAD
+- BTC/EUR
+- BTC/GBP
+- BTC/JPY
+- BTC/USD
+- DOGE/BTC
+- XLM/BTC
+- XLM/EUR
+- XLM/GBP
+- XLM/USD
+- XMR/BTC
+- XMR/EUR
+- XMR/USD
+- XRP/BTC
+- XRP/CAD
+- XRP/EUR
+- XRP/USD
+- XYO/EUR
+- XYO/USD
+- ZEC/EUR
+- ZEC/USD
+- YFI/EUR
+- YFI/USD
+- YGG/EUR
+- YGG/USD
+- ZEREBRO/EUR
+- ZEREBRO/USD
+- ZETA/EUR
+- ZETA/USD
+- EUR/USD
+- ZEUS/EUR
+- ZEUS/USD
+- ZEX/EUR
+- ZEX/USD
+- GBP/USD
+- ZK/EUR
+- ZK/USD
+- ZORA/EUR
+- ZORA/USD
+- ZRO/EUR
+- ZRO/USD
+- ZRX/EUR
+- ZRX/USD
+- ZRX/BTC
+- USD/CAD
+- USD/JPY
+- AIBTC/EUR
+- AIBTC/USD
+- AIBTC/EUR
+- AIBTC/USD
+- AIBTC/EUR
+- AIBTC/USD
+- AIBTC/EUR
+- AIBTC/USD
+- AIBTC/EUR
+- AIBTC/USD
+- AIBTC/EUR
+- AIBTC/USD
+- AIBTC/EUR
+- AIBTC/USD
+- AIXBT/EUR
+- AIXBT/USD

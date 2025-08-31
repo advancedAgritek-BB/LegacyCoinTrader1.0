@@ -125,6 +125,17 @@ class PaperWallet:
             price = args[3]
             identifier = args[4] if len(args) > 4 else None
 
+            # Basic symbol validation
+            if symbol and '/' in symbol:
+                base, quote = symbol.split('/', 1)
+                if not base or not quote:
+                    raise ValueError(f"Invalid symbol format: {symbol}")
+                # Check for obviously invalid symbols
+                if len(base) > 20 or len(quote) > 10:
+                    raise ValueError(f"Suspiciously long symbol: {symbol}")
+                if base == quote:
+                    raise ValueError(f"Invalid symbol - base and quote are the same: {symbol}")
+
             if symbol in self.positions:
                 raise RuntimeError(f"Position already open for symbol {symbol}")
 

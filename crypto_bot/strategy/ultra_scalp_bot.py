@@ -8,7 +8,7 @@ It uses ultra-fast timeframes (1m) and very tight stop losses for rapid executio
 from typing import Optional, Tuple, Dict, Any
 import pandas as pd
 import numpy as np
-import ta
+
 from dataclasses import dataclass
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
@@ -70,27 +70,32 @@ def _calculate_ultra_fast_indicators(df: pd.DataFrame, config: UltraScalpConfig)
     indicators = {}
     
     # Ultra-fast EMAs
-    indicators['ema_fast'] = ta.trend.ema_indicator(df['close'], window=config.ema_fast)
-    indicators['ema_slow'] = ta.trend.ema_indicator(df['close'], window=config.ema_slow)
-    
+    indicators['ema_fast'] = df['close'].ewm(span=config.ema_fast, adjust=False).mean()
+    indicators['ema_slow'] = df['close'].ewm(span=config.ema_slow, adjust=False).mean()
+
     # Ultra-fast RSI
-    indicators['rsi'] = ta.momentum.rsi(df['close'], window=config.rsi_window)
-    
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=config.rsi_window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=config.rsi_window).mean()
+    rs = gain / loss
+    indicators['rsi'] = 100 - (100 / (1 + rs))
+
     # Ultra-fast MACD
-    macd = ta.trend.MACD(
-        df['close'], 
-        window_fast=config.macd_fast, 
-        window_slow=config.macd_slow, 
-        window_sign=config.macd_signal
-    )
-    indicators['macd'] = macd.macd()
-    indicators['macd_signal'] = macd.macd_signal()
-    indicators['macd_histogram'] = macd.macd_diff()
+    ema_fast = df['close'].ewm(span=config.macd_fast, adjust=False).mean()
+    ema_slow = df['close'].ewm(span=config.macd_slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    macd_signal = macd_line.ewm(span=config.macd_signal, adjust=False).mean()
+    macd_histogram = macd_line - macd_signal
+    indicators['macd'] = macd_line
+    indicators['macd_signal'] = macd_signal
+    indicators['macd_histogram'] = macd_histogram
     
     # Ultra-fast ATR
-    indicators['atr'] = ta.volatility.average_true_range(
-        df['high'], df['low'], df['close'], window=config.atr_window
-    )
+    high_low = df['high'] - df['low']
+    high_close = (df['high'] - df['close'].shift(1)).abs()
+    low_close = (df['low'] - df['close'].shift(1)).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    indicators['atr'] = tr.rolling(window=config.atr_window).mean()
     
     # Volume indicators
     indicators['volume_sma'] = df['volume'].rolling(window=config.volume_window).mean()

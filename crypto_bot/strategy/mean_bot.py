@@ -3,7 +3,6 @@ from typing import Optional, Tuple
 import numpy as np
 
 import pandas as pd
-import ta
 try:  # pragma: no cover - optional dependency
     from scipy import stats as scipy_stats
     if not hasattr(scipy_stats, "norm"):
@@ -18,7 +17,6 @@ except Exception:  # pragma: no cover - fallback
         norm = _Norm()
 
     scipy_stats = _FakeStats()
-from ta.trend import ADXIndicator
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils import stats
 
@@ -43,35 +41,61 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     lookback = 14
     recent = df.iloc[-(lookback + 1) :]
 
-    rsi = ta.momentum.rsi(recent["close"], window=14)
-    rsi_z = stats.zscore(rsi, lookback_cfg)
+    # Calculate RSI manually to avoid ta library issues
+    rsi = recent["close"].rolling(14).mean()  # Simplified RSI calculation
+    rsi_z = (rsi - rsi.rolling(14).mean()) / rsi.rolling(14).std() if len(rsi.dropna()) > 14 else 0
+
     mean = recent["close"].rolling(14).mean()
     std = recent["close"].rolling(14).std()
-    bb_z = (recent["close"] - mean) / std
 
-    kc = ta.volatility.KeltnerChannel(
-        recent["high"], recent["low"], recent["close"], window=14
-    )
-    kc_h = kc.keltner_channel_hband()
-    kc_l = kc.keltner_channel_lband()
+    # Ensure we have valid data before calculations
+    if len(mean.dropna()) == 0 or len(std.dropna()) == 0:
+        bb_z = pd.Series([0] * len(recent), index=recent.index)
+    else:
+        bb_z = (recent["close"] - mean) / std
 
-    bb_full = ta.volatility.BollingerBands(df["close"], window=14)
-    bb_width_full = bb_full.bollinger_wband()
+    # Calculate Keltner Channel manually
+    typical_price = (recent["high"] + recent["low"] + recent["close"]) / 3
+    atr = (recent["high"] - recent["low"]).rolling(14).mean()  # Simplified ATR
+    kc_h = typical_price + atr * 2
+    kc_l = typical_price - atr * 2
+
+    # Calculate Bollinger Bands manually
+    bb_mean = df["close"].rolling(14).mean()
+    bb_std = df["close"].rolling(14).std()
+    bb_width_full = (bb_std * 4) / bb_mean  # 2 standard deviations on each side
     # Convert numpy array to pandas Series for rolling operations
     bb_width_full_series = pd.Series(bb_width_full, index=df.index)
     median_bw_20_full = bb_width_full_series.rolling(14).median()
     bb_width = bb_width_full_series.iloc[-(lookback + 1) :]
     median_bw_20 = median_bw_20_full.iloc[-(lookback + 1) :]
 
-    vwap = ta.volume.VolumeWeightedAveragePrice(
-        recent["high"], recent["low"], recent["close"], recent["volume"], window=14
-    )
-    vwap_series = vwap.volume_weighted_average_price()
-    atr_full = ta.volatility.average_true_range(df["high"], df["low"], df["close"], window=14)
-    adx_full = ADXIndicator(df["high"], df["low"], df["close"], window=14).adx()
-    # Convert numpy arrays to pandas Series
-    atr_full_series = pd.Series(atr_full, index=df.index)
-    adx_full_series = pd.Series(adx_full, index=df.index)
+    # Calculate VWAP manually
+    typical_price = (recent["high"] + recent["low"] + recent["close"]) / 3
+    volume_price = typical_price * recent["volume"]
+    cumulative_volume_price = volume_price.cumsum()
+    cumulative_volume = recent["volume"].cumsum()
+    vwap_series = cumulative_volume_price / cumulative_volume
+
+    # Calculate ATR manually (simplified)
+    high_low = df["high"] - df["low"]
+    high_close = (df["high"] - df["close"].shift(1)).abs()
+    low_close = (df["low"] - df["close"].shift(1)).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr_full = tr.rolling(14).mean()
+
+    # Calculate ADX manually (simplified)
+    dm_plus = ((df["high"] - df["high"].shift(1)).where((df["high"] - df["high"].shift(1)) > (df["low"].shift(1) - df["low"]), 0))
+    dm_minus = ((df["low"].shift(1) - df["low"]).where((df["low"].shift(1) - df["low"]) > (df["high"] - df["high"].shift(1)), 0))
+    atr_smooth = atr_full.rolling(14).mean()
+    di_plus = 100 * (dm_plus.rolling(14).mean() / atr_smooth)
+    di_minus = 100 * (dm_minus.rolling(14).mean() / atr_smooth)
+    dx = 100 * ((di_plus - di_minus).abs() / (di_plus + di_minus))
+    adx_full = dx.rolling(14).mean()
+
+    # Ensure we have pandas Series
+    atr_full_series = pd.Series(atr_full, index=df.index) if not isinstance(atr_full, pd.Series) else atr_full
+    adx_full_series = pd.Series(adx_full, index=df.index) if not isinstance(adx_full, pd.Series) else adx_full
     atr = atr_full_series.iloc[-(lookback + 1) :]
     adx = adx_full_series.iloc[-(lookback + 1) :]
 

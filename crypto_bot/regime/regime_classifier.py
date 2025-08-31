@@ -42,6 +42,8 @@ _ALL_REGIMES = [
     "mean-reverting",
     "breakout",
     "volatile",
+    "bounce",
+    "scalp",
     "bullish_trending",
     "bearish_volatile",
     "unknown",
@@ -56,7 +58,13 @@ PATTERN_WEIGHTS = {
     "shooting_star": ("mean-reverting", 0.5),
     "doji": ("sideways", 0.2),
     "bullish_engulfing": ("mean-reverting", 1.2),
+    "bearish_engulfing": ("mean-reverting", 1.2),
     "ascending_triangle": ("breakout", 2.0),
+    "volume_spike": ("scalp", 1.5),
+    "inside_bar": ("sideways", 0.8),
+    "three_bar_reversal": ("bounce", 1.8),
+    "head_and_shoulders": ("bounce", 2.0),
+    "inverse_head_and_shoulders": ("bounce", 2.0),
 }
 
 
@@ -77,9 +85,12 @@ def adaptive_thresholds(cfg: dict, df: Optional[pd.DataFrame], symbol: Optional[
     baseline = cfg.get("atr_baseline")
     if baseline:
         try:
-            atr = ta.volatility.average_true_range(
-                df["high"], df["low"], df["close"], window=cfg.get("indicator_window", 14)
-            )
+            # Calculate ATR manually
+            high_low = df["high"] - df["low"]
+            high_close = (df["high"] - df["close"].shift(1)).abs()
+            low_close = (df["low"] - df["close"].shift(1)).abs()
+            tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+            atr = tr.rolling(window=cfg.get("indicator_window", 14)).mean()
             avg_atr = float(atr.mean())
             factor = avg_atr / float(baseline) if baseline else 1.0
             out["adx_trending_min"] = cfg["adx_trending_min"] * factor
@@ -149,20 +160,41 @@ def _classify_core(
         df[col] = np.nan
 
     if len(df) >= cfg["ema_fast"]:
-        df["ema20"] = ta.trend.ema_indicator(df["close"], window=cfg["ema_fast"])
+        df["ema20"] = df["close"].ewm(span=cfg["ema_fast"], adjust=False).mean()
 
     if len(df) >= cfg["ema_slow"]:
-        df["ema50"] = ta.trend.ema_indicator(df["close"], window=cfg["ema_slow"])
+        df["ema50"] = df["close"].ewm(span=cfg["ema_slow"], adjust=False).mean()
 
     if len(df) >= cfg["indicator_window"]:
         try:
-            df["adx"] = ta.trend.adx(
-                df["high"], df["low"], df["close"], window=cfg["indicator_window"]
-            )
-            df["rsi"] = ta.momentum.rsi(df["close"], window=cfg["indicator_window"])
-            df["atr"] = ta.volatility.average_true_range(
-                df["high"], df["low"], df["close"], window=cfg["indicator_window"]
-            )
+            # Calculate ADX manually
+            high_diff = df["high"].diff()
+            low_diff = df["low"].diff()
+
+            dm_plus = ((high_diff > low_diff) & (high_diff > 0)) * high_diff
+            dm_minus = ((low_diff > high_diff) & (low_diff > 0)) * (-low_diff)
+
+            tr = pd.concat([
+                df["high"] - df["low"],
+                (df["high"] - df["close"].shift(1)).abs(),
+                (df["low"] - df["close"].shift(1)).abs()
+            ], axis=1).max(axis=1)
+
+            atr = tr.rolling(window=cfg["indicator_window"]).mean()
+            di_plus = 100 * (dm_plus.rolling(window=cfg["indicator_window"]).mean() / atr)
+            di_minus = 100 * (dm_minus.rolling(window=cfg["indicator_window"]).mean() / atr)
+            dx = 100 * ((di_plus - di_minus).abs() / (di_plus + di_minus))
+            df["adx"] = dx.rolling(window=cfg["indicator_window"]).mean()
+
+            # Calculate RSI manually
+            delta = df["close"].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=cfg["indicator_window"]).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=cfg["indicator_window"]).mean()
+            rs = gain / loss
+            df["rsi"] = 100 - (100 / (1 + rs))
+
+            # Calculate ATR manually
+            df["atr"] = atr
             df["normalized_range"] = (df["high"] - df["low"]) / df["atr"]
         except IndexError:
             return "unknown"
@@ -173,8 +205,11 @@ def _classify_core(
         df["normalized_range"] = np.nan
 
     if len(df) >= cfg["bb_window"]:
-        bb = ta.volatility.BollingerBands(df["close"], window=cfg["bb_window"])
-        df["bb_width"] = bb.bollinger_wband()
+        # Calculate Bollinger Bands manually
+        bb_mid = df["close"].rolling(cfg["bb_window"]).mean()
+        bb_std = df["close"].rolling(cfg["bb_window"]).std()
+        bb_width = (bb_std * 4) / bb_mid  # 2 standard deviations on each side
+        df["bb_width"] = bb_width
 
     df["volume_change"] = df["volume"].pct_change()
     if len(df) >= cfg["ma_window"]:
@@ -271,6 +306,21 @@ def _classify_core(
         and latest["normalized_range"] > cfg["normalized_range_volatility_min"]
     ):
         regime = "volatile"
+    elif (
+        # Bounce regime detection - look for oversold conditions with reversal patterns
+        latest["rsi"] < cfg.get("rsi_bounce_max", 30)
+        and latest["close"] > latest["open"]  # Bullish candle
+        and latest["volume"] > volume_ma20.iloc[-1] * cfg.get("bounce_volume_mult", 1.2)
+    ):
+        regime = "bounce"
+    elif (
+        # Scalp regime detection - look for high frequency, low volatility conditions
+        latest["adx"] < cfg.get("adx_scalp_max", 15)
+        and latest["bb_width"] < cfg.get("bb_width_scalp_max", 0.02)
+        and latest["volume"] > volume_ma20.iloc[-1] * cfg.get("scalp_volume_mult", 1.5)
+        and abs(latest["close"] - latest["ema20"]) / latest["close"] < cfg.get("ema_distance_scalp_max", 0.005)
+    ):
+        regime = "scalp"
 
     return regime
 

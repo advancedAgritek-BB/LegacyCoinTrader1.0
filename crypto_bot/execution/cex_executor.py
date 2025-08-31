@@ -251,17 +251,21 @@ def execute_trade(
         logger.error("Failed to send message: %s", err)
 
     try:
-        ticker = exchange.fetch_ticker(symbol)
-        bid = ticker.get("bid")
-        ask = ticker.get("ask")
-        if bid and ask:
-            slippage = (ask - bid) / ((ask + bid) / 2)
-            if slippage > config.get("max_slippage_pct", 1.0):
-                logger.warning("Trade skipped due to slippage.")
-                err_msg = notifier.notify("Trade skipped due to slippage.")
-                if err_msg:
-                    logger.error("Failed to send message: %s", err_msg)
-                return {}
+        # Check if exchange has fetch_ticker method before calling it
+        if hasattr(exchange, "fetch_ticker") and callable(getattr(exchange, "fetch_ticker", None)):
+            ticker = exchange.fetch_ticker(symbol)
+            bid = ticker.get("bid")
+            ask = ticker.get("ask")
+            if bid and ask:
+                slippage = (ask - bid) / ((ask + bid) / 2)
+                if slippage > config.get("max_slippage_pct", 1.0):
+                    logger.warning("Trade skipped due to slippage.")
+                    err_msg = notifier.notify("Trade skipped due to slippage.")
+                    if err_msg:
+                        logger.error("Failed to send message: %s", err_msg)
+                    return {}
+        else:
+            logger.debug("Exchange does not support fetch_ticker, skipping slippage check")
     except Exception as err:  # pragma: no cover - network
         logger.warning("Slippage check failed: %s", err)
 
@@ -294,8 +298,11 @@ def execute_trade(
             if order:
                 if dry_run:
                     try:
-                        t = exchange.fetch_ticker(symbol)
-                        order["price"] = t.get("last") or t.get("bid") or t.get("ask") or 0.0
+                        if hasattr(exchange, "fetch_ticker") and callable(getattr(exchange, "fetch_ticker", None)):
+                            t = exchange.fetch_ticker(symbol)
+                            order["price"] = t.get("last") or t.get("bid") or t.get("ask") or 0.0
+                        else:
+                            order["price"] = 0.0
                     except Exception:
                         order["price"] = 0.0
                 log_trade(order)
@@ -335,8 +342,11 @@ def execute_trade(
         if order:
             if dry_run:
                 try:
-                    t = exchange.fetch_ticker(symbol)
-                    order["price"] = t.get("last") or t.get("bid") or t.get("ask") or 0.0
+                    if hasattr(exchange, "fetch_ticker") and callable(getattr(exchange, "fetch_ticker", None)):
+                        t = exchange.fetch_ticker(symbol)
+                        order["price"] = t.get("last") or t.get("bid") or t.get("ask") or 0.0
+                    else:
+                        order["price"] = 0.0
                 except Exception:
                     order["price"] = 0.0
             log_trade(order)

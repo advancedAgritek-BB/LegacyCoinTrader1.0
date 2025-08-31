@@ -20,6 +20,97 @@ from .telegram import TelegramNotifier
 from .logger import LOG_DIR, setup_logger
 
 
+class CircuitBreaker:
+    """Circuit breaker pattern for failing API endpoints."""
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        recovery_timeout: float = 300.0,
+        expected_exception: Exception = Exception,
+    ):
+        """
+        Initialize the circuit breaker.
+
+        Args:
+            failure_threshold: Number of failures before opening circuit
+            recovery_timeout: Time in seconds before attempting recovery
+            expected_exception: Type of exception to catch
+        """
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.expected_exception = expected_exception
+        self.failure_count = 0
+        self.last_failure_time = None
+        self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
+        self.logger = setup_logger("circuit_breaker")
+
+    def call(self, func, *args, **kwargs):
+        """Execute function with circuit breaker protection."""
+        if self.state == "OPEN":
+            if self._should_attempt_reset():
+                self.state = "HALF_OPEN"
+                self.logger.info("Circuit breaker transitioning to HALF_OPEN")
+            else:
+                raise Exception("Circuit breaker is OPEN")
+
+        try:
+            result = func(*args, **kwargs)
+            self._on_success()
+            return result
+        except self.expected_exception as e:
+            self._on_failure()
+            raise e
+
+    async def async_call(self, coro_func, *args, **kwargs):
+        """Execute async function with circuit breaker protection."""
+        if self.state == "OPEN":
+            if self._should_attempt_reset():
+                self.state = "HALF_OPEN"
+                self.logger.info("Circuit breaker transitioning to HALF_OPEN")
+            else:
+                raise Exception("Circuit breaker is OPEN")
+
+        try:
+            result = await coro_func(*args, **kwargs)
+            self._on_success()
+            return result
+        except self.expected_exception as e:
+            self._on_failure()
+            raise e
+
+    def _should_attempt_reset(self) -> bool:
+        """Check if enough time has passed to attempt recovery."""
+        if self.last_failure_time is None:
+            return True
+        return time.time() - self.last_failure_time >= self.recovery_timeout
+
+    def _on_success(self):
+        """Handle successful call."""
+        if self.state == "HALF_OPEN":
+            self.state = "CLOSED"
+            self.failure_count = 0
+            self.logger.info("Circuit breaker reset to CLOSED after successful call")
+        elif self.state == "CLOSED":
+            self.failure_count = 0  # Reset on consecutive successes
+
+    def _on_failure(self):
+        """Handle failed call."""
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+
+        if self.failure_count >= self.failure_threshold:
+            if self.state != "OPEN":
+                self.state = "OPEN"
+                self.logger.warning(
+                    f"Circuit breaker opened after {self.failure_count} failures"
+                )
+        elif self.state == "HALF_OPEN":
+            # If we're in HALF_OPEN and still failing, go back to OPEN
+            self.state = "OPEN"
+            self.logger.warning("Circuit breaker returned to OPEN after HALF_OPEN failure")
+
+
 class AdaptiveRateLimiter:
     """Intelligent rate limiting for API calls with adaptive delays."""
     
@@ -156,11 +247,14 @@ class AdaptiveRateLimiter:
 # Global rate limiter instance
 _global_rate_limiter: Optional[AdaptiveRateLimiter] = None
 
+# Global circuit breaker instance for API endpoints
+_global_circuit_breaker: Optional[CircuitBreaker] = None
+
 
 def get_rate_limiter() -> AdaptiveRateLimiter:
     """
     Get or create the global rate limiter instance.
-    
+
     Returns:
         AdaptiveRateLimiter instance
     """
@@ -168,6 +262,23 @@ def get_rate_limiter() -> AdaptiveRateLimiter:
     if _global_rate_limiter is None:
         _global_rate_limiter = AdaptiveRateLimiter()
     return _global_rate_limiter
+
+
+def get_circuit_breaker() -> CircuitBreaker:
+    """
+    Get or create the global circuit breaker instance.
+
+    Returns:
+        CircuitBreaker instance
+    """
+    global _global_circuit_breaker
+    if _global_circuit_breaker is None:
+        _global_circuit_breaker = CircuitBreaker(
+            failure_threshold=10,  # Allow more failures before opening
+            recovery_timeout=600.0,  # 10 minutes before attempting recovery
+            expected_exception=(ccxt.ExchangeError, ccxt.NetworkError, ccxt.BadRequest)
+        )
+    return _global_circuit_breaker
 
 
 def configure_rate_limiter(
@@ -488,49 +599,76 @@ def timeframe_seconds(exchange, timeframe: str) -> int:
 
 
 async def _call_with_retry(func, *args, timeout=None, **kwargs):
-    """Call ``func`` with exponential back-off on various errors."""
+    """Call ``func`` with exponential back-off, adaptive rate limiting, and circuit breaker."""
 
-    # Use configuration values if available
-    attempts = get_api_config_value('kraken.max_retries', 5)
-    base_delay = get_api_config_value('kraken.base_retry_delay', 1.0)
-    max_delay = get_api_config_value('kraken.max_retry_delay', 30.0)
+    # Get the adaptive rate limiter and circuit breaker
+    rate_limiter = get_rate_limiter()
+    circuit_breaker = get_circuit_breaker()
 
-    for attempt in range(attempts):
-        try:
-            if timeout is not None:
-                return await asyncio.wait_for(
-                    asyncio.shield(func(*args, **kwargs)), timeout
-                )
-            return await func(*args, **kwargs)
-        except asyncio.CancelledError:
-            raise
-        except (ccxt.ExchangeError, ccxt.NetworkError, ccxt.BadRequest) as exc:
-            # Handle various Kraken-specific errors
-            error_msg = str(exc).lower()
+    # Use circuit breaker to wrap the entire retry logic
+    async def _execute_with_retry():
+        # Use configuration values if available
+        attempts = get_api_config_value('kraken.max_retries', 5)
+        base_delay = get_api_config_value('kraken.base_retry_delay', 1.0)
+        max_delay = get_api_config_value('kraken.max_retry_delay', 30.0)
 
-            # Get retryable status codes and patterns from config
-            retryable_status_codes = get_api_config_value('kraken.retryable_status_codes', [520, 522, 429, 400])
-            retryable_patterns = get_api_config_value('kraken.retryable_error_patterns', RETRYABLE_ERROR_PATTERNS)
+        for attempt in range(attempts):
+            try:
+                # Wait for rate limiter before making the call
+                await rate_limiter.wait_if_needed()
 
-            is_retryable_error = (
-                getattr(exc, "http_status", None) in retryable_status_codes or
-                any(pattern in error_msg for pattern in retryable_patterns)
-            )
+                if timeout is not None:
+                    result = await asyncio.wait_for(
+                        asyncio.shield(func(*args, **kwargs)), timeout
+                    )
+                else:
+                    result = await func(*args, **kwargs)
 
-            if is_retryable_error and attempt < attempts - 1:
-                delay = min(max_delay, base_delay * (2 ** attempt))
-                logger.warning(
-                    f"Retryable error on attempt {attempt + 1}/{attempts}: {exc}. "
-                    f"Retrying in {delay:.1f}s"
-                )
-                await asyncio.sleep(delay)
-                continue
-            elif not is_retryable_error:
-                logger.error(f"Non-retryable error: {exc}")
+                # Record successful call to adjust rate limiter
+                rate_limiter.record_success()
+                return result
+
+            except asyncio.CancelledError:
                 raise
-            else:
-                logger.error(f"Max retries ({attempts}) exceeded for: {exc}")
-                raise
+            except (ccxt.ExchangeError, ccxt.NetworkError, ccxt.BadRequest) as exc:
+                # Record error to adjust rate limiter
+                rate_limiter.record_error()
+
+                # Handle various Kraken-specific errors
+                error_msg = str(exc).lower()
+
+                # Get retryable status codes and patterns from config
+                retryable_status_codes = get_api_config_value('kraken.retryable_status_codes', [520, 522, 429, 400])
+                retryable_patterns = get_api_config_value('kraken.retryable_error_patterns', RETRYABLE_ERROR_PATTERNS)
+
+                is_retryable_error = (
+                    getattr(exc, "http_status", None) in retryable_status_codes or
+                    any(pattern in error_msg for pattern in retryable_patterns)
+                )
+
+                if is_retryable_error and attempt < attempts - 1:
+                    # Check if circuit breaker is open
+                    if circuit_breaker.state == "OPEN":
+                        logger.warning("Circuit breaker is OPEN, skipping retry attempt")
+                        raise exc
+
+                    # Use adaptive delay instead of fixed exponential backoff
+                    adaptive_delay = min(max_delay, rate_limiter.get_current_delay())
+                    logger.warning(
+                        f"Retryable error on attempt {attempt + 1}/{attempts}: {exc}. "
+                        f"Retrying in {adaptive_delay:.1f}s (adaptive delay)"
+                    )
+                    await asyncio.sleep(adaptive_delay)
+                    continue
+                elif not is_retryable_error:
+                    logger.error(f"Non-retryable error: {exc}")
+                    raise
+                else:
+                    logger.error(f"Max retries ({attempts}) exceeded for: {exc}")
+                    raise
+
+    # Execute with circuit breaker protection
+    return await circuit_breaker.async_call(_execute_with_retry)
 
 
 async def load_kraken_symbols(
@@ -618,6 +756,10 @@ async def load_kraken_symbols(
         if row.reason:
             logger.debug("Skipping symbol %s: %s", row.symbol, row.reason)
         else:
+            # Additional validation for Kraken symbols
+            if getattr(exchange, "id", "").lower() == "kraken" and not is_valid_kraken_symbol(row.symbol):
+                logger.debug("Skipping invalid Kraken symbol %s", row.symbol)
+                continue
             logger.debug("Including symbol %s", row.symbol)
             symbols.append(row.symbol)
 
@@ -1697,13 +1839,13 @@ async def update_ohlcv_cache(
                     columns=["timestamp", "open", "high", "low", "close", "volume"],
                 )
             if len(df_new) < min_candles_required:
-                logger.warning(
-                    "Skipping %s: only %d/%d candles",
+                logger.info(
+                    "Incomplete data for %s: %d/%d candles (accumulating in background)",
                     sym,
                     len(df_new),
                     limit,
                 )
-                continue
+                # Don't skip - allow incomplete data to be cached for gradual accumulation
         changed = False
         if sym in cache and not cache[sym].empty:
             last_ts = cache[sym]["timestamp"].iloc[-1]
@@ -1909,3 +2051,43 @@ async def update_regime_tf_cache(
         )
 
     return cache
+
+# Add this after the imports section, around line 20
+
+# Invalid Kraken symbols that cause API errors
+INVALID_KRAKEN_SYMBOLS = {
+    'FXS/USD', 'WIF/USD', 'GAIA/USD', 'GAIA/EUR', 'CRV/USD', 
+    'FWOG/USD', 'FWOG/EUR', 'FORTH/USD', 'IP/USD', 'AI16Z/USD',
+    'SAPIEN/USD', 'CFG/USD', 'PYTH/USD', 'BONK/USD', 'CRO/USDT',
+    'CRO/USD', 'CRO/EUR', 'BCH/USD', 'BCH/EUR', 'ARB/USD', 'ARB/EUR',
+    'ADA/USD', 'AAVE/USD', 'SOL/USD'
+}
+
+def is_valid_kraken_symbol(symbol: str) -> bool:
+    """Check if a symbol is valid for Kraken API."""
+    if not symbol or not isinstance(symbol, str):
+        return False
+    
+    # Check against known invalid symbols
+    if symbol in INVALID_KRAKEN_SYMBOLS:
+        return False
+    
+    # Basic format validation
+    if '/' not in symbol:
+        return False
+    
+    base, quote = symbol.split('/', 1)
+    if not base or not quote:
+        return False
+    
+    # Check for common invalid patterns
+    invalid_patterns = [
+        'USDUSD', 'USDTUSD', 'EURUSD', 'USDEUR',
+        'BTCBTC', 'ETHETH', 'SOLSOL'
+    ]
+    
+    for pattern in invalid_patterns:
+        if pattern in symbol:
+            return False
+    
+    return True

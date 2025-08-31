@@ -135,7 +135,12 @@ async def trade_stats_lines(exchange: Any, trade_file: Path = TRADE_FILE) -> Lis
                 ticker = ticker_result
             prices[sym] = float(ticker.get("last") or ticker.get("close") or 0.0)
         except Exception:
-            prices[sym] = 0.0
+            # Fallback to frontend's price fetching logic for unknown tokens
+            try:
+                from frontend.app import get_current_price_for_symbol
+                prices[sym] = get_current_price_for_symbol(sym)
+            except Exception:
+                prices[sym] = 0.0
 
     lines = []
     for trade in open_trades:

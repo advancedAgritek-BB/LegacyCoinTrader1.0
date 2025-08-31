@@ -40,16 +40,20 @@ async def get_filtered_symbols(exchange, config) -> list:
 
     if config.get("skip_symbol_filters"):
         syms = config.get("symbols", [config.get("symbol")])
+        # Filter out None values to prevent issues
+        syms = [s for s in syms if s is not None]
         result = [(s, 0.0) for s in syms]
         _cached_symbols = result
         _last_refresh = now
         return result
 
     symbols = config.get("symbols", [config.get("symbol")])
+    # Filter out None values to prevent TypeError in string operations
+    symbols = [s for s in symbols if s is not None]
     cleaned_symbols = []
     for sym in symbols:
         if not isinstance(sym, str):
-            cleaned_symbols.append(sym)
+            logger.warning("Skipping non-string symbol: %s (type: %s)", sym, type(sym))
             continue
         base, _, quote = sym.partition("/")
         if quote.upper() == "USDC" and not _is_valid_base_token(base):

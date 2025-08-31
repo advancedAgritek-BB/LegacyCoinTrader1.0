@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from typing import Tuple, Optional
 import requests
-import ta
+
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.pair_cache import load_liquid_pairs
@@ -60,8 +60,18 @@ def fetch_priority_fee_gwei(endpoint: Optional[str] = None) -> float:
     return 0.0
 
 
-def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[float, str]:
+def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
     """Short-term momentum strategy using EMA divergence on DEX pairs."""
+    # Handle type conversion from dict to DataFrame
+    if isinstance(df, dict):
+        try:
+            df = pd.DataFrame.from_dict(df)
+        except Exception:
+            return 0.0, "none"
+
+    if df is None or not isinstance(df, pd.DataFrame):
+        return 0.0, "none"
+
     if df.empty:
         return 0.0, "none"
 
@@ -82,8 +92,9 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     lookback = slow_window
     recent = df.iloc[-(lookback + 1) :]
 
-    ema_fast = ta.trend.ema_indicator(recent["close"], window=fast_window)
-    ema_slow = ta.trend.ema_indicator(recent["close"], window=slow_window)
+    # Calculate EMA manually
+    ema_fast = recent["close"].ewm(span=fast_window, adjust=False).mean()
+    ema_slow = recent["close"].ewm(span=slow_window, adjust=False).mean()
 
     ema_fast = cache_series("ema_fast", df, ema_fast, lookback)
     ema_slow = cache_series("ema_slow", df, ema_slow, lookback)

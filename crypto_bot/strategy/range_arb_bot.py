@@ -10,7 +10,7 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel, WhiteKernel
 from sklearn.preprocessing import StandardScaler
 
-import ta
+
 from scipy import stats
 from scipy.optimize import fmin_l_bfgs_b
 from crypto_bot.utils.stats import last_window_zscore
@@ -129,9 +129,12 @@ def generate_signal(
 
     recent = df.iloc[-lookback:].copy()
 
-    atr = ta.volatility.average_true_range(
-        recent["high"], recent["low"], recent["close"], window=atr_window
-    )
+    # Calculate ATR manually
+    high_low = recent["high"] - recent["low"]
+    high_close = (recent["high"] - recent["close"].shift(1)).abs()
+    low_close = (recent["low"] - recent["close"].shift(1)).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr = tr.rolling(window=atr_window).mean()
     vol_ma = recent["volume"].rolling(kr_window).mean()
     atr_z = pd.Series(stats.zscore(atr), index=atr.index)
     vol_z = pd.Series(stats.zscore(recent["volume"]), index=recent.index)

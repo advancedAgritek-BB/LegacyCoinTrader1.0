@@ -38,6 +38,16 @@ def optimize_strategies() -> Dict[str, Dict[str, float]]:
     bot_cfg = _load_config()
     results: Dict[str, Dict[str, float]] = {}
 
+    # Check for required dependencies
+    try:
+        import skopt  # noqa: F401
+        import joblib  # noqa: F401
+        from tqdm import tqdm  # noqa: F401
+        logger.info("All optimization dependencies are available")
+    except ImportError as e:
+        logger.error(f"Missing optimization dependencies: {e}. Please install scikit-optimize, joblib, and tqdm.")
+        return {}
+
     # Initialize exchange based on config using get_exchange for nonce improvements
     exchange = None
     try:
@@ -53,8 +63,12 @@ def optimize_strategies() -> Dict[str, Dict[str, float]]:
         sl_range: Iterable[float] = ranges.get("stop_loss", [])
         tp_range: Iterable[float] = ranges.get("take_profit", [])
 
+        if not sl_range or not tp_range:
+            logger.warning(f"Skipping {name}: missing stop_loss or take_profit ranges")
+            continue
+
         config = BacktestConfig(
-            symbol=bot_cfg.get("symbol", "XBT/USDT"),
+            symbol=bot_cfg.get("symbol", "BTC/USD"),
             timeframe=bot_cfg.get("timeframe", "1h"),
             since=0,
             limit=1000,
@@ -64,14 +78,24 @@ def optimize_strategies() -> Dict[str, Dict[str, float]]:
         )
 
         try:
-            df = BacktestRunner(config, exchange=exchange).run_grid()
-        except Exception as exc:  # pragma: no cover - network
-            logger.error("Backtest failed for %s: %s", name, exc)
+            logger.info(f"Starting optimization for {name} with {len(sl_range)}x{len(tp_range)} parameter combinations")
+            runner = BacktestRunner(config, exchange=exchange)
+            df = runner.run_grid()
+            logger.info(f"Completed optimization for {name} - got {len(df)} results")
+        except ImportError as e:
+            logger.error(f"Missing dependency for backtesting {name}: {e}")
+            continue
+        except Exception as exc:
+            logger.error(f"Backtest failed for {name}: {exc}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            continue
+
+        if df.empty:
+            logger.warning(f"No results from backtest for {name}")
             continue
 
         df = df.sort_values(["sharpe", "max_drawdown"], ascending=[False, True])
-        if df.empty:
-            continue
         best = df.iloc[0]
         results[name] = {
             "stop_loss_pct": float(best["stop_loss_pct"]),
@@ -80,7 +104,7 @@ def optimize_strategies() -> Dict[str, Dict[str, float]]:
             "max_drawdown": float(best["max_drawdown"]),
         }
         logger.info(
-            "Best for %s sl %.4f tp %.4f sharpe %.2f dd %.2f",
+            "Best for %s: sl=%.4f, tp=%.4f, sharpe=%.2f, dd=%.2f",
             name,
             results[name]["stop_loss_pct"],
             results[name]["take_profit_pct"],
@@ -88,7 +112,14 @@ def optimize_strategies() -> Dict[str, Dict[str, float]]:
             results[name]["max_drawdown"],
         )
 
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LOG_FILE.write_text(json.dumps(results))
-    logger.info("Wrote optimized params to %s", LOG_FILE)
+    if results:
+        try:
+            LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            LOG_FILE.write_text(json.dumps(results, indent=2))
+            logger.info("Wrote optimized params to %s", LOG_FILE)
+        except Exception as e:
+            logger.error(f"Failed to write optimization results: {e}")
+    else:
+        logger.warning("No optimization results to save")
+
     return results

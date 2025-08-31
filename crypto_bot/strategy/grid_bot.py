@@ -9,7 +9,7 @@ from typing import Mapping, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-import ta
+
 
 from crypto_bot import grid_state
 from crypto_bot.utils.indicator_cache import cache_series
@@ -142,8 +142,9 @@ def is_in_trend(df: pd.DataFrame, fast: int, slow: int, side: str) -> bool:
     if len(df) < max(fast, slow):
         return True
 
-    fast_ema = ta.trend.ema_indicator(df["close"], window=fast).iloc[-1]
-    slow_ema = ta.trend.ema_indicator(df["close"], window=slow).iloc[-1]
+    # Calculate EMA manually
+    fast_ema = df["close"].ewm(span=fast, adjust=False).mean().iloc[-1]
+    slow_ema = df["close"].ewm(span=slow, adjust=False).mean().iloc[-1]
 
     if pd.isna(fast_ema) or pd.isna(slow_ema):
         return True
@@ -214,9 +215,12 @@ def generate_signal(
     if range_size < price * cfg.min_range_pct:
         return 0.0, "none"
 
-    atr_series = ta.volatility.average_true_range(
-        recent["high"], recent["low"], recent["close"], window=atr_period
-    )
+    # Calculate ATR manually
+    high_low = recent["high"] - recent["low"]
+    high_close = (recent["high"] - recent["close"].shift(1)).abs()
+    low_close = (recent["low"] - recent["close"].shift(1)).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr_series = tr.rolling(window=atr_period).mean()
     vwap_series = compute_vwap(recent, volume_ma_window)
 
     lookback = len(recent)

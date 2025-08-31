@@ -1,5 +1,27 @@
 """Strategy router for selecting and executing trading strategies based on market conditions."""
 
+import pandas as pd
+from typing import Any, Dict, Optional
+
+
+# Debug utility to help identify DataFrame conversion issues
+DEBUG_DATAFRAME_CONVERSION = False
+
+def enable_dataframe_debug():
+    """Enable debug logging for DataFrame conversions."""
+    global DEBUG_DATAFRAME_CONVERSION
+    DEBUG_DATAFRAME_CONVERSION = True
+    logger.info("DataFrame conversion debugging enabled")
+
+def debug_dataframe_type(obj, context=""):
+    """Debug helper to log DataFrame types."""
+    if DEBUG_DATAFRAME_CONVERSION:
+        logger.debug(f"{context} - Object type: {type(obj)}, is DataFrame: {isinstance(obj, pd.DataFrame)}")
+        if isinstance(obj, dict):
+            logger.debug(f"{context} - Dict keys: {list(obj.keys())[:10]}")
+        elif isinstance(obj, pd.DataFrame):
+            logger.debug(f"{context} - DataFrame shape: {obj.shape}, columns: {list(obj.columns)}")
+
 import asyncio
 import logging
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Union, Iterable
@@ -55,6 +77,10 @@ from crypto_bot.strategy import (
     momentum_exploiter,
     volatility_harvester,
 )
+
+import random
+from collections import defaultdict, deque
+from datetime import datetime, timedelta
 
 logger = setup_logger(__name__, LOG_DIR / "bot.log")
 _SYMBOL_LOCKS: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
@@ -580,29 +606,30 @@ def _bandit_context(
     except Exception:
         return context
 
-                        if df is not None and isinstance(df, pd.DataFrame) and not df.empty:
-        price = df["close"].iloc[-1]
-        if symbol:
-            try:
-                from crypto_bot.utils.pyth import get_pyth_price
+    # Continue with context calculation if imports succeeded
+    price = df["close"].iloc[-1]
+    if symbol:
+        try:
+            from crypto_bot.utils.pyth import get_pyth_price
 
-                pyth_price = get_pyth_price(symbol)
-                if pyth_price:
-                    price = pyth_price
-            except Exception:
-                pass
+            pyth_price = get_pyth_price(symbol)
+            if pyth_price:
+                price = pyth_price
+        except Exception:
+            pass
 
-        atr = calc_atr(df)
-        context["atr_pct"] = atr / price if price else 0.0
+    atr = calc_atr(df)
+    context["atr_pct"] = atr / price if price else 0.0
 
-        ts = df.index[-1]
-        if not isinstance(ts, pd.Timestamp):
-            ts = pd.to_datetime(ts)
-        hour = ts.hour + ts.minute / 60
-        context["hour_sin"] = float(np.sin(2 * np.pi * hour / 24))
-        context["hour_cos"] = float(np.cos(2 * np.pi * hour / 24))
-        vol_z = stats.zscore(df["volume"], lookback=20)
-        context["liquidity_z"] = float(vol_z.iloc[-1]) if hasattr(vol_z, 'empty') and not vol_z.empty else 0.0
+    ts = df.index[-1]
+    if not isinstance(ts, pd.Timestamp):
+        ts = pd.to_datetime(ts)
+    hour = ts.hour + ts.minute / 60
+    context["hour_sin"] = float(np.sin(2 * np.pi * hour / 24))
+    context["hour_cos"] = float(np.cos(2 * np.pi * hour / 24))
+    vol_z = stats.zscore(df["volume"], lookback=20)
+    context["liquidity_z"] = float(vol_z.iloc[-1]) if hasattr(vol_z, 'empty') and not vol_z.empty else 0.0
+
     return context
 
 
@@ -713,27 +740,43 @@ def route(
             original_df_id = id(df)
 
             try:
-                res = fn(df, cfg)
-                # Validate that df is still a DataFrame after strategy execution
-                if not isinstance(df, pd.DataFrame):
-                    logger.error(f"Strategy {fn.__name__} corrupted DataFrame - df type after call: {type(df)}")
-                    return 0.0, "none"
+                # Check if the function is async
+                if asyncio.iscoroutinefunction(fn):
+                    # Handle async functions properly
+                    try:
+                        res = await fn(df, cfg)
+                    except TypeError:
+                        res = await fn(df)
+                else:
+                    # Handle sync functions
+                    res = fn(df, cfg)
+                    # Validate that df is still a DataFrame after strategy execution
+                    if not isinstance(df, pd.DataFrame):
+                        logger.error(f"Strategy {fn.__name__} corrupted DataFrame - df type after call: {type(df)}")
+                        return 0.0, "none"
             except TypeError:
-                res = fn(df)
-                # Validate that df is still a DataFrame after strategy execution
-                if not isinstance(df, pd.DataFrame):
-                    logger.error(f"Strategy {fn.__name__} corrupted DataFrame after TypeError fallback - df type: {type(df)}")
-                    return 0.0, "none"
+                # Fallback for sync functions with different signatures
+                if asyncio.iscoroutinefunction(fn):
+                    res = await fn(df)
+                else:
+                    res = fn(df)
+                    # Validate that df is still a DataFrame after strategy execution
+                    if not isinstance(df, pd.DataFrame):
+                        logger.error(f"Strategy {fn.__name__} corrupted DataFrame after TypeError fallback - df type: {type(df)}")
+                        return 0.0, "none"
             except AttributeError as e:
                 if "'dict' object has no attribute" in str(e):
                     logger.error(f"Strategy {fn.__name__} failed: DataFrame was converted to dict - {e}")
                     # Try to recover by checking if df is still a DataFrame
                     if not isinstance(df, pd.DataFrame):
                         logger.error(f"Strategy {fn.__name__} DataFrame was actually converted to {type(df)}")
-                        logger.error(f"Strategy {fn.__name__} df type: {type(df)}, df value: {df}")
+                        logger.error(f"Strategy {fn.__name__} df type: {type(df)}, df value: {repr(df)[:200]}...")
                     # Also check if the error is coming from within the strategy function
                     import traceback
                     logger.error(f"Strategy {fn.__name__} traceback: {traceback.format_exc()}")
+                    # Add debug info about the DataFrame state
+                    logger.error(f"Strategy {fn.__name__} debug - original_df_type: {original_df_type}, original_df_id: {original_df_id}")
+                    logger.error(f"Strategy {fn.__name__} debug - current_df_type: {type(df)}, current_df_id: {id(df)}")
                     return 0.0, "none"
                 elif "bollinger_pband" in str(e):
                     logger.error(f"Strategy {fn.__name__} failed: Bollinger Bands method 'bollinger_pband' does not exist. Use 'bollinger_wband()' and calculate upper/lower bands manually.")
@@ -848,7 +891,7 @@ def route(
         try:
             # 1) breakout squeeze detected by Bollinger band z-score and
             #    concurrent volume spike
-            from ta.volatility import BollingerBands
+            # Bollinger Bands calculation manually
 
             window = int(fp.get("breakout_squeeze_window", 15))
             bw_z_thr = float(fp.get("breakout_bandwidth_zscore", -0.84))
@@ -883,14 +926,28 @@ def route(
                 return _wrap(breakout_bot.generate_signal)
 
             # 2) ultra-strong trend by ADX
-            from ta.trend import ADXIndicator
-
+            # Calculate ADX manually
             adx_thr = float(fp.get("trend_adx_threshold", 25))
-            adx_val = (
-                ADXIndicator(df["high"], df["low"], df["close"], window=window)
-                .adx()
-                .iloc[-1]
-            )
+
+            # Calculate ADX manually (simplified)
+            high_diff = df["high"].diff()
+            low_diff = df["low"].diff()
+
+            dm_plus = ((high_diff > low_diff) & (high_diff > 0)) * high_diff
+            dm_minus = ((low_diff > high_diff) & (low_diff > 0)) * (-low_diff)
+
+            tr = pd.concat([
+                df["high"] - df["low"],
+                (df["high"] - df["close"].shift(1)).abs(),
+                (df["low"] - df["close"].shift(1)).abs()
+            ], axis=1).max(axis=1)
+
+            atr = tr.rolling(window=window).mean()
+            di_plus = 100 * (dm_plus.rolling(window=window).mean() / atr)
+            di_minus = 100 * (dm_minus.rolling(window=window).mean() / atr)
+            dx = 100 * ((di_plus - di_minus).abs() / (di_plus + di_minus))
+            adx_series = dx.rolling(window=window).mean()
+            adx_val = adx_series.iloc[-1] if len(adx_series) > 0 and not pd.isna(adx_series.iloc[-1]) else 0
             if adx_val > adx_thr:
                 logger.info("FAST-PATH: trend_bot via ADX > %.1f", adx_thr)
                 return _wrap(trend_bot.generate_signal)
@@ -1020,5 +1077,104 @@ def route(
         return _wrap(dex_scalper.generate_signal)
 
     select_df = df if df is not None else pd.DataFrame()
-    strategy_fn = Selector(cfg).select(select_df, regime, mode, notifier)
+    
+    # Check if strategy rotation is enabled
+    rotation_enabled = cfg_get(cfg, "strategy_rotation_enabled", True)
+    
+    if rotation_enabled:
+        strategy_fn = _select_strategy_with_rotation(regime, select_df, cfg)
+    else:
+        strategy_fn = Selector(cfg).select(select_df, regime, mode, notifier)
+    
     return _wrap(strategy_fn)
+
+# Strategy rotation tracking
+_strategy_usage_history = defaultdict(lambda: deque(maxlen=1000))
+_strategy_last_used = defaultdict(lambda: datetime.min)
+_strategy_min_usage_interval = defaultdict(lambda: timedelta(minutes=5))
+
+def _update_strategy_usage(strategy_name: str, regime: str):
+    """Update strategy usage tracking."""
+    now = datetime.now()
+    _strategy_usage_history[strategy_name].append(now)
+    _strategy_last_used[strategy_name] = now
+
+def _get_strategy_priority(strategy_name: str, regime: str, config: Union[RouterConfig, Mapping[str, Any]]) -> float:
+    """Calculate strategy priority based on usage history and performance."""
+    now = datetime.now()
+    last_used = _strategy_last_used[strategy_name]
+    time_since_last = now - last_used
+    
+    # Base priority from performance weights
+    if isinstance(config, RouterConfig):
+        weights = config.raw.get("strategy_weights", {})
+    else:
+        weights = config.get("strategy_weights", {})
+    
+    base_priority = weights.get(strategy_name, 1.0)
+    
+    # Boost priority for underused strategies
+    usage_count = len(_strategy_usage_history[strategy_name])
+    if usage_count < 10:  # New or underused strategy
+        base_priority *= 2.0
+    
+    # Boost priority based on time since last use
+    min_interval = _strategy_min_usage_interval[strategy_name]
+    if time_since_last > min_interval * 2:  # Haven't been used in a while
+        base_priority *= 1.5
+    elif time_since_last < min_interval:  # Used recently
+        base_priority *= 0.7
+    
+    return base_priority
+
+def _select_strategy_with_rotation(
+    regime: str, 
+    df: pd.DataFrame, 
+    config: Union[RouterConfig, Mapping[str, Any]]
+) -> Callable[[pd.DataFrame], Tuple[float, str]]:
+    """Select strategy with rotation to ensure balanced usage."""
+    strategies = get_strategies_for_regime(regime, config)
+    
+    if not strategies:
+        logger.warning(f"No strategies found for regime: {regime}")
+        return lambda df: (0.0, "none")
+    
+    # Calculate priorities for all strategies
+    strategy_priorities = []
+    for strategy in strategies:
+        priority = _get_strategy_priority(strategy.__name__, regime, config)
+        strategy_priorities.append((strategy, priority))
+    
+    # Sort by priority (highest first)
+    strategy_priorities.sort(key=lambda x: x[1], reverse=True)
+    
+    # Select strategy with weighted random choice
+    total_priority = sum(priority for _, priority in strategy_priorities)
+    if total_priority == 0:
+        # Fallback to random selection
+        selected_strategy = random.choice(strategies)
+    else:
+        # Weighted random selection
+        rand_val = random.uniform(0, total_priority)
+        cumulative = 0
+        for strategy, priority in strategy_priorities:
+            cumulative += priority
+            if rand_val <= cumulative:
+                selected_strategy = strategy
+                break
+        else:
+            selected_strategy = strategy_priorities[-1][0]
+    
+    # Update usage tracking
+    _update_strategy_usage(selected_strategy.__name__, regime)
+    
+    # Record strategy usage for performance tracking
+    try:
+        from crypto_bot.utils.strategy_performance_tracker import record_strategy_usage
+        # We'll record actual usage when the strategy generates a signal
+    except ImportError:
+        pass
+    
+    logger.debug(f"Selected strategy {selected_strategy.__name__} for regime {regime} with priority {_get_strategy_priority(selected_strategy.__name__, regime, config):.3f}")
+    
+    return selected_strategy

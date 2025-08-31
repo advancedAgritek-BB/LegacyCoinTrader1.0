@@ -99,6 +99,27 @@ from crypto_bot.regime.regime_classifier import CONFIG, classify_regime_async
 from crypto_bot.volatility_filter import calc_atr
 from crypto_bot.solana.exit import monitor_price
 
+# Start continuous log monitoring in background
+try:
+    from crypto_bot.tools.log_monitor import LogMonitor
+    import threading
+
+    def start_log_monitoring():
+        """Start continuous log monitoring in a background thread."""
+        try:
+            monitor = LogMonitor(repo_root=Path(__file__).resolve().parent.parent, flush_interval=60)
+            monitor.run()
+        except Exception as e:
+            logger.warning(f"Failed to start log monitoring: {e}")
+
+    # Start monitoring in background thread
+    monitor_thread = threading.Thread(target=start_log_monitoring, daemon=True, name="LogMonitor")
+    monitor_thread.start()
+    logger.info("Continuous log monitoring started in background")
+
+except ImportError as e:
+    logger.warning(f"Could not start log monitoring: {e}")
+
 # Memory management utilities
 try:
     import psutil
@@ -1114,6 +1135,17 @@ async def execute_solana_trade(
             # Apply sentiment boost to size
             adjusted_size = size * sentiment_boost
 
+            # Validate Solana token exists before trading
+            try:
+                from crypto_bot.solana import sniper_solana
+                test_score = sniper_solana.generate_signal({"df": None})  # Basic validation
+                if test_score == 0.0:  # Token not found or invalid
+                    logger.error(f"Solana token validation failed for {base} - aborting trade")
+                    return False
+            except Exception as e:
+                logger.error(f"Solana token validation failed for {base}: {e} - aborting trade")
+                return False
+
             await sniper_trade(
                 ctx.config.get("wallet_address", ""),
                 quote,
@@ -1191,6 +1223,19 @@ async def execute_cex_trade(
         # Apply sentiment boost to size
         adjusted_size = size * sentiment_boost
         amount = adjusted_size / price if price > 0 else 0.0
+
+        # Validate symbol exists on exchange before trading
+        try:
+            if asyncio.iscoroutinefunction(getattr(ctx.exchange, "fetch_ticker", None)):
+                test_ticker = await ctx.exchange.fetch_ticker(sym)
+            else:
+                test_ticker = await asyncio.to_thread(ctx.exchange.fetch_ticker, sym)
+            if not test_ticker or not test_ticker.get("last"):
+                logger.error(f"Symbol {sym} not found on exchange or has no price data - aborting trade")
+                return False
+        except Exception as e:
+            logger.error(f"Symbol validation failed for {sym}: {e} - aborting trade")
+            return False
 
         order = await cex_trade_async(
             ctx.exchange,
@@ -1872,10 +1917,32 @@ async def _main_impl() -> TelegramNotifier:
                         all_symbols.append(sym)
                 config["symbols"] = all_symbols
                 logger.info(f"Combined {len(configured_symbols)} configured symbols with {len(discovered)} discovered symbols = {len(all_symbols)} total")
+                # Persist combined symbols to config file
+                try:
+                    import yaml
+                    with open(CONFIG_PATH, 'r') as f:
+                        file_config = yaml.safe_load(f) or {}
+                    file_config["symbols"] = all_symbols
+                    with open(CONFIG_PATH, 'w') as f:
+                        yaml.dump(file_config, f, default_flow_style=False, sort_keys=False)
+                    logger.info(f"Persisted {len(all_symbols)} combined symbols to config file")
+                except Exception as e:
+                    logger.warning(f"Failed to persist combined symbols to config file: {e}")
             else:
                 # No configured symbols, use discovered ones
                 config["symbols"] = discovered
                 logger.info(f"Using {len(discovered)} discovered symbols")
+                # Persist discovered symbols to config file
+                try:
+                    import yaml
+                    with open(CONFIG_PATH, 'r') as f:
+                        file_config = yaml.safe_load(f) or {}
+                    file_config["symbols"] = discovered
+                    with open(CONFIG_PATH, 'w') as f:
+                        yaml.dump(file_config, f, default_flow_style=False, sort_keys=False)
+                    logger.info(f"Persisted {len(discovered)} discovered symbols to config file")
+                except Exception as e:
+                    logger.warning(f"Failed to persist discovered symbols to config file: {e}")
         else:
             logger.error(
                 "No symbols discovered after %d attempts; using configured symbols only",
@@ -2000,8 +2067,8 @@ async def _main_impl() -> TelegramNotifier:
         
         paper_wallet = PaperWallet(
             start_bal,
-            config.get("max_open_trades", 1),
-            config.get("allow_short", False),
+            config.get("paper_wallet", {}).get("max_open_trades", config.get("max_open_trades", 1)),
+            config.get("paper_wallet", {}).get("allow_short", config.get("allow_short", False)),
         )
         log_balance(paper_wallet.balance)
         last_balance = notify_balance_change(

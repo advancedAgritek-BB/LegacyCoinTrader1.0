@@ -304,8 +304,15 @@ def get_open_positions() -> list:
                                 # Filter out positions with zero amounts or very small amounts
                                 if amount > 0.0001:  # Minimum threshold
                                     entry_price = float(match.group('entry'))
-                                    current_price = float(match.group('current'))
-                                    
+
+                                    # Get LIVE current price instead of cached price
+                                    current_price = get_current_price_for_symbol(symbol)
+                                    if current_price <= 0:
+                                        # For unknown tokens, use entry price to show 0 PnL
+                                        # This is better than using stale cached prices
+                                        print(f"No live price available for {symbol}, using entry price for 0 PnL")
+                                        current_price = entry_price
+
                                     # Calculate PnL if not provided
                                     if 'pnl' in match.groupdict() and match.group('pnl'):
                                         pnl = float(match.group('pnl'))
@@ -444,14 +451,27 @@ def calculate_wallet_pnl() -> Dict[str, float]:
                 'pnl_percentage': (position_pnl / (entry_price * amount)) * 100 if entry_price > 0 else 0
             })
         
+        # Calculate realized PnL from completed trades
+        df = log_reader._read_trades(TRADE_FILE)
+        realized_pnl = 0.0
+        if not df.empty:
+            # Use the compute_performance function to get realized PnL
+            perf = utils.compute_performance(df)
+            realized_pnl = perf.get('total_pnl', 0.0)
+        
+        # Calculate total PnL (realized + unrealized)
+        total_pnl = realized_pnl + unrealized_pnl
+        
         # Calculate current balance
-        current_balance = initial_balance + unrealized_pnl
+        current_balance = initial_balance + total_pnl
         
         return {
             'initial_balance': initial_balance,
             'current_balance': current_balance,
+            'realized_pnl': realized_pnl,
             'unrealized_pnl': unrealized_pnl,
-            'pnl_percentage': (unrealized_pnl / initial_balance) * 100 if initial_balance > 0 else 0,
+            'total_pnl': total_pnl,
+            'pnl_percentage': (total_pnl / initial_balance) * 100 if initial_balance > 0 else 0,
             'open_positions': position_details,
             'position_count': len(open_positions)
         }
@@ -461,7 +481,9 @@ def calculate_wallet_pnl() -> Dict[str, float]:
         return {
             'initial_balance': 0.0,
             'current_balance': 0.0,
+            'realized_pnl': 0.0,
             'unrealized_pnl': 0.0,
+            'total_pnl': 0.0,
             'pnl_percentage': 0.0,
             'open_positions': [],
             'position_count': 0,
@@ -509,6 +531,10 @@ def index():
     # Get open positions
     open_positions = get_open_positions()
     
+    # Calculate total PnL including both realized and unrealized
+    pnl_data = calculate_wallet_pnl()
+    total_pnl = pnl_data.get('total_pnl', 0.0)
+    
     return render_template(
         'index.html',
         running=is_running(),
@@ -517,11 +543,12 @@ def index():
         last_trade=utils.get_last_trade(TRADE_FILE),
         regime=utils.get_current_regime(LOG_FILE),
         last_reason=utils.get_last_decision_reason(LOG_FILE),
-        pnl=perf.get('total_pnl', 0.0),
+        pnl=total_pnl,
         performance=perf,
         allocation=allocation,
         paper_wallet_balance=paper_wallet_balance,
         open_positions=open_positions,
+        pnl_data=pnl_data,  # Pass the full PnL data for JavaScript
     )
 
 
@@ -1024,12 +1051,12 @@ def get_current_price_for_symbol(symbol: str) -> float:
         # Try Jupiter API for Solana tokens
         try:
             import requests
-            
+
             # Clean symbol for Jupiter API
             base = symbol.split('/')[0] if '/' in symbol else symbol
             # Remove common prefixes/suffixes
             base = base.replace('USDT', '').replace('USDC', '').replace('USD', '')
-            
+
             if base and len(base) > 0:
                 response = requests.get(
                     "https://price.jup.ag/v4/price",
@@ -1043,24 +1070,39 @@ def get_current_price_for_symbol(symbol: str) -> float:
                         print(f"Got price for {symbol} from Jupiter: ${price}")
                         return price
         except Exception as e:
-            print(f"Jupiter price fetch failed for {symbol}: {e}")
+            # Jupiter API appears to be unavailable/deprecated, skip silently
+            # This avoids repeated DNS error messages in the terminal
             pass
         
         # Try Kraken API for major pairs
         try:
             import requests
-            
+
             # Convert symbol format for Kraken
             kraken_symbol = symbol.replace('/', '')
-            if kraken_symbol in ['BTCUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD']:
+
+            # Map common symbol formats to Kraken format (with proper Kraken pair names)
+            kraken_mapping = {
+                'BTCUSDT': 'XXBTZUSD',
+                'BTCUSD': 'XXBTZUSD',
+                'ETHUSDT': 'XETHZUSD',
+                'ETHUSD': 'XETHZUSD',
+                'SOLUSDT': 'SOLUSD',
+                'SOLUSD': 'SOLUSD',
+                'ADAUSDT': 'ADAUSD',
+                'ADAUSD': 'ADAUSD'
+            }
+
+            kraken_pair = kraken_mapping.get(kraken_symbol)
+            if kraken_pair:
                 response = requests.get(
-                    f"https://api.kraken.com/0/public/Ticker?pair={kraken_symbol}",
+                    f"https://api.kraken.com/0/public/Ticker?pair={kraken_pair}",
                     timeout=5
                 )
                 if response.status_code == 200:
                     data = response.json()
-                    if 'result' in data and kraken_symbol in data['result']:
-                        price = float(data['result'][kraken_symbol]['c'][0])  # Current price
+                    if 'result' in data and kraken_pair in data['result']:
+                        price = float(data['result'][kraken_pair]['c'][0])  # Current price
                         if price > 0:
                             print(f"Got price for {symbol} from Kraken: ${price}")
                             return price
@@ -1081,6 +1123,39 @@ def get_current_price_for_symbol(symbol: str) -> float:
                             return price
         except Exception as e:
             print(f"Cached price fetch failed for {symbol}: {e}")
+            pass
+
+        # Try CoinGecko API as additional fallback
+        try:
+            import requests
+            base_symbol = symbol.split('/')[0] if '/' in symbol else symbol
+            # Remove common suffixes/prefixes for CoinGecko
+            base_symbol = base_symbol.replace('USDT', '').replace('USDC', '').replace('USD', '')
+
+            if base_symbol:
+                response = requests.get(
+                    f"https://api.coingecko.com/api/v3/simple/price?ids={base_symbol.lower()}&vs_currencies=usd",
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if base_symbol.lower() in data and 'usd' in data[base_symbol.lower()]:
+                        price = float(data[base_symbol.lower()]['usd'])
+                        if price > 0:
+                            print(f"Got price for {symbol} from CoinGecko: ${price}")
+                            return price
+        except Exception as e:
+            print(f"CoinGecko price fetch failed for {symbol}: {e}")
+            pass
+
+        # Try CoinMarketCap API as final fallback
+        try:
+            import requests
+            # This would require an API key, so we'll skip the actual call
+            # but show the pattern for completeness
+            print(f"All price sources failed for {symbol}, returning 0.0 (will use entry price)")
+        except Exception as e:
+            print(f"CoinMarketCap price fetch failed for {symbol}: {e}")
             pass
         
         # Final fallback: try to get from positions.log if it's a recent position
@@ -1134,9 +1209,25 @@ def trades_data():
                         if price > 0:
                             current_prices[symbol] = price
                 
+                # Get open positions using the same logic as console monitor
+                from crypto_bot.utils.open_trades import get_open_trades
+                open_trades = get_open_trades(TRADE_FILE)
+                print(f"DEBUG: open_trades returned: {open_trades}")
+                if not open_trades:
+                    return jsonify([])
+                
+                # Create a mapping of open positions for quick lookup
+                open_positions = {}
+                for trade in open_trades:
+                    symbol = trade['symbol']
+                    open_positions[symbol] = {
+                        'side': trade['side'],
+                        'price': float(trade['price']),
+                        'amount': float(trade['amount'])
+                    }
+                
                 # Calculate PnL for each trade
                 records = []
-                open_positions = {}  # Track open positions per symbol
                 
                 for _, row in df.iterrows():
                     symbol = str(row.get('symbol', ''))
@@ -1148,54 +1239,22 @@ def trades_data():
                     # Calculate trade total
                     total = amount * price
                     
-                    # Calculate PnL for this trade
+                    # Calculate realized PnL for this trade (if it closes a position)
                     pnl = 0.0
                     pnl_percentage = 0.0
-                    
-                    if symbol in open_positions:
-                        # Check if this trade closes an existing position
-                        if (side == 'sell' and open_positions[symbol]['side'] == 'buy') or \
-                           (side == 'buy' and open_positions[symbol]['side'] == 'sell'):
-                            # Calculate realized PnL
-                            entry_price = open_positions[symbol]['price']
-                            entry_amount = open_positions[symbol]['amount']
-                            
-                            if side == 'sell':  # Closing long position
-                                pnl = (price - entry_price) * min(amount, entry_amount)
-                            else:  # Closing short position
-                                pnl = (entry_price - price) * min(amount, entry_amount)
-                            
-                            pnl_percentage = (pnl / (entry_price * min(amount, entry_amount))) * 100
-                            
-                            # Update or remove position
-                            if amount >= entry_amount:
-                                del open_positions[symbol]
-                            else:
-                                open_positions[symbol]['amount'] -= amount
-                        else:
-                            # Same side trade - update position
-                            if symbol in open_positions:
-                                # Average down/up
-                                total_cost = (open_positions[symbol]['price'] * open_positions[symbol]['amount']) + total
-                                total_amount = open_positions[symbol]['amount'] + amount
-                                open_positions[symbol]['price'] = total_cost / total_amount
-                                open_positions[symbol]['amount'] = total_amount
-                            else:
-                                open_positions[symbol] = {'side': side, 'price': price, 'amount': amount}
-                    else:
-                        # New position
-                        open_positions[symbol] = {'side': side, 'price': price, 'amount': amount}
                     
                     # Calculate unrealized PnL for open positions
                     unrealized_pnl = 0.0
                     unrealized_pnl_percentage = 0.0
+                    
+                    # Check if this symbol has an open position
                     if symbol in open_positions and symbol in current_prices:
                         current_price = current_prices[symbol]
                         if current_price > 0:
                             pos = open_positions[symbol]
-                            if pos['side'] == 'buy':
+                            if pos['side'] == 'long':
                                 unrealized_pnl = (current_price - pos['price']) * pos['amount']
-                            else:
+                            else:  # short
                                 unrealized_pnl = (pos['price'] - current_price) * pos['amount']
                             
                             if pos['price'] > 0:
@@ -1246,7 +1305,60 @@ def api_bot_status():
 def api_open_positions():
     """Return open positions as JSON."""
     try:
-        positions = get_open_positions()
+        from crypto_bot.utils.open_trades import get_open_trades
+        
+        # Get open positions
+        open_trades = get_open_trades(TRADE_FILE)
+        if not open_trades:
+            return jsonify([])
+        
+        # Get current prices
+        current_prices = {}
+        try:
+            import requests
+            response = requests.get('http://localhost:8000/api/current-prices', timeout=5)
+            if response.status_code == 200:
+                current_prices = response.json()
+        except Exception:
+            # Fallback: get prices directly
+            symbols = [trade['symbol'] for trade in open_trades]
+            for symbol in symbols:
+                price = get_current_price_for_symbol(symbol)
+                if price > 0:
+                    current_prices[symbol] = price
+        
+        # Calculate PnL for each open position
+        positions = []
+        for trade in open_trades:
+            symbol = trade['symbol']
+            entry_price = float(trade['price'])
+            amount = float(trade['amount'])
+            side = trade['side']
+            current_price = current_prices.get(symbol, 0.0)
+            
+            # Calculate PnL
+            if side == 'long':
+                pnl = (current_price - entry_price) * amount
+            else:  # short
+                pnl = (entry_price - current_price) * amount
+            
+            pnl_percentage = 0.0
+            if entry_price > 0:
+                pnl_percentage = (pnl / (entry_price * amount)) * 100
+            
+            position = {
+                'symbol': symbol,
+                'side': side,
+                'entry_price': entry_price,
+                'amount': amount,
+                'current_price': current_price,
+                'pnl': pnl,
+                'pnl_percentage': pnl_percentage,
+                'entry_time': trade.get('entry_time', ''),
+                'timestamp': trade.get('entry_time', '')
+            }
+            positions.append(position)
+        
         return jsonify(positions)
     except Exception as e:
         return jsonify({'error': str(e)})

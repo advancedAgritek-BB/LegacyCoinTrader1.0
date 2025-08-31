@@ -27,13 +27,25 @@ _CORRELATION_THRESHOLD = 0.8
 
 
 def generate_signal(
-    df_a: pd.DataFrame,
-    df_b: pd.DataFrame,
+    df_a,
+    df_b,
     symbol: Optional[str] = None,
     timeframe: Optional[str] = None,
     **kwargs,
 ) -> Tuple[float, str]:
     """Return (score, direction) based on the price spread z-score."""
+    # Handle type conversion from dict to DataFrame
+    if isinstance(df_a, dict):
+        try:
+            df_a = pd.DataFrame.from_dict(df_a)
+        except Exception:
+            return 0.0, "none"
+    if isinstance(df_b, dict):
+        try:
+            df_b = pd.DataFrame.from_dict(df_b)
+        except Exception:
+            return 0.0, "none"
+
     if isinstance(symbol, dict) and timeframe is None:
         kwargs.setdefault("config", symbol)
         symbol = None
@@ -42,7 +54,11 @@ def generate_signal(
         timeframe = None
     config = kwargs.get("config")
 
-    if df_a is None or df_b is None or df_a.empty or df_b.empty:
+    if (df_a is None or df_b is None or
+        not isinstance(df_a, pd.DataFrame) or not isinstance(df_b, pd.DataFrame)):
+        return 0.0, "none"
+
+    if df_a.empty or df_b.empty:
         return 0.0, "none"
 
     threshold = (

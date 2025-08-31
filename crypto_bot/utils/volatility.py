@@ -9,10 +9,13 @@ def atr_percent(df: pd.DataFrame, window: int = 14) -> float:
     if df.empty or not {"high", "low", "close"}.issubset(df.columns):
         return 0.0
 
-    series = ta.volatility.average_true_range(
-        df["high"], df["low"], df["close"], window=window
-    )
-    if series.empty:
+    # Calculate ATR manually
+    high_low = df["high"] - df["low"]
+    high_close = (df["high"] - df["close"].shift(1)).abs()
+    low_close = (df["low"] - df["close"].shift(1)).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    series = tr.rolling(window=window).mean()
+    if series.empty or len(series.dropna()) == 0:
         return 0.0
 
     atr = float(series.iloc[-1])

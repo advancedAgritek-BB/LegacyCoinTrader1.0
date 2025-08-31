@@ -1,7 +1,7 @@
 from typing import Dict, Optional, Tuple, Union
 
 import pandas as pd
-import ta
+
 try:  # pragma: no cover - optional dependency
     from scipy import stats as scipy_stats
     if not hasattr(scipy_stats, "norm"):
@@ -51,7 +51,12 @@ def _squeeze(
     bb_width = bb_upper - bb_lower
     bb_mid = sma
 
-    atr = ta.volatility.average_true_range(high, low, close, window=kc_len)
+    # Calculate ATR manually
+    high_low = high - low
+    high_close = (high - close.shift(1)).abs()
+    low_close = (low - close.shift(1)).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr = tr.rolling(window=kc_len).mean()
     kc_width = 2 * atr * kc_mult
 
     if len(bb_width) >= lookback:
@@ -145,9 +150,18 @@ def generate_signal(
     dc_low = low.rolling(donchian_window).min().shift(1)
     vol_ma = volume.rolling(vol_window).mean()
 
-    rsi = ta.momentum.rsi(close, window=14)
-    macd_line = ta.trend.macd(close)
-    macd_signal = ta.trend.macd_signal(close)
+    # Calculate RSI manually
+    delta = close.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+
+    # Calculate MACD manually
+    ema_fast = close.ewm(span=12, adjust=False).mean()
+    ema_slow = close.ewm(span=26, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    macd_signal = macd_line.ewm(span=9, adjust=False).mean()
     macd_hist = macd_line - macd_signal
 
     dc_high = cache_series("dc_high", df, dc_high, lookback)

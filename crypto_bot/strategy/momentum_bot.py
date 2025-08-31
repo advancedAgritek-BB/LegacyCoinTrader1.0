@@ -2,7 +2,7 @@ from typing import Optional, Tuple
 
 import logging
 import pandas as pd
-import ta
+
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
@@ -58,10 +58,20 @@ def generate_signal(
     dc_low = recent["low"].rolling(window).min().shift(1)
     vol_ma = recent["volume"].rolling(vol_window).mean()
     vol_std = recent["volume"].rolling(vol_window).std()
-    rsi = ta.momentum.rsi(recent["close"], window=rsi_window)
-    macd = ta.trend.macd(
-        recent["close"], window_fast=macd_fast, window_slow=macd_slow
-    )
+    # Calculate RSI manually
+    delta = recent["close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=rsi_window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_window).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+
+    # Calculate MACD manually
+    ema_fast = recent["close"].ewm(span=macd_fast, adjust=False).mean()
+    ema_slow = recent["close"].ewm(span=macd_slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    macd_signal = macd_line.ewm(span=9, adjust=False).mean()  # Standard signal line
+    macd_hist = macd_line - macd_signal
+    macd = macd_line  # Return the main MACD line
 
     dc_low = cache_series("momentum_dc_low", df, dc_low, lookback)
     vol_ma = cache_series("momentum_vol_ma", df, vol_ma, lookback)

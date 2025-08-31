@@ -18,12 +18,20 @@ def _fetch_prices(symbols: List[str]) -> Dict[str, float]:
     if not symbols:
         return {}
     try:  # pragma: no cover - best effort
-        return asyncio.run(fetch_solana_prices(symbols))
+        # Try to get the current event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # If we're in an async context, we can't use asyncio.run
+            # Return empty dict for now, the async version will handle this
+            return {}
+        except RuntimeError:
+            # No running loop, safe to use asyncio.run
+            return asyncio.run(fetch_solana_prices(symbols))
     except Exception:
         return {}
 
 
-def generate_signal(
+async def generate_signal(
     df: pd.DataFrame,
     symbol: Optional[str] = None,
     timeframe: Optional[str] = None,
@@ -63,25 +71,16 @@ def generate_signal(
         except (TypeError, ValueError):
             fee_thr = 0.0
         try:
-            suspicious = asyncio.run(mempool_monitor.is_suspicious(fee_thr))
-        except RuntimeError:
-            try:
-                loop = asyncio.get_event_loop()
-                suspicious = loop.run_until_complete(
-                    mempool_monitor.is_suspicious(fee_thr)
-                )
-            except Exception:
-                suspicious = False
+            suspicious = await mempool_monitor.is_suspicious(fee_thr)
         except Exception:
             suspicious = False
         if suspicious:
             return 0.0, "none"
 
     try:
-        prices = asyncio.run(fetch_solana_prices([pair]))
-    except RuntimeError:  # pragma: no cover - event loop already running
-        loop = asyncio.get_event_loop()
-        prices = loop.run_until_complete(fetch_solana_prices([pair]))
+        prices = await fetch_solana_prices([pair])
+    except Exception:
+        prices = {}
     dex_price = prices.get(pair)
     if dex_price is None or dex_price <= 0:
         return 0.0, "none"

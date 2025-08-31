@@ -176,6 +176,8 @@ async def _refresh_tickers(
     config: Optional[dict] = None,
 ) -> dict:
     """Return ticker data using WS/HTTP and fall back to per-symbol fetch."""
+    # Filter out None values to prevent TypeError
+    symbols = [s for s in symbols if s is not None]
 
     cfg = config if config is not None else globals().get("cfg", {})
     sf = cfg.get("symbol_filter", {})
@@ -204,6 +206,9 @@ async def _refresh_tickers(
                 "Symbols not in exchange.markets: %s",
                 ", ".join(missing),
             )
+            # Filter out missing symbols to prevent BadSymbol errors
+            symbols = [s for s in symbols if s in markets]
+            logger.info("Filtered to %d valid symbols for %s", len(symbols), exchange.id)
 
     try_ws = (
         getattr(getattr(exchange, "has", {}), "get", lambda _k: False)("watchTickers")

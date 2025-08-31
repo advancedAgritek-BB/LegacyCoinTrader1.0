@@ -2,7 +2,7 @@ from typing import Optional, Tuple, Union
 
 import logging
 import pandas as pd
-import ta
+
 import numpy as np
 
 from crypto_bot.utils.indicator_cache import cache_series
@@ -87,16 +87,41 @@ def generate_signal(
     if len(recent) < required_bars:
         return 0.0, "none"
 
-    rsi = ta.momentum.rsi(recent["close"], window=rsi_window)
+    # Calculate RSI manually
+    delta = recent["close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=rsi_window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_window).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+
     # ADX requires at least twice the window length for a stable reading
     if len(recent) < 2 * adx_window:
         return 0.0, "none"
-    adx = ta.trend.ADXIndicator(
-        recent["high"], recent["low"], recent["close"], window=adx_window
-    ).adx()
-    bb = ta.volatility.BollingerBands(recent["close"], window=bb_window)
-    bb_width = bb.bollinger_wband()
-    bb_mid = recent["close"].rolling(bb_window).mean()
+
+    # Calculate ADX manually (simplified)
+    high_diff = recent["high"].diff()
+    low_diff = recent["low"].diff()
+
+    dm_plus = ((high_diff > low_diff) & (high_diff > 0)) * high_diff
+    dm_minus = ((low_diff > high_diff) & (low_diff > 0)) * (-low_diff)
+
+    tr = pd.concat([
+        recent["high"] - recent["low"],
+        (recent["high"] - recent["close"].shift(1)).abs(),
+        (recent["low"] - recent["close"].shift(1)).abs()
+    ], axis=1).max(axis=1)
+
+    atr = tr.rolling(window=adx_window).mean()
+    di_plus = 100 * (dm_plus.rolling(window=adx_window).mean() / atr)
+    di_minus = 100 * (dm_minus.rolling(window=adx_window).mean() / atr)
+    dx = 100 * ((di_plus - di_minus).abs() / (di_plus + di_minus))
+    adx = dx.rolling(window=adx_window).mean()
+
+    # Calculate Bollinger Bands manually
+    bb_mean = recent["close"].rolling(bb_window).mean()
+    bb_std = recent["close"].rolling(bb_window).std()
+    bb_width = (bb_std * 4) / bb_mean  # 2 standard deviations on each side
+    bb_mid = bb_mean
     bb_upper = bb_mid + (bb_width / 2)
     bb_lower = bb_mid - (bb_width / 2)
     bb_pct = (recent["close"] - bb_lower) / (bb_upper - bb_lower)
@@ -140,7 +165,8 @@ def generate_signal(
     if higher_df is not None and not higher_df.empty:
         h_lookback = max(ema_trend, 1)
         h_recent = higher_df.iloc[-(h_lookback + 1) :]
-        ema_h = ta.trend.ema_indicator(h_recent["close"], window=ema_trend)
+        # Calculate EMA manually
+        ema_h = h_recent["close"].ewm(span=ema_trend, adjust=False).mean()
         ema_h = cache_series("ema_trend_h", higher_df, ema_h, h_lookback)
         in_trend = higher_df["close"].iloc[-1] > ema_h.iloc[-1]
     else:
