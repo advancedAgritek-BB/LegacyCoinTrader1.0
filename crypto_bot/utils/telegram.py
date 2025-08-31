@@ -6,6 +6,8 @@ import asyncio
 import inspect
 import threading
 import os
+import time
+from collections import deque
 
 try:
     # For python-telegram-bot version 20.2
@@ -27,6 +29,50 @@ logger = setup_logger(__name__, LOG_DIR / "bot.log")
 
 # Store allowed Telegram admin IDs parsed from the environment or configuration
 _admin_ids: set[str] = set()
+
+
+class MessageRateLimiter:
+    """Rate limiter for Telegram messages to prevent flooding."""
+
+    def __init__(self, max_messages: int = 10, time_window: int = 60):
+        """
+        Initialize rate limiter.
+
+        Args:
+            max_messages: Maximum messages allowed in time window
+            time_window: Time window in seconds
+        """
+        self.max_messages = max_messages
+        self.time_window = time_window
+        self.messages = deque()
+        self._lock = threading.Lock()
+
+    def can_send(self) -> bool:
+        """Check if a message can be sent based on rate limits."""
+        with self._lock:
+            now = time.time()
+
+            # Remove old messages outside the time window
+            while self.messages and now - self.messages[0] > self.time_window:
+                self.messages.popleft()
+
+            # Check if we're within limits
+            return len(self.messages) < self.max_messages
+
+    def record_message(self) -> None:
+        """Record that a message was sent."""
+        with self._lock:
+            self.messages.append(time.time())
+
+    def get_remaining_time(self) -> float:
+        """Get seconds until next message can be sent."""
+        with self._lock:
+            if len(self.messages) < self.max_messages:
+                return 0.0
+
+            now = time.time()
+            oldest = self.messages[0]
+            return max(0, self.time_window - (now - oldest))
 
 
 def set_admin_ids(admins: Optional[Union[Iterable[str], str, Any]]) -> None:
@@ -64,10 +110,13 @@ def send_message(token: str, chat_id: str, text: str) -> Optional[str]:
     try:
         if Request is not None:
             bot = Bot(token, request=Request(
-                connection_pool_size=8,
+                connection_pool_size=20,  # Increased from 8
                 connect_timeout=30.0,
                 read_timeout=30.0,
-                write_timeout=30.0
+                write_timeout=30.0,
+                pool_connections=20,  # Total connections
+                pool_maxsize=20,      # Max connections per pool
+                max_retries=3,        # HTTP retries
             ))
         else:
             # Fallback for older versions
@@ -160,24 +209,69 @@ class TelegramNotifier:
         self._disabled = False
         # lock to serialize send attempts
         self._lock = threading.Lock()
+        # rate limiter to prevent message flooding (10 messages per minute)
+        self._rate_limiter = MessageRateLimiter(max_messages=10, time_window=60)
 
     def notify(self, text: str) -> Optional[str]:
         """Send ``text`` if notifications are enabled and credentials exist."""
-        if self._disabled or not self.enabled or not self.token or not self.chat_id:
+        if not self.enabled or not self.token or not self.chat_id:
             return None
+
+        # Don't send if permanently disabled due to repeated failures
+        if self._disabled:
+            return None
+
+        # Check rate limit
+        if not self._rate_limiter.can_send():
+            wait_time = self._rate_limiter.get_remaining_time()
+            logger.debug(
+                "Rate limited: %d messages in last 60s, waiting %.1fs",
+                self._rate_limiter.max_messages, wait_time
+            )
+            return f"Rate limited: wait {wait_time:.1f}s"
 
         with self._lock:
             if self._disabled:
                 return None
+
             # Use the local send_message function directly
             err = send_message(self.token, self.chat_id, text)
+
             if err is not None:
-                self._disabled = True
-                logger.error(
-                    "Disabling Telegram notifications due to send failure: %s",
-                    err,
-                )
+                # Only disable after multiple consecutive failures
+                if not hasattr(self, '_failure_count'):
+                    self._failure_count = 0
+                self._failure_count += 1
+
+                if self._failure_count >= 5:  # Allow 5 failures before disabling
+                    self._disabled = True
+                    logger.error(
+                        "Disabling Telegram notifications after %d consecutive failures. Last error: %s",
+                        self._failure_count, err,
+                    )
+                    logger.error(
+                        "To re-enable, restart the bot or call reset_telegram_notifications()"
+                    )
+                else:
+                    logger.warning(
+                        "Telegram send error (%d/%d): %s",
+                        self._failure_count, 5, err,
+                    )
+            else:
+                # Reset failure count on success and record the message
+                self._failure_count = 0
+                self._rate_limiter.record_message()
+
             return err
+
+    def reset_notifications(self) -> None:
+        """Reset notification state to re-enable after failures."""
+        with self._lock:
+            self._disabled = False
+            self._failure_count = 0
+            # Clear rate limiter history
+            self._rate_limiter.messages.clear()
+            logger.info("Telegram notifications reset and re-enabled")
 
     @classmethod
     def from_config(cls, config: dict) -> "TelegramNotifier":

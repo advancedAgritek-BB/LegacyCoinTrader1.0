@@ -42,7 +42,7 @@ confirm_trend_with_higher_tf: true  # Enable higher timeframe confirmation
 
 # ML Integration
 use_ml_regime_classifier: true # Enable ML fallback
-ml_min_bars: 200              # Minimum bars for ML classification
+ml_min_bars: 50               # Minimum bars for ML classification (reduced for better trading coverage)
 ml_blend_weight: 0.5          # Weight for ML vs rule-based classification
 
 # Pattern Detection

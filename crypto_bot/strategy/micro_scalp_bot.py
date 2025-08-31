@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 from crypto_bot.execution.solana_mempool import SolanaMempoolMonitor
 
 import pandas as pd
+import ta
 
 from crypto_bot.utils.indicator_cache import cache_series
 

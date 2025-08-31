@@ -14,7 +14,7 @@ except ImportError:
     ASYNCPG_AVAILABLE = False
     asyncpg = None
 
-from .logger import setup_logger
+from .logger import LOG_DIR, setup_logger
 
 
 @dataclass
@@ -91,7 +91,7 @@ class DatabaseManager:
         self.total_errors = 0
         self.avg_query_time = 0.0
         
-        self.logger = setup_logger("database_manager")
+        self.logger = setup_logger("database_manager", LOG_DIR / "database_manager.log")
     
     def is_available(self) -> bool:
         """Check if database operations are available."""

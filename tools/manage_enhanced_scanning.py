@@ -23,10 +23,10 @@ from crypto_bot.enhanced_scan_integration import (
     get_enhanced_scan_integration,
     get_integration_stats
 )
-from crypto_bot.utils.logger import setup_logger
+from crypto_bot.utils.logger import setup_logger, LOG_DIR
 from crypto_bot.utils.telegram import TelegramNotifier
 
-logger = setup_logger(__name__)
+logger = setup_logger(__name__, LOG_DIR / "enhanced_scanning.log")
 
 
 class EnhancedScanCLI:

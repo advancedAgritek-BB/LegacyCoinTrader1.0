@@ -43,7 +43,7 @@ class CircuitBreaker:
         self.failure_count = 0
         self.last_failure_time = None
         self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
-        self.logger = setup_logger("circuit_breaker")
+        self.logger = setup_logger("circuit_breaker", LOG_DIR / "circuit_breaker.log")
 
     def call(self, func, *args, **kwargs):
         """Execute function with circuit breaker protection."""
@@ -150,7 +150,7 @@ class AdaptiveRateLimiter:
         # Statistics
         self.total_requests = 0
         self.total_errors = 0
-        self.logger = setup_logger("adaptive_rate_limiter")
+        self.logger = setup_logger("adaptive_rate_limiter", LOG_DIR / "adaptive_rate_limiter.log")
     
     async def wait_if_needed(self) -> None:
         """
@@ -328,6 +328,40 @@ logger = setup_logger(__name__, LOG_DIR / "bot.log")
 failed_symbols: Dict[str, Dict[str, Any]] = {}
 RETRY_DELAY = 300
 MAX_RETRY_DELAY = 3600
+
+
+def reset_failed_symbols(symbols: Optional[List[str]] = None) -> int:
+    """Reset failed symbols cache, optionally for specific symbols only.
+
+    Args:
+        symbols: List of specific symbols to reset. If None, resets all.
+
+    Returns:
+        Number of symbols reset.
+    """
+    global failed_symbols
+
+    if symbols is None:
+        # Reset all symbols
+        count = len(failed_symbols)
+        failed_symbols.clear()
+        logger.info(f"Reset all {count} failed symbols")
+        return count
+    else:
+        # Reset specific symbols
+        count = 0
+        for symbol in symbols:
+            if symbol in failed_symbols:
+                del failed_symbols[symbol]
+                count += 1
+                logger.info(f"Reset failed symbol: {symbol}")
+        logger.info(f"Reset {count} specific failed symbols")
+        return count
+
+
+def get_failed_symbols_info() -> Dict[str, Dict[str, Any]]:
+    """Get information about currently failed/disabled symbols."""
+    return failed_symbols.copy()
 # Default timeout when fetching OHLCV data
 OHLCV_TIMEOUT = 60
 # Default timeout when fetching OHLCV data over WebSocket
@@ -641,9 +675,12 @@ async def _call_with_retry(func, *args, timeout=None, **kwargs):
                 retryable_status_codes = get_api_config_value('kraken.retryable_status_codes', [520, 522, 429, 400])
                 retryable_patterns = get_api_config_value('kraken.retryable_error_patterns', RETRYABLE_ERROR_PATTERNS)
 
+                # Special handling for mTLS certificate errors - treat as non-retryable
+                is_mtls_error = "missing client certificate" in error_msg
+
                 is_retryable_error = (
                     getattr(exc, "http_status", None) in retryable_status_codes or
-                    any(pattern in error_msg for pattern in retryable_patterns)
+                    (any(pattern in error_msg for pattern in retryable_patterns) and not is_mtls_error)
                 )
 
                 if is_retryable_error and attempt < attempts - 1:
@@ -1615,10 +1652,9 @@ async def load_ohlcv_parallel(
                 f"(tf={timeframe} limit={limit} mode={mode})"
             )
             logger.error(msg)
-            if notifier and STATUS_UPDATES:
-                notifier.notify(
-                    f"Timeout loading OHLCV for {sym} on {timeframe} limit {limit}"
-                )
+            # Only send notification for critical timeouts, not individual symbol failures
+            # This prevents flooding the Telegram with error messages
+            pass
             info = failed_symbols.get(sym)
             delay = RETRY_DELAY
             count = 1
@@ -1654,10 +1690,9 @@ async def load_ohlcv_parallel(
                 f"(tf={timeframe} limit={limit} mode={mode}): {res}"
             )
             logger.error(msg)
-            if notifier and STATUS_UPDATES:
-                notifier.notify(
-                    f"Failed to load OHLCV for {sym} on {timeframe} limit {limit}: {res}"
-                )
+            # Only send notification for critical failures, not individual symbol failures
+            # This prevents flooding the Telegram with error messages
+            pass
             info = failed_symbols.get(sym)
             delay = RETRY_DELAY
             count = 1

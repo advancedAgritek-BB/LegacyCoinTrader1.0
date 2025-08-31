@@ -179,7 +179,18 @@ async def analyze_symbol(
     sub_regime = regime
     regime = regime.split("_")[-1]
     patterns = detect_patterns(df)
-    base_conf = float(probs.get(sub_regime, 0.0))
+    
+    # Handle different return types from classify_regime_async
+    if isinstance(probs, dict):
+        base_conf = float(probs.get(sub_regime, 0.0))
+    elif isinstance(probs, set):
+        # Convert set to dict with default confidence
+        base_conf = 0.5 if sub_regime in probs else 0.0
+        probs = {k: 0.5 for k in probs}
+    else:
+        # Fallback for other types
+        base_conf = float(probs) if isinstance(probs, (int, float)) else 0.0
+        probs = {sub_regime: base_conf}
     bias_cfg = config.get("sentiment_filter", {})
     try:
         from crypto_bot.sentiment_filter import boost_factor

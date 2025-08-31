@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from collections import deque
 
 import pandas as pd
+import ta
 
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger

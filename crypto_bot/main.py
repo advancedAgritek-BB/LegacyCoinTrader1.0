@@ -28,6 +28,14 @@ import yaml
 from dotenv import dotenv_values
 from pydantic import ValidationError
 
+import sys
+from pathlib import Path
+
+# Add the project root to the Python path for schema imports
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from schema.scanner import (
     ScannerConfig,
     SolanaScannerConfig,
@@ -99,26 +107,7 @@ from crypto_bot.regime.regime_classifier import CONFIG, classify_regime_async
 from crypto_bot.volatility_filter import calc_atr
 from crypto_bot.solana.exit import monitor_price
 
-# Start continuous log monitoring in background
-try:
-    from crypto_bot.tools.log_monitor import LogMonitor
-    import threading
-
-    def start_log_monitoring():
-        """Start continuous log monitoring in a background thread."""
-        try:
-            monitor = LogMonitor(repo_root=Path(__file__).resolve().parent.parent, flush_interval=60)
-            monitor.run()
-        except Exception as e:
-            logger.warning(f"Failed to start log monitoring: {e}")
-
-    # Start monitoring in background thread
-    monitor_thread = threading.Thread(target=start_log_monitoring, daemon=True, name="LogMonitor")
-    monitor_thread.start()
-    logger.info("Continuous log monitoring started in background")
-
-except ImportError as e:
-    logger.warning(f"Could not start log monitoring: {e}")
+# Log monitoring setup will be done after logger is initialized
 
 # Memory management utilities
 try:
@@ -245,6 +234,27 @@ ENV_PATH = Path(__file__).resolve().parent / ".env"
 _LAST_CONFIG_MTIME = CONFIG_PATH.stat().st_mtime
 
 logger = setup_logger("bot", LOG_DIR / "bot.log", to_console=False)
+
+# Start continuous log monitoring in background (after logger is initialized)
+try:
+    from tools.log_monitor import LogMonitor
+    import threading
+
+    def start_log_monitoring():
+        """Start continuous log monitoring in a background thread."""
+        try:
+            monitor = LogMonitor(repo_root=Path(__file__).resolve().parent.parent, flush_interval=60)
+            monitor.run()
+        except Exception as e:
+            logger.warning(f"Failed to start log monitoring: {e}")
+
+    # Start monitoring in background thread
+    monitor_thread = threading.Thread(target=start_log_monitoring, daemon=True, name="LogMonitor")
+    monitor_thread.start()
+    logger.info("Continuous log monitoring started in background")
+
+except ImportError as e:
+    logger.warning(f"Could not start log monitoring: {e}")
 
 # Queue of symbols awaiting evaluation across loops
 symbol_priority_queue: deque[str] = deque()

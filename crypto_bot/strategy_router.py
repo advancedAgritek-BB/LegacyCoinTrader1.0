@@ -186,24 +186,43 @@ class BotStats:
 
 
 def load_bot_stats(name: str) -> BotStats:
-    """Return statistics for ``name`` loaded from Redis."""
+    """Return statistics for ``name`` loaded from Redis.
+
+    For new strategies (no stats available), returns neutral defaults to allow testing.
+    This prevents win rate filtering from blocking new symbols/strategies.
+    """
     try:
         r = redis.Redis()
         raw = r.get(f"bot-stats:{name}")
     except Exception:
-        return BotStats()
+        # For new strategies, give them a neutral score to allow testing
+        return BotStats(
+            sharpe_30d=0.5,  # Neutral Sharpe ratio
+            win_rate_30d=0.5,  # 50% win rate assumption for new strategies
+            avg_r_multiple=1.0,  # Neutral R-multiple
+        )
     if not raw:
-        return BotStats()
+        # For new strategies, give them a neutral score to allow testing
+        return BotStats(
+            sharpe_30d=0.5,  # Neutral Sharpe ratio
+            win_rate_30d=0.5,  # 50% win rate assumption for new strategies
+            avg_r_multiple=1.0,  # Neutral R-multiple
+        )
     try:
         if isinstance(raw, bytes):
             raw = raw.decode()
         data = json.loads(raw)
     except Exception:
-        return BotStats()
+        # For new strategies, give them a neutral score to allow testing
+        return BotStats(
+            sharpe_30d=0.5,  # Neutral Sharpe ratio
+            win_rate_30d=0.5,  # 50% win rate assumption for new strategies
+            avg_r_multiple=1.0,  # Neutral R-multiple
+        )
     return BotStats(
-        sharpe_30d=float(data.get("sharpe_30d", 0.0)),
-        win_rate_30d=float(data.get("win_rate_30d", 0.0)),
-        avg_r_multiple=float(data.get("avg_r_multiple", 0.0)),
+        sharpe_30d=float(data.get("sharpe_30d", 0.5)),  # Default to neutral if missing
+        win_rate_30d=float(data.get("win_rate_30d", 0.5)),  # Default to 50% if missing
+        avg_r_multiple=float(data.get("avg_r_multiple", 1.0)),  # Default to neutral if missing
     )
 
 
@@ -600,6 +619,14 @@ def _bandit_context(
     ]:
         context[f"regime_{r}"] = 1.0 if regime == r else 0.0
 
+    # Check if DataFrame is valid and has required columns
+    if df is None or df.empty or not isinstance(df, pd.DataFrame):
+        return context
+    
+    required_columns = ["close", "volume"]
+    if not all(col in df.columns for col in required_columns):
+        return context
+
     try:
         from crypto_bot.volatility_filter import calc_atr
         from crypto_bot.utils import stats
@@ -607,28 +634,32 @@ def _bandit_context(
         return context
 
     # Continue with context calculation if imports succeeded
-    price = df["close"].iloc[-1]
-    if symbol:
-        try:
-            from crypto_bot.utils.pyth import get_pyth_price
+    try:
+        price = df["close"].iloc[-1]
+        if symbol:
+            try:
+                from crypto_bot.utils.pyth import get_pyth_price
 
-            pyth_price = get_pyth_price(symbol)
-            if pyth_price:
-                price = pyth_price
-        except Exception:
-            pass
+                pyth_price = get_pyth_price(symbol)
+                if pyth_price:
+                    price = pyth_price
+            except Exception:
+                pass
 
-    atr = calc_atr(df)
-    context["atr_pct"] = atr / price if price else 0.0
+        atr = calc_atr(df)
+        context["atr_pct"] = atr / price if price else 0.0
 
-    ts = df.index[-1]
-    if not isinstance(ts, pd.Timestamp):
-        ts = pd.to_datetime(ts)
-    hour = ts.hour + ts.minute / 60
-    context["hour_sin"] = float(np.sin(2 * np.pi * hour / 24))
-    context["hour_cos"] = float(np.cos(2 * np.pi * hour / 24))
-    vol_z = stats.zscore(df["volume"], lookback=20)
-    context["liquidity_z"] = float(vol_z.iloc[-1]) if hasattr(vol_z, 'empty') and not vol_z.empty else 0.0
+        ts = df.index[-1]
+        if not isinstance(ts, pd.Timestamp):
+            ts = pd.to_datetime(ts)
+        hour = ts.hour + ts.minute / 60
+        context["hour_sin"] = float(np.sin(2 * np.pi * hour / 24))
+        context["hour_cos"] = float(np.cos(2 * np.pi * hour / 24))
+        vol_z = stats.zscore(df["volume"], lookback=20)
+        context["liquidity_z"] = float(vol_z.iloc[-1]) if hasattr(vol_z, 'empty') and not vol_z.empty else 0.0
+    except Exception:
+        # If any calculation fails, return basic context
+        pass
 
     return context
 

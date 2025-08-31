@@ -73,7 +73,7 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-const perfData = {{ performance.per_symbol|tojson if performance and performance.per_symbol else '{}' }};
+const perfData = {{ performance['per_symbol']|tojson if performance and performance.get('per_symbol') else '{}' }};
 const allocData = {{ allocation|tojson }};
 
 // Performance chart

@@ -1446,21 +1446,19 @@ def api_dashboard_metrics():
             with open(SCAN_FILE) as f:
                 asset_scores = json.load(f)
         
-        # Get recent trades
+        # Get recent trades using the log_reader function
         recent_trades = []
-        if TRADE_FILE.exists():
-            lines = TRADE_FILE.read_text().strip().split('\n')
-            for line in lines[-10:]:  # Last 10 trades
-                if line.strip():
-                    parts = line.split(',')
-                    if len(parts) >= 5:
-                        recent_trades.append({
-                            'symbol': parts[0],
-                            'side': parts[1],
-                            'amount': float(parts[2]),
-                            'price': float(parts[3]),
-                            'timestamp': parts[4]
-                        })
+        if not df.empty:
+            # Get last 10 trades from the DataFrame
+            recent_df = df.tail(10)
+            for _, row in recent_df.iterrows():
+                recent_trades.append({
+                    'symbol': str(row.get('symbol', '')),
+                    'side': str(row.get('side', '')),
+                    'amount': float(row.get('amount', 0.0)),
+                    'price': float(row.get('price', 0.0)),
+                    'timestamp': str(row.get('timestamp', ''))
+                })
         
         # Get open positions
         open_positions = get_open_positions()

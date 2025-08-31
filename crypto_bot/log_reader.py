@@ -14,37 +14,69 @@ def _read_trades(path: Union[Path, str]) -> pd.DataFrame:
         return pd.DataFrame(columns=["symbol", "side", "amount", "price", "timestamp"])
 
     try:
-        # First try to read with header detection
+        # Try to read with pandas' built-in header detection first
         df = pd.read_csv(file, engine="python")
-        
-        # Check if the first row looks like a header (contains string values)
-        if not df.empty and df.iloc[0].dtype == 'object':
-            # First row is likely a header, check if it contains expected column names
-            first_row = df.iloc[0].astype(str).str.lower()
-            if any(col in first_row.values for col in ['symbol', 'side', 'amount', 'price', 'timestamp']):
-                # This is a header row, skip it
-                df = df.iloc[1:].reset_index(drop=True)
-        
-        # Ensure we have the expected columns
+
+        # Check if we need to handle the header manually
         expected_cols = ["symbol", "side", "amount", "price", "timestamp"]
-        if not df.empty and len(df.columns) >= len(expected_cols):
-            df = df.iloc[:, :len(expected_cols)]
-            df.columns = expected_cols
+        actual_cols = [str(col).lower() for col in df.columns]
+
+        # If the columns match our expected columns, use them as is
+        if all(col in actual_cols for col in ['symbol', 'side', 'amount', 'price', 'timestamp']):
+            # Good, columns are properly named
+            pass
+        elif len(df.columns) >= len(expected_cols):
+            # Try to detect if first row is header by checking if it contains column names
+            first_row_values = df.iloc[0].astype(str).values
+            header_keywords = ['symbol', 'side', 'amount', 'price', 'timestamp']
+
+            # Check if first row contains header-like values
+            if any(keyword in ' '.join(first_row_values).lower() for keyword in header_keywords):
+                # First row looks like header, skip it
+                df = df.iloc[1:].reset_index(drop=True)
+                df.columns = expected_cols[:len(df.columns)]
+            else:
+                # No header detected, set column names
+                df.columns = expected_cols[:len(df.columns)]
         else:
-            # Fallback to reading without header
-            df = pd.read_csv(
-                file,
-                header=None,
-                names=expected_cols,
-                engine="python",
-                on_bad_lines=lambda row: row[: len(expected_cols)],
-            )
-            df = df.iloc[:, : len(expected_cols)]
-            
-    except Exception:
-        # If all else fails, return empty DataFrame
-        df = pd.DataFrame(columns=["symbol", "side", "amount", "price", "timestamp"])
-    
+            # Too few columns, set expected names
+            df.columns = expected_cols[:len(df.columns)]
+
+        # Ensure we only keep the expected columns
+        df = df[expected_cols[:len(df.columns)]]
+
+    except Exception as e:
+        # If pandas fails, try manual reading
+        try:
+            with open(file, 'r') as f:
+                lines = f.readlines()
+
+            if not lines:
+                return pd.DataFrame(columns=expected_cols)
+
+            data = []
+            for line in lines:
+                if line.strip():
+                    parts = line.strip().split(',')
+                    if len(parts) >= 5:
+                        # Try to parse the row
+                        try:
+                            symbol = str(parts[0])
+                            side = str(parts[1])
+                            amount = float(parts[2]) if parts[2] else 0.0
+                            price = float(parts[3]) if parts[3] else 0.0
+                            timestamp = str(parts[4])
+                            data.append([symbol, side, amount, price, timestamp])
+                        except (ValueError, IndexError):
+                            # Skip malformed rows
+                            continue
+
+            df = pd.DataFrame(data, columns=expected_cols)
+
+        except Exception:
+            # If all else fails, return empty DataFrame
+            df = pd.DataFrame(columns=expected_cols)
+
     return df
 
 
