@@ -47,7 +47,19 @@ def record_exit(order: Dict) -> None:
         return
     entry = _open_positions.pop(0)
     sell_price = _extract_price(order)
-    pnl = (sell_price - entry["price"]) * entry["qty"]
+    
+    # Determine if this is a short position based on the order side
+    side = order.get("side", "").lower()
+    if side in ["sell", "short"]:
+        # For short positions: profit when price goes down (sell high, buy low)
+        pnl = (entry["price"] - sell_price) * entry["qty"]
+        buy_price = sell_price  # The exit price becomes the "buy" price for shorts
+        sell_price = entry["price"]  # The entry price becomes the "sell" price for shorts
+    else:
+        # For long positions: profit when price goes up (buy low, sell high)
+        pnl = (sell_price - entry["price"]) * entry["qty"]
+        buy_price = entry["price"]
+    
     days = (datetime.utcnow() - entry["time"]).days
     trade_type = "long_term" if days >= 365 else "short_term"
     _closed_trades.append(
@@ -55,7 +67,7 @@ def record_exit(order: Dict) -> None:
             "Date": datetime.utcnow().date().isoformat(),
             "Token": token or entry["token"],
             "Qty": entry["qty"],
-            "Buy_Price": entry["price"],
+            "Buy_Price": buy_price,
             "Sell_Price": sell_price,
             "Profit": pnl,
             "Type": trade_type,

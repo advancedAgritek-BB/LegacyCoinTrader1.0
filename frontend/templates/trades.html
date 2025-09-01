@@ -57,40 +57,40 @@
           </div>
           
           <div class="trades-summary mt-3">
-            <div class="row">
-              <div class="col-md-2">
+            <div class="row g-3">
+              <div class="col-xl-2 col-lg-4 col-md-6">
                 <div class="summary-item">
-                  <span class="summary-label">Total Trades:</span>
+                  <span class="summary-label">Total Trades</span>
                   <span class="summary-value" id="totalTradesCount">0</span>
                 </div>
               </div>
-              <div class="col-md-2">
+              <div class="col-xl-2 col-lg-4 col-md-6">
                 <div class="summary-item">
-                  <span class="summary-label">Total Volume:</span>
+                  <span class="summary-label">Total Volume</span>
                   <span class="summary-value" id="totalVolume">$0.00</span>
                 </div>
               </div>
-              <div class="col-md-2">
+              <div class="col-xl-2 col-lg-4 col-md-6">
                 <div class="summary-item">
-                  <span class="summary-label">Win Rate:</span>
+                  <span class="summary-label">Win Rate</span>
                   <span class="summary-value" id="winRate">0%</span>
                 </div>
               </div>
-              <div class="col-md-2">
+              <div class="col-xl-2 col-lg-4 col-md-6">
                 <div class="summary-item">
-                  <span class="summary-label">Realized P&L:</span>
+                  <span class="summary-label">Realized P&L</span>
                   <span class="summary-value" id="realizedPnl">$0.00</span>
                 </div>
               </div>
-              <div class="col-md-2">
+              <div class="col-xl-2 col-lg-4 col-md-6">
                 <div class="summary-item">
-                  <span class="summary-label">Unrealized P&L:</span>
+                  <span class="summary-label">Unrealized P&L</span>
                   <span class="summary-value" id="unrealizedPnl">$0.00</span>
                 </div>
               </div>
-              <div class="col-md-2">
+              <div class="col-xl-2 col-lg-4 col-md-6">
                 <div class="summary-item">
-                  <span class="summary-label">Total P&L:</span>
+                  <span class="summary-label">Total P&L</span>
                   <span class="summary-value" id="totalPnl">$0.00</span>
                 </div>
               </div>
@@ -129,13 +129,17 @@ let errorsData = [];
 
 // Initialize the trades page
 document.addEventListener('DOMContentLoaded', function() {
+  console.log('DOM loaded, initializing trades page');
   loadTrades();
   loadErrors();
   
   // Set up search functionality
-  document.getElementById('tradeSearch').addEventListener('input', function(e) {
-    filterTrades(e.target.value);
-  });
+  const searchInput = document.getElementById('tradeSearch');
+  if (searchInput) {
+    searchInput.addEventListener('input', function(e) {
+      filterTrades(e.target.value);
+    });
+  }
 });
 
 // Load trades data
@@ -148,13 +152,14 @@ function loadTrades() {
       return response.json();
     })
     .then(data => {
+      console.log('Trades data received:', data);
       tradesData = data || [];
+      console.log('Trades data length:', tradesData.length);
       displayTrades(tradesData);
       updateSummary(tradesData);
     })
     .catch(error => {
       console.error('Error loading trades:', error);
-      window.LegacyCoinTrader.showToast('Error loading trades: ' + error.message, 'error');
       // Display empty state
       displayTrades([]);
       updateSummary([]);
@@ -177,12 +182,17 @@ function loadErrors() {
 
 // Display trades in the table
 function displayTrades(trades) {
+  console.log('displayTrades called with:', trades);
   const tbody = document.getElementById('tradesTableBody');
-  if (!tbody) return;
+  if (!tbody) {
+    console.error('tradesTableBody not found');
+    return;
+  }
   
   tbody.innerHTML = '';
   
   if (trades.length === 0) {
+    console.log('No trades to display');
     tbody.innerHTML = `
       <tr>
         <td colspan="8" class="text-center text-muted py-4">
@@ -223,8 +233,9 @@ function createTradeRow(trade) {
   // Determine status badge class
   let statusClass = 'badge-info';
   if (status === 'completed') statusClass = 'badge-success';
+  else if (status === 'active') statusClass = 'badge-warning';
   else if (status === 'failed') statusClass = 'badge-danger';
-  else if (status === 'pending') statusClass = 'badge-warning';
+  else if (status === 'pending') statusClass = 'badge-info';
   
   // Determine type badge class
   let typeClass = 'badge-secondary';
@@ -236,11 +247,14 @@ function createTradeRow(trade) {
   let pnlValue = pnl;
   let pnlPercentValue = pnlPercentage;
   
-  // If there's unrealized PnL, show that instead
-  if (unrealizedPnl !== 0) {
+  // For completed trades, show realized P&L
+  // For active trades, show unrealized P&L if available
+  if (status === 'active' && unrealizedPnl !== 0) {
     pnlValue = unrealizedPnl;
     pnlPercentValue = unrealizedPnlPercentage;
   }
+  
+
   
   if (pnlValue > 0) {
     pnlClass = 'text-success';
@@ -330,6 +344,8 @@ function updateSummary(trades) {
   
   const winRate = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0;
   const totalPnl = realizedPnl + unrealizedPnl;
+  
+
   
   // Update the summary display
   document.getElementById('totalTradesCount').textContent = totalTrades;
@@ -452,11 +468,11 @@ function formatCurrency(num) {
   return '$' + num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Auto-refresh every 30 seconds
-setInterval(loadTrades, 30000);
-
-// Refresh prices every 10 seconds for real-time updates
-setInterval(refreshPrices, 10000);
+  // Auto-refresh every 30 seconds (disabled to prevent P&L fluctuation)
+  // setInterval(loadTrades, 30000);
+  
+  // Refresh prices every 10 seconds for real-time updates (disabled to prevent P&L fluctuation)
+  // setInterval(refreshPrices, 10000);
 
 // Function to refresh current prices
 function refreshPrices() {
@@ -525,7 +541,15 @@ function updateCurrentPrices(prices) {
               
               if (entryPrice > 0 && currentPrice > 0 && amount > 0) {
                 // Calculate unrealized PnL
-                const pnl = (currentPrice - entryPrice) * amount;
+                const side = cells[1].textContent.trim().toLowerCase(); // Get side from the side column
+                let pnl;
+                if (side === 'sell' || side === 'short') {
+                  // Short position: profit when price goes down
+                  pnl = (entryPrice - currentPrice) * amount;
+                } else {
+                  // Long position: profit when price goes up
+                  pnl = (currentPrice - entryPrice) * amount;
+                }
                 const pnlPercent = (pnl / (entryPrice * amount)) * 100;
                 
                 // Update PnL cells
@@ -570,22 +594,66 @@ function updateCurrentPrices(prices) {
 
 .summary-item {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
   align-items: center;
-  padding: 0.75rem;
+  justify-content: center;
+  padding: 1rem;
   background: var(--bg-secondary);
   border-radius: 0.5rem;
   border: 1px solid var(--border-color);
+  height: 80px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.summary-item:hover {
+  background: var(--bg-tertiary);
+  transform: translateY(-2px);
 }
 
 .summary-label {
   color: var(--text-secondary);
-  font-size: 0.875rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+  font-weight: 500;
 }
 
 .summary-value {
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-primary);
+  font-size: 1.1rem;
+  word-break: break-all;
+}
+
+.summary-value.text-success {
+  color: var(--success-color) !important;
+}
+
+.summary-value.text-danger {
+  color: var(--danger-color) !important;
+}
+
+.summary-value.text-muted {
+  color: var(--text-muted) !important;
+}
+
+/* Responsive adjustments for summary items */
+@media (max-width: 768px) {
+  .summary-item {
+    height: auto;
+    min-height: 70px;
+    padding: 0.75rem;
+  }
+
+  .summary-label {
+    font-size: 0.7rem;
+  }
+
+  .summary-value {
+    font-size: 1rem;
+  }
 }
 
 .error-item {

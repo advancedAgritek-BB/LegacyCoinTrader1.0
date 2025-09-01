@@ -212,7 +212,7 @@ def test_trades_data_endpoint():
                     'price': price,
                     'timestamp': timestamp,
                     'total': total,
-                    'status': 'completed',
+                    'status': 'completed',  # This trade would be completed since it's a sell
                     'pnl': pnl,
                     'pnl_percentage': pnl_percentage,
                     'unrealized_pnl': unrealized_pnl,

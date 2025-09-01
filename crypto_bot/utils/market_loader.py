@@ -797,8 +797,10 @@ async def load_kraken_symbols(
             if getattr(exchange, "id", "").lower() == "kraken" and not is_valid_kraken_symbol(row.symbol):
                 logger.debug("Skipping invalid Kraken symbol %s", row.symbol)
                 continue
-            logger.debug("Including symbol %s", row.symbol)
-            symbols.append(row.symbol)
+            # Normalize symbol before adding
+            normalized_symbol = normalize_symbol(row.symbol)
+            logger.debug("Including symbol %s (normalized: %s)", row.symbol, normalized_symbol)
+            symbols.append(normalized_symbol)
 
     if not symbols:
         logger.warning("No active trading pairs were discovered")
@@ -833,6 +835,33 @@ async def fetch_ohlcv_async(
         use_websocket = False
 
     try:
+        # Normalize the symbol before checking
+        original_symbol = symbol
+        normalized_symbol = normalize_symbol(symbol)
+
+        # Check if we should use Kraken for this symbol
+        use_kraken = should_use_kraken_for_symbol(symbol)
+        exchange_id = getattr(exchange, "id", "unknown").lower()
+
+        # If it's a Solana contract and we're on Kraken, use the normalized symbol
+        if is_solana_contract_address(original_symbol) and exchange_id == "kraken":
+            if use_kraken:
+                symbol = normalized_symbol
+                logger.debug("Mapped Solana contract %s to Kraken symbol %s", original_symbol, symbol)
+            else:
+                logger.warning(
+                    "Skipping unsupported symbol %s on %s (no Kraken mapping available)",
+                    original_symbol,
+                    exchange_id,
+                )
+                failed_symbols[original_symbol] = {
+                    "time": time.time(),
+                    "delay": MAX_RETRY_DELAY,
+                    "count": MAX_OHLCV_FAILURES,
+                    "disabled": True,
+                }
+                return UNSUPPORTED_SYMBOL
+
         if hasattr(exchange, "symbols"):
             if not exchange.symbols and hasattr(exchange, "load_markets"):
                 try:
@@ -848,8 +877,16 @@ async def fetch_ohlcv_async(
                 logger.warning(
                     "Skipping unsupported symbol %s on %s",
                     symbol,
-                    getattr(exchange, "id", "unknown"),
+                    exchange_id,
                 )
+                # Try Helius fallback for Solana tokens not supported by Kraken
+                if is_solana_contract_address(original_symbol) and exchange_id == "kraken":
+                    logger.debug("Trying Helius fallback for Solana token %s", original_symbol)
+                    helius_data = await fetch_helius_ohlcv(original_symbol, timeframe=timeframe, limit=limit)
+                    if helius_data:
+                        logger.info("Successfully fetched %d candles for %s via Helius fallback", len(helius_data), original_symbol)
+                        return helius_data
+
                 failed_symbols[symbol] = {
                     "time": time.time(),
                     "delay": MAX_RETRY_DELAY,
@@ -1457,6 +1494,59 @@ async def fetch_coingecko_ohlc(
     return result
 
 
+async def fetch_helius_ohlcv(
+    symbol: str,
+    timeframe: str = "1h",
+    limit: int = 100,
+) -> Optional[list]:
+    """Fetch OHLCV data for Solana tokens using Helius API.
+
+    This is used as a fallback for tokens not supported by Kraken.
+    """
+    import os
+
+    # Check if we have a Helius API key
+    helius_key = os.getenv("HELIUS_KEY")
+    if not helius_key:
+        logger.debug("No HELIUS_KEY found, skipping Helius OHLCV fetch")
+        return None
+
+    # Extract token mint address from symbol
+    if "/" in symbol:
+        base_token = symbol.split("/")[0]
+    else:
+        base_token = symbol
+
+    # Check if it's a valid Solana token address
+    if not _is_valid_base_token(base_token):
+        logger.debug("Invalid Solana token address for Helius: %s", base_token)
+        return None
+
+    try:
+        # Use GeckoTerminal as primary source for Solana tokens via Helius
+        res = await fetch_geckoterminal_ohlcv(
+            f"{base_token}/USDC",
+            timeframe=timeframe,
+            limit=limit,
+            min_24h_volume=0.0  # Accept any volume for now
+        )
+
+        if res:
+            if isinstance(res, tuple):
+                data, vol = res
+                if data and len(data) > 0:
+                    logger.debug("Fetched %d candles for %s via Helius/GeckoTerminal", len(data), symbol)
+                    return data
+            elif isinstance(res, list) and len(res) > 0:
+                logger.debug("Fetched %d candles for %s via Helius/GeckoTerminal", len(res), symbol)
+                return res
+
+    except Exception as exc:
+        logger.debug("Helius OHLCV fetch failed for %s: %s", symbol, exc)
+
+    return None
+
+
 async def fetch_dex_ohlcv(
     exchange,
     symbol: str,
@@ -1491,6 +1581,12 @@ async def fetch_dex_ohlcv(
             vol = min_volume_usd
         if data and vol >= min_volume_usd:
             return data
+
+    # Try Helius for Solana tokens
+    if is_solana_contract_address(symbol.split("/")[0] if "/" in symbol else symbol):
+        helius_data = await fetch_helius_ohlcv(symbol, timeframe=timeframe, limit=limit)
+        if helius_data:
+            return helius_data
 
     base, _, quote = symbol.partition("/")
     coin_id = COINGECKO_IDS.get(base)
@@ -2091,38 +2187,131 @@ async def update_regime_tf_cache(
 
 # Invalid Kraken symbols that cause API errors
 INVALID_KRAKEN_SYMBOLS = {
-    'FXS/USD', 'WIF/USD', 'GAIA/USD', 'GAIA/EUR', 'CRV/USD', 
+    'FXS/USD', 'WIF/USD', 'GAIA/USD', 'GAIA/EUR', 'CRV/USD',
     'FWOG/USD', 'FWOG/EUR', 'FORTH/USD', 'IP/USD', 'AI16Z/USD',
     'SAPIEN/USD', 'CFG/USD', 'PYTH/USD', 'BONK/USD', 'CRO/USDT',
     'CRO/USD', 'CRO/EUR', 'BCH/USD', 'BCH/EUR', 'ARB/USD', 'ARB/EUR',
     'ADA/USD', 'AAVE/USD', 'SOL/USD'
 }
 
+# Mapping of Solana contract addresses to standard symbols
+SOLANA_CONTRACT_TO_SYMBOL = {
+    'So11111111111111111111111111111111111111112': 'SOL',
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 'USDT',
+    '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo': 'PYTH',
+    'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm': 'WIF',
+    '7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr': 'BONK',
+    'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn': 'JTO',
+    'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN': 'JUP',
+    'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': 'DBR',
+    '27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4': 'RAY',
+    '5LafQUrVco6o7KMz42eqVEJ9LW31StPyGjeeu5sKoMtA': 'HBAR',
+    'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v': 'JUPSOL',
+    'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': 'MSOL',
+    '5mbK36SZ7J19An8jFochhQS4of8g6BwUjbeCSxBSoWdp': 'ORCA',
+    'hntyVP6YFm1Hg25TN9WGLqM12b8TQmcknKrdu1oxWux': 'HNT',
+    'A7GJgPaRgLR9M7DjXnX78Ab2PWQ5rZhtLdj2qGAnZnZa': 'ATLAS',
+    'ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82': 'UKT',
+    'MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5': 'MEW',
+    '24gG4br5xFBRmxdqpgirtxgcr7BaWoErQfc2uyDp2Qhh': 'HONEY',
+    'DtR4D9FtVoTX2569gaL837ZgrB6wNjj6tkmnX9Rdk9B2': 'BONK',
+    'CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump': 'PUMP',
+    '25hAyBQfoDhfWx9ay6rarbgvWGwDdNqcHsXS3jQ3mTDJ': 'BONK',
+    'KENJSUYLASHUMfHyy5o4Hp2FdNqZg1AsUPhfH2kYvEP': 'KEN',
+    'J1Wpmugrooj1yMyQKrdZ2vwRXG5rhfx3vTnYE39gpump': 'PUMP',
+    '6NspJqVFceCiU5D1YgVq7waYoC394Vhqxwg7cSJdFtVE': 'BONK',
+    'J3NKxxXZcnNiMjKw9hYb2K4LUxgwB6t1FtPtQVsv3KFr': 'JUP',
+    '9PR7nCP9DpcUotnDPVLUBUZKu5WAYkwrCUx9wDnSpump': 'PUMP',
+    'CJMihkPYswa3k6az9SUbepjKnkJQ6KWpGG5p9qW9n7NV': 'JUP',
+    'HgBRWfYxEfvPhtqkaeymCQtHCrKE46qQ43pKe8HCpump': 'PUMP',
+    '7BgBvyjrZX1YKz4oh9mjb8ZScatkkwb8DzFx7LoiVkM3': 'MEW',
+    'WskzsKqEW3ZsmrhPAevfVZb6PuuLzWov9mJWZsfDePC': 'WSK',
+}
+
+# Kraken-supported symbols that we can map Solana contracts to
+KRAKEN_SUPPORTED_SOLANA_SYMBOLS = {
+    'SOL/USD', 'SOL/EUR', 'SOL/USDT',
+    'USDC/USD', 'USDC/EUR', 'USDC/USDT',
+    'USDT/USD', 'USDT/EUR',
+    'BONK/USD', 'BONK/EUR',
+    'WIF/USD', 'WIF/EUR',
+    'JUP/USD', 'JUP/EUR',
+    'PYTH/USD', 'PYTH/EUR',
+    'RAY/USD', 'RAY/EUR',
+    'HBAR/USD', 'HBAR/EUR',
+    'HNT/USD', 'HNT/EUR',
+}
+
+def map_solana_contract_to_symbol(contract_address: str) -> Optional[str]:
+    """Map a Solana contract address to its standard symbol."""
+    return SOLANA_CONTRACT_TO_SYMBOL.get(contract_address)
+
+
+def is_solana_contract_address(symbol: str) -> bool:
+    """Check if a symbol is a Solana contract address."""
+    if not symbol or not isinstance(symbol, str):
+        return False
+    return _is_valid_base_token(symbol)
+
+
+def normalize_symbol(symbol: str) -> str:
+    """Normalize a symbol by mapping Solana contracts to standard symbols."""
+    if not symbol or not isinstance(symbol, str):
+        return symbol
+
+    # If it's a Solana contract address, map it to standard symbol
+    if is_solana_contract_address(symbol):
+        mapped_symbol = map_solana_contract_to_symbol(symbol)
+        if mapped_symbol:
+            # Return the mapped symbol with USD as default quote
+            return f"{mapped_symbol}/USD"
+
+    # If it's already in symbol format (base/quote), return as-is
+    if '/' in symbol:
+        return symbol
+
+    # If it's just a base symbol, add USD quote
+    return f"{symbol}/USD"
+
+
 def is_valid_kraken_symbol(symbol: str) -> bool:
     """Check if a symbol is valid for Kraken API."""
     if not symbol or not isinstance(symbol, str):
         return False
-    
+
     # Check against known invalid symbols
     if symbol in INVALID_KRAKEN_SYMBOLS:
         return False
-    
+
     # Basic format validation
     if '/' not in symbol:
         return False
-    
+
     base, quote = symbol.split('/', 1)
     if not base or not quote:
         return False
-    
+
     # Check for common invalid patterns
     invalid_patterns = [
         'USDUSD', 'USDTUSD', 'EURUSD', 'USDEUR',
         'BTCBTC', 'ETHETH', 'SOLSOL'
     ]
-    
+
     for pattern in invalid_patterns:
         if pattern in symbol:
             return False
-    
+
     return True
+
+
+def should_use_kraken_for_symbol(symbol: str) -> bool:
+    """Determine if we should use Kraken for a given symbol."""
+    if not symbol or not isinstance(symbol, str):
+        return False
+
+    # Normalize the symbol first
+    normalized = normalize_symbol(symbol)
+
+    # Check if the normalized symbol is supported by Kraken
+    return normalized in KRAKEN_SUPPORTED_SOLANA_SYMBOLS

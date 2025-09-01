@@ -1,148 +1,75 @@
-adaptive_scan:
-  atr_baseline: 0.003
-  enabled: true
-  max_factor: 15.0
-bandit:
-  alpha0: 2
-  beta0: 1
-  enabled: true
-  explore_pct: 0.3
-bounce_scalper:
-  atr_normalization: true
-  atr_period: 8
-  atr_window: 8
-  cooldown_enabled: false
-  cooldown_seconds: 60
-  down_candles: 1
-  ema_window: 30
-  lookback: 150
-  max_concurrent_signals: 12
-  max_drawdown: 0.25
-  min_score: 0.01
-  pattern_timeframe: 1m
-  rsi_overbought_pct: 80
-  rsi_oversold_pct: 20
-  rsi_window: 10
-  stop_loss_atr_mult: 0.8217711534978719
-  stop_loss_pct: 0.01
-  take_profit_atr_mult: 2.397437260113053
-  take_profit_pct: 0.02
-  trend_ema_fast: 5
-  trend_ema_slow: 15
-  up_candles: 1
-  vol_window: 10
-  vol_zscore_threshold: 1.0
-  volume_multiple: 2.340306476069623
-  zscore_threshold: 0.6
-breakout:
-  adx_threshold: 12
-  atr_buffer_mult: 0.02
-  bb_length: 8
-  bb_std: 1.8
-  dc_length: 12
-  kc_length: 8
-  kc_mult: 1.2
-  momentum_filter: true
-  squeeze_threshold: 0.008
-  vol_multiplier: 1.5
-  volume_window: 10
-cycle_bias:
-  enabled: false
-  mvrv_url: https://api.alternative.me/v2/onchain/mvrv
-  nupl_url: https://api.alternative.me/v2/onchain/nupl
-  sopr_url: https://api.alternative.me/v2/onchain/sopr
-debug_mode:
-  enabled: false
-  execution_debug:
-    log_fee_calculation: true
-    log_order_placement: true
-    log_order_status: true
-    log_slippage_calculation: true
-  risk_debug:
-    log_capital_allocation: true
-    log_position_limits: true
-    log_risk_checks: true
-  strategy_debug:
-    log_strategy_performance: true
-    log_strategy_selection: true
-    log_strategy_weights: true
-  trade_pipeline:
-    log_execution_decisions: true
-    log_position_sizing: true
-    log_risk_calculations: true
-    log_signal_generation: true
-enhanced_backtesting:
-  batch_size: 100
-  continuous_mode: true
-  enabled: true
-  lookback_days: 45
-  max_drawdown_threshold: 0.5
-  max_workers: 8
-  min_sharpe_threshold: 0.2
-  min_volume_usd: 100000
-  min_win_rate: 0.1
-  refresh_interval_hours: 6
-  results_cache_dir: crypto_bot/logs/backtest_results
-  strategies_to_test:
-  - trend
-  - momentum_bot
-  - grid_bot
-  - bounce_scalper
-  - sniper_bot
-  - micro_scalp
-  timeframes:
-  - 15m
-  - 1h
-  - 4h
-  top_pairs_count: 20
-  use_gpu: true
 exchange: kraken
 exchange_market_types:
 - spot
 - futures
-excluded_symbols:
-- So11111111111111111111111111111111111111112/USDC
-- So11111111111111111111111111111111111111112/USDT
-exec:
-  allow_market_orders: true
-  order_retry_interval: 0.5
 execution_mode: dry_run
+testing_mode: false
+timeframe: 15m
+timeframes:
+- 1m
+- 5m
+- 15m
+- 1h
+- 4h
+max_open_trades: 10
+max_concurrent_ohlcv: 3
+max_parallel: 20
+max_ws_limit: 300
+risk:
+  risk_pct: 0.01
+  trade_size_pct: 0.1
+  stop_loss_pct: 0.01
+  take_profit_pct: 0.02
+  stop_loss_atr_mult: 2.0
+  take_profit_atr_mult: 4.0
+  max_drawdown: 0.25
+  max_pair_drawdown: 0.0
+  pair_drawdown_lookback: 20
+  atr_period: 14
+  atr_long_window: 50
+  atr_short_window: 14
+  min_volume: 0.0
+  max_volatility_factor: 1.5
+  volume_threshold_ratio: 0.01
+  min_atr_pct: 0.0
+  min_fng: 0
+  max_fng: 101
+  min_sentiment: 0
+  max_sentiment: 101
+  bull_fng: 101
+  bull_sentiment: 101
+  min_expected_value: 0.0
+  max_funding_rate: 1.0
 exit_strategy:
-  adaptive_trailing:
-    base_trailing_pct: 0.008
-    enabled: true
-    momentum_trailing_adjustments:
-      moderate_momentum: 0.8
-      strong_momentum: 0.6
-      very_strong_momentum: 0.4
-      weak_momentum: 1.0
-  breakout_momentum:
-    breakout_threshold: 0.015
-    enabled: true
-    momentum_extension_multiplier: 2.5
-    volume_breakout_multiplier: 3.0
+  take_profit_pct: 0.04
+  trailing_stop_pct: 0.008
+  trailing_stop_factor: 1.1
+  min_gain_to_trail: 0.005
+  scale_out: true
+  partial_levels:
+  - 20
+  - 40
+  - 60
+  - 80
+  - 100
+  momentum_aware_exits: true
+  momentum_tp_scaling: true
+  momentum_trail_adjustment: true
   fib_momentum_scaling: true
   fib_tp_enabled: true
-  min_gain_to_trail: 0.005
-  momentum_aware_exits: true
-  momentum_continuation:
+  real_time_monitoring:
     enabled: true
-    macd_momentum_threshold: 0.001
-    price_acceleration_threshold: 0.002
-    rsi_momentum_threshold: 65
-    volume_momentum_threshold: 1.5
+    check_interval_seconds: 5.0
+    max_monitor_age_seconds: 300.0
+    price_update_threshold: 0.001
+    use_websocket_when_available: true
+    fallback_to_rest: true
+    max_execution_latency_ms: 1000
   momentum_exit_delays:
     enabled: true
     strong_momentum_delay_seconds: 30
     very_strong_momentum_delay_seconds: 60
   momentum_partial_exits: true
-  momentum_tp_multipliers:
-    moderate_momentum: 1.5
-    strong_momentum: 2.0
-    very_strong_momentum: 3.0
-    weak_momentum: 1.0
-  momentum_tp_scaling: true
-  momentum_trail_adjustment: true
   partial_exit_momentum_thresholds:
   - exit_pct: 10
     momentum: 0.3
@@ -156,127 +83,135 @@ exit_strategy:
   - exit_pct: 25
     momentum: 0.85
     profit_pct: 0.08
-  partial_levels:
-  - 20
-  - 40
-  - 60
-  - 80
-  - 100
-  scale_out: true
-  take_profit_pct: 0.04
-  trailing_stop_factor: 1.1
-  trailing_stop_pct: 0.008
+  momentum_tp_multipliers:
+    weak_momentum: 1.0
+    moderate_momentum: 1.5
+    strong_momentum: 2.0
+    very_strong_momentum: 3.0
+  adaptive_trailing:
+    enabled: true
+    base_trailing_pct: 0.008
+    momentum_trailing_adjustments:
+      weak_momentum: 1.0
+      moderate_momentum: 0.8
+      strong_momentum: 0.6
+      very_strong_momentum: 0.4
+  breakout_momentum:
+    enabled: true
+    breakout_threshold: 0.015
+    momentum_extension_multiplier: 2.5
+    volume_breakout_multiplier: 3.0
+  momentum_continuation:
+    enabled: true
+    macd_momentum_threshold: 0.001
+    price_acceleration_threshold: 0.002
+    rsi_momentum_threshold: 65
+    volume_momentum_threshold: 1.5
 exits:
   default_sl_pct: 0.008
   default_tp_pct: 0.045
   trailing_stop_pct: 0.008
+strategy_allocation:
+  bounce_scalper: 15
+  grid_bot: 15
+  micro_scalp_bot: 30
+  momentum_bot: 10
+  sniper_bot: 25
+  trend_bot: 15
+  volatility_harvester: 10
+bounce_scalper:
+  pattern_timeframe: 1m
+  lookback: 150
+  up_candles: 1
+  down_candles: 1
+  ema_window: 30
+  trend_ema_fast: 5
+  trend_ema_slow: 15
+  rsi_window: 10
+  rsi_overbought_pct: 80
+  rsi_oversold_pct: 20
+  vol_window: 10
+  stop_loss_pct: 0.01
+  take_profit_pct: 0.02
+  stop_loss_atr_mult: 0.8217711534978719
+  take_profit_atr_mult: 2.397437260113053
+  max_drawdown: 0.25
+  max_concurrent_signals: 12
+  volume_multiple: 2.340306476069623
+  vol_zscore_threshold: 1.0
+  zscore_threshold: 0.6
+  atr_normalization: true
+  atr_period: 8
+  atr_window: 8
+  min_score: 0.01
+  cooldown_enabled: false
+  cooldown_seconds: 60
 grid_bot:
+  dynamic_grid: true
+  spacing_factor: 0.15
+  min_range_pct: 0.0002
+  range_window: 10
+  max_active_legs: 20
+  trend_ema_fast: 25
+  trend_ema_slow: 100
+  atr_period: 8
+  atr_normalization: true
+  leverage: 5
+  breakout_mult: 1.5
+  cooldown_bars: 0
+  volume_filter: false
+  volume_multiple: 1.2
+  volume_ma_window: 10
+  vol_zscore_threshold: 1.2
+  use_ml_center: true
   arbitrage_pairs:
   - BTC/USDT
   - SOL/USDC
   - ETH/USDT
   - MATIC/USDC
   arbitrage_threshold: 0.0008
-  atr_normalization: true
-  atr_period: 8
-  breakout_mult: 1.5
-  cooldown_bars: 0
-  dynamic_grid: true
-  leverage: 5
-  max_active_legs: 20
-  min_range_pct: 0.0002
-  range_window: 10
-  spacing_factor: 0.15
-  trend_ema_fast: 25
-  trend_ema_slow: 100
-  use_ml_center: true
-  vol_zscore_threshold: 1.2
-  volume_filter: false
-  volume_ma_window: 10
-  volume_multiple: 1.2
-higher_timeframe: 1d
-liquidity_check: true
-liquidity_depth: 3
-logging:
-  console_logging: true
-  error_tracking:
-    enabled: true
-    log_api_errors: true
-    log_exceptions: true
-    log_validation_errors: true
-    log_websocket_errors: true
-  file_logging: true
-  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-  level: INFO
-  live_trading:
-    enabled: true
-    level: INFO
-    log_api_calls: true
-    log_real_executions: true
-    log_websocket_events: true
-  log_directory: crypto_bot/logs
-  paper_trading:
-    enabled: true
-    level: DEBUG
-    log_balance_simulation: true
-    log_position_simulation: true
-    log_simulated_trades: true
-  performance:
-    enabled: true
-    log_api_latency: true
-    log_execution_times: true
-    log_memory_usage: true
-  trade_pipeline:
-    enabled: true
-    level: DEBUG
-    log_balance_changes: true
-    log_executions: true
-    log_position_updates: true
-    log_risk_checks: true
-    log_signals: true
-loop_interval_minutes: 30
-max_age_days: 60
-max_change_pct: 30
-max_concurrent_ohlcv: 3
-max_drawdown: 0.25
-max_latency_ms: 300
-max_ohlcv_failures: 8
-max_open_trades: 10
-max_parallel: 20
-max_slippage_pct: 0.3
-max_spread_pct: 4
-max_vol: 100000000
-max_ws_limit: 300
-metrics_backend: csv
-metrics_enabled: true
-metrics_output_file: crypto_bot/logs/metrics.csv
 micro_scalp:
-  atr_period: 8
-  confirm_bars: 0
-  cooldown_seconds: 20
+  timeframe: 1m
+  trend_timeframe: 1m
   ema_fast: 1
   ema_slow: 3
-  fresh_cross_only: false
-  imbalance_filter: false
-  max_concurrent_signals: 30
-  max_drawdown: 0.25
-  min_atr_pct: 0.0003
-  min_score: 0.01
-  stop_loss_pct: 0.005
-  take_profit_pct: 0.02
   trend_fast: 10
-  trend_filter: false
   trend_slow: 25
-  trend_timeframe: 1m
   vol_window: 10
   volume_window: 10
+  stop_loss_pct: 0.005
+  take_profit_pct: 0.02
+  max_drawdown: 0.25
+  max_concurrent_signals: 30
+  min_score: 0.01
+  min_atr_pct: 0.0003
   wick_pct: 0.08
-min_symbol_age_days: 0
-ml_enabled: true
-ml_signal_model:
-  enabled: true
-  weight: 0.8
-mode: auto
+  confirm_bars: 0
+  cooldown_seconds: 20
+  fresh_cross_only: false
+  imbalance_filter: false
+  trend_filter: false
+sniper_bot:
+  atr_window: 8
+  volume_window: 2
+  stop_loss_pct: 0.0063797342686504575
+  take_profit_pct: 0.050447594063026804
+  max_drawdown: 0.25
+  max_concurrent_signals: 20
+  max_slippage_bps: 15
+  volume_multiple: 2.340419908826357
+  breakout_pct: 0.011236940825431006
+  min_liquidity_usd: 100
+  max_history: 15
+  price_fallback: true
+  fallback_atr_mult: 1.0
+  fallback_volume_mult: 1.0
+  cooldown_seconds: 30
+trend:
+  trend_ema_fast: 10
+  trend_ema_slow: 25
+  atr_period: 8
+  k: 0.9
 momentum_exploiter:
   enabled: true
   lookback: 10
@@ -284,39 +219,176 @@ momentum_exploiter:
   stop_loss_pct: 0.008
   take_profit_pct: 0.035
   threshold: 0.01
-monitoring:
-  performance_monitoring:
-    enabled: true
-    track_max_drawdown: true
-    track_profit_factor: true
-    track_sharpe_ratio: true
-    track_win_rate: true
-  position_monitoring:
-    enabled: true
-    log_position_changes: true
-    track_realized_pnl: true
-    track_unrealized_pnl: true
-  real_time:
-    enabled: true
-    update_interval: 5
-  risk_monitoring:
-    enabled: true
-    log_risk_events: true
-    track_drawdown: true
-    track_exposure: true
-  trade_monitoring:
-    enabled: true
-    log_all_trades: true
-    track_execution_time: true
-    track_fees: true
-    track_slippage: true
+volatility_harvester:
+  enabled: true
+  atr_threshold: 0.002
+  max_positions: 20
+  stop_loss_pct: 0.01
+  take_profit_pct: 0.04
+  volume_spike: 2.0
+ultra_scalp_bot:
+  enabled: true
+  timeframe: 1m
+  atr_window: 3
+  max_concurrent: 30
+  min_score: 0.034262190740007054
+  stop_loss_pct: 0.003361080934308343
+  take_profit_pct: 0.026817922291809047
+  volume_mult: 2.129581467112397
+strategy_router:
+  bandit_enabled: true
+  strategy_rotation_enabled: true
+  bounce_timeframe: 3m
+  breakout_timeframe: 15m
+  mean_reverting_timeframe: 45m
+  omega_based_timeframe: 5m
+  scalp_timeframe: 1m
+  sideways_timeframe: 45m
+  trending_timeframe: 45m
+  volatile_timeframe: 1m
+  fast_path:
+    trend_adx_threshold: 15
+    breakout_max_bandwidth: 0.025
+    breakout_squeeze_window: 8
+    breakout_volume_multiplier: 4
+  regimes:
+    bounce:
+    - bounce_scalper
+    breakout:
+    - breakout_bot
+    mean-reverting:
+    - mean_bot
+    - dip_hunter
+    - stat_arb_bot
+    - dca_bot
+    scalp:
+    - micro_scalp_bot
+    - ultra_scalp_bot
+    sideways:
+    - grid_bot
+    - maker_spread
+    - range_arb_bot
+    - cross_chain_arb_bot
+    trending:
+    - trend_bot
+    - momentum_bot
+    - lstm_bot
+    - momentum_exploiter
+    volatile:
+    - sniper_bot
+    - sniper_solana
+    - flash_crash_bot
+    - meme_wave_bot
+    - hft_engine
+    - volatility_harvester
+    - dex_scalper
+regime_timeframes:
+- 1h
+- 4h
+- 1d
+top_n_symbols: 200
+symbol_batch_size: 100
+symbol_refresh_minutes: 15
+scan_markets: true
+scan_in_background: true
+scan_lookback_limit: 200
+symbol_filter:
+  min_volume_usd: 1000
+  max_spread_pct: 8
+  max_correlation: 0.85
+  correlation_max_pairs: 250
+  volume_percentile: 10
+  change_pct_percentile: 50
+  kraken_batch_size: 300
+  ticker_retry_attempts: 3
+  http_timeout: 3
+  log_ticker_exceptions: true
+  uncached_volume_multiplier: 1.2
+max_age_days: 60
+max_change_pct: 30
+max_latency_ms: 300
+max_ohlcv_failures: 8
+max_slippage_pct: 0.3
+max_spread_pct: 4
+max_vol: 100000000
+min_symbol_age_days: 0
+min_confidence_score: 0.05
 ohlcv_quality:
-  fallback_to_rest: true
-  max_retry_attempts: 2
   min_data_ratio: 0.5
   min_required_candles: 20
-  rest_fallback_timeout: 25
+  max_retry_attempts: 2
   retry_incomplete: true
+  fallback_to_rest: true
+  rest_fallback_timeout: 25
+exec:
+  allow_market_orders: true
+  order_retry_interval: 0.5
+rest_ohlcv_timeout: 30
+use_websocket: false
+enhanced_backtesting:
+  enabled: true
+  continuous_mode: true
+  lookback_days: 45
+  batch_size: 100
+  max_workers: 8
+  use_gpu: true
+  refresh_interval_hours: 6
+  results_cache_dir: crypto_bot/logs/backtest_results
+  top_pairs_count: 20
+  min_volume_usd: 100000
+  min_win_rate: 0.1
+  min_sharpe_threshold: 0.2
+  max_drawdown_threshold: 0.5
+  timeframes:
+  - 15m
+  - 1h
+  - 4h
+  strategies_to_test:
+  - trend
+  - momentum_bot
+  - grid_bot
+  - bounce_scalper
+  - sniper_bot
+  - micro_scalp
+performance:
+  caching:
+    adaptive_cache_ttl: true
+    cache_hit_rate_threshold: 0.7
+    cache_size_multiplier: 2.0
+    max_cache_ttl: 3600
+    min_cache_ttl: 60
+  concurrency:
+    adaptive_concurrency: true
+    max_concurrent_requests: 5
+    min_concurrent_requests: 1
+    response_time_threshold: 1.0
+    success_rate_threshold: 0.8
+  memory:
+    adaptive_cache_sizing: true
+    max_memory_usage_pct: 80.0
+    memory_pressure_threshold: 80.0
+    gc_threshold: 70.0
+  rate_limiting:
+    adaptive_rate_limiting: true
+    base_request_delay: 0.5
+    max_request_delay: 5.0
+    max_requests_per_minute: 30
+    error_backoff_multiplier: 1.5
+  monitoring:
+    enable_performance_monitoring: true
+    alert_enabled: true
+    performance_log_level: INFO
+    metrics_export_interval: 300
+  database:
+    enabled: false
+    host: localhost
+    port: 5432
+    database: crypto_bot
+    user: postgres
+    password: ''
+    max_connections: 20
+    min_connections: 5
+    command_timeout: 30
 optimization:
   enabled: true
   interval_days: 0.5
@@ -377,94 +449,105 @@ optimization:
       - 0.08
       - 0.12
       - 0.15
-paper_wallet:
-  allow_short: true
-  config_file: crypto_bot/paper_wallet_config.yaml
-  enabled: true
-  initial_balance: 10000.0
-  max_open_trades: 10
-performance:
-  caching:
-    adaptive_cache_ttl: true
-    cache_hit_rate_threshold: 0.7
-    cache_size_multiplier: 2.0
-    max_cache_ttl: 3600
-    min_cache_ttl: 60
-  concurrency:
-    adaptive_concurrency: true
-    max_concurrent_requests: 5
-    min_concurrent_requests: 1
-    response_time_threshold: 1.0
-    success_rate_threshold: 0.8
-  database:
-    command_timeout: 30
-    database: crypto_bot
-    enabled: false
-    host: localhost
-    max_connections: 20
-    min_connections: 5
-    password: ''
-    port: 5432
-    user: postgres
-  memory:
-    adaptive_cache_sizing: true
-    gc_threshold: 70.0
-    max_memory_usage_pct: 80.0
-    memory_pressure_threshold: 80.0
-  monitoring:
-    alert_enabled: true
-    enable_performance_monitoring: true
-    metrics_export_interval: 300
-    performance_log_level: INFO
-  rate_limiting:
-    adaptive_rate_limiting: true
-    base_request_delay: 0.5
-    error_backoff_multiplier: 1.5
-    max_request_delay: 5.0
-    max_requests_per_minute: 30
 portfolio_rotation:
   enabled: true
   interval_days: 0.25
   rebalance_threshold: 0.03
   scoring_method: momentum
   top_assets: 15
-preferred_chain: solana
-regime_timeframes:
-- 1h
-- 4h
-- 1d
-rest_ohlcv_timeout: 30
-risk:
-  atr_long_window: 50
-  atr_period: 14
-  atr_short_window: 14
-  bull_fng: 101
-  bull_sentiment: 101
-  max_drawdown: 0.25
-  max_funding_rate: 1.0
-  max_pair_drawdown: 0.0
-  max_volatility_factor: 1.5
-  min_atr_pct: 0.0
-  min_expected_value: 0.0
-  min_fng: 0
-  min_sentiment: 0
-  min_volume: 0.0
-  pair_drawdown_lookback: 20
-  risk_pct: 0.01
-  stop_loss_atr_mult: 2.0
-  stop_loss_pct: 0.01
-  take_profit_atr_mult: 4.0
-  take_profit_pct: 0.02
-  trade_size_pct: 0.1
-  volume_threshold_ratio: 0.05
-min_confidence_score: 0.05
-safety:
-  max_error_count: 15
-  restart_on_error: true
-scalp_timeframe: 1m
-scan_in_background: true
-scan_lookback_limit: 200
-scan_markets: true
+logging:
+  level: INFO
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  console_logging: true
+  file_logging: true
+  log_directory: crypto_bot/logs
+  error_tracking:
+    enabled: true
+    log_api_errors: true
+    log_exceptions: true
+    log_validation_errors: true
+    log_websocket_errors: true
+  live_trading:
+    enabled: true
+    level: INFO
+    log_api_calls: true
+    log_real_executions: true
+    log_websocket_events: true
+  paper_trading:
+    enabled: true
+    level: DEBUG
+    log_balance_simulation: true
+    log_position_simulation: true
+    log_simulated_trades: true
+  performance:
+    enabled: true
+    log_api_latency: true
+    log_execution_times: true
+    log_memory_usage: true
+  trade_pipeline:
+    enabled: true
+    level: DEBUG
+    log_signals: true
+    log_risk_checks: true
+    log_position_updates: true
+    log_executions: true
+    log_balance_changes: true
+monitoring:
+  real_time:
+    enabled: true
+    update_interval: 5
+  performance_monitoring:
+    enabled: true
+    track_win_rate: true
+    track_profit_factor: true
+    track_sharpe_ratio: true
+    track_max_drawdown: true
+  position_monitoring:
+    enabled: true
+    log_position_changes: true
+    track_unrealized_pnl: true
+    track_realized_pnl: true
+  trade_monitoring:
+    enabled: true
+    log_all_trades: true
+    track_execution_time: true
+    track_slippage: true
+    track_fees: true
+  risk_monitoring:
+    enabled: true
+    log_risk_events: true
+    track_exposure: true
+    track_drawdown: true
+telegram:
+  enabled: true
+  token: 8126215032:AAEhQZLiXpssauKf0ktQsq1XqXl94QriCdE
+  chat_id: '827777274'
+  chat_admins: '827777274'
+  balance_updates: true
+  trade_updates: true
+  status_updates: false
+  connect_timeout: 30.0
+  read_timeout: 30.0
+  write_timeout: 30.0
+  timeout_seconds: 30
+  connection_pool_size: 20
+  max_retries: 3
+  retry_delay_seconds: 5
+  fail_silently: true
+  command_cooldown: 5
+telegram_ctl:
+  enabled: true
+  update_interval: 15
+paper_wallet:
+  enabled: true
+  config_file: crypto_bot/paper_wallet_config.yaml
+  initial_balance: 10000.0
+  max_open_trades: 10
+  allow_short: true
+ml_enabled: true
+ml_signal_model:
+  enabled: true
+  weight: 0.8
 signal_fusion:
   enabled: true
   fusion_method: weight
@@ -476,179 +559,128 @@ signal_fusion:
     - 0.35
   - - sniper_bot
     - 0.25
-sl_pct: 0.008
-sniper_bot:
-  atr_window: 8
-  breakout_pct: 0.011236940825431006
-  cooldown_seconds: 30
-  fallback_atr_mult: 1.0
-  fallback_volume_mult: 1.0
-  max_concurrent_signals: 20
-  max_drawdown: 0.25
-  max_history: 15
-  max_slippage_bps: 15
-  min_liquidity_usd: 100
-  price_fallback: true
-  stop_loss_pct: 0.0063797342686504575
-  take_profit_pct: 0.050447594063026804
-  volume_multiple: 2.340419908826357
-  volume_window: 2
-solana_scalping:
-  macd_fast: 8
-  macd_signal: 6
-  macd_slow: 18
-  overbought: 80.0
-  oversold: 20.0
-  rsi_window: 6
+preferred_chain: solana
+solana_symbols: []
+solana_slippage_bps: 15
 solana_scanner:
-  api_keys:
-    bitquery: YOUR_KEY
-    moralis: YOUR_KEY
   enabled: true
-  gecko_search: true
   interval_minutes: 5
   max_tokens_per_scan: 150
   min_volume_usd: 100
-solana_slippage_bps: 15
-solana_symbols: []
-stop_loss_pct: 0.008
-strategy_allocation:
-  bounce_scalper: 15
-  grid_bot: 15
-  micro_scalp_bot: 30
-  momentum_bot: 10
-  sniper_bot: 25
-  trend_bot: 15
-  volatility_harvester: 10
-strategy_router:
-  bandit_enabled: true
-  bounce_timeframe: 3m
-  breakout_timeframe: 15m
-  fast_path:
-    breakout_max_bandwidth: 0.025
-    breakout_squeeze_window: 8
-    breakout_volume_multiplier: 4
-    trend_adx_threshold: 15
-  mean_reverting_timeframe: 45m
-  omega_based_timeframe: 5m
-  strategy_rotation_enabled: true
-  regimes:
-    bounce:
-    - bounce_scalper
-    breakout:
-    - breakout_bot
-    mean-reverting:
-    - mean_bot
-    - dip_hunter
-    - stat_arb_bot
-    - dca_bot
-    scalp:
-    - micro_scalp_bot
-    - ultra_scalp_bot
-    sideways:
-    - grid_bot
-    - maker_spread
-    - range_arb_bot
-    - cross_chain_arb_bot
-    trending:
-    - trend_bot
-    - momentum_bot
-    - lstm_bot
-    - momentum_exploiter
-    volatile:
-    - sniper_bot
-    - sniper_solana
-    - flash_crash_bot
-    - meme_wave_bot
-    - hft_engine
-    - volatility_harvester
-    - dex_scalper
-  scalp_timeframe: 1m
-  sideways_timeframe: 45m
-  trending_timeframe: 45m
-  volatile_timeframe: 1m
-symbol_filter:
-  change_pct_percentile: 50
-  correlation_max_pairs: 250
-  http_timeout: 3
-  kraken_batch_size: 300
-  log_ticker_exceptions: true
-  max_correlation: 0.85
-  max_spread_pct: 8
-  min_volume_usd: 5000
-  ticker_retry_attempts: 3
-  uncached_volume_multiplier: 1.2
-  volume_percentile: 20
-symbol_refresh_minutes: 15
-take_profit_pct: 0.045
+  gecko_search: true
+  api_keys:
+    bitquery: YOUR_KEY
+    moralis: YOUR_KEY
+    pump_fun: YOUR_KEY
+solana_scalping:
+  rsi_window: 6
+  overbought: 80.0
+  oversold: 20.0
+  macd_fast: 8
+  macd_slow: 18
+  macd_signal: 6
+adaptive_scan:
+  enabled: true
+  atr_baseline: 0.003
+  max_factor: 15.0
+bandit:
+  enabled: true
+  alpha0: 2
+  beta0: 1
+  explore_pct: 0.3
+cycle_bias:
+  enabled: false
+  mvrv_url: https://api.alternative.me/v2/onchain/mvrv
+  nupl_url: https://api.alternative.me/v2/onchain/nupl
+  sopr_url: https://api.alternative.me/v2/onchain/sopr
+breakout:
+  adx_threshold: 12
+  bb_length: 8
+  bb_std: 1.8
+  dc_length: 12
+  kc_length: 8
+  kc_mult: 1.2
+  squeeze_threshold: 0.008
+  atr_buffer_mult: 0.02
+  vol_multiplier: 1.5
+  volume_window: 10
+  momentum_filter: true
+debug_mode:
+  enabled: false
+  execution_debug:
+    log_order_placement: true
+    log_order_status: true
+    log_fee_calculation: true
+    log_slippage_calculation: true
+  risk_debug:
+    log_risk_checks: true
+    log_position_limits: true
+    log_capital_allocation: true
+  strategy_debug:
+    log_strategy_selection: true
+    log_strategy_weights: true
+    log_strategy_performance: true
+  trade_pipeline:
+    log_signal_generation: true
+    log_risk_calculations: true
+    log_position_sizing: true
+    log_execution_decisions: true
+safety:
+  restart_on_error: true
+  max_error_count: 15
+metrics_enabled: true
+metrics_backend: csv
+metrics_output_file: crypto_bot/logs/metrics.csv
 tax_tracking:
   enabled: true
   export_path: crypto_bot/logs/tax_trades.csv
-telegram:
-  balance_updates: true
-  chat_admins: '827777274'
-  chat_id: '827777274'
-  command_cooldown: 5
-  connect_timeout: 30.0
-  connection_pool_size: 20
-  enabled: true
-  fail_silently: true
-  max_retries: 3
-  read_timeout: 30.0
-  retry_delay_seconds: 5
-  status_updates: false
-  timeout_seconds: 30
-  token: 8126215032:AAEhQZLiXpssauKf0ktQsq1XqXl94QriCdE
-  trade_updates: true
-  write_timeout: 30.0
-telegram_ctl:
-  enabled: true
-  update_interval: 15
-testing_mode: false
-timeframe: 15m
-timeframes:
-- 1m
-- 5m
-- 15m
-- 1h
-- 4h
-top_n_symbols: 200
-symbol_batch_size: 100
-tp_mult: 2.5
-tp_pct: 0.045
-trade_size_pct: 0.1
-trend:
-  atr_period: 8
-  k: 0.9
-  trend_ema_fast: 10
-  trend_ema_slow: 25
-ultra_scalp_bot:
-  atr_window: 3
-  enabled: true
-  max_concurrent: 30
-  min_score: 0.034262190740007054
-  stop_loss_pct: 0.003361080934308343
-  take_profit_pct: 0.026817922291809047
-  timeframe: 1m
-  volume_mult: 2.129581467112397
-use_websocket: false
-volatility_harvester:
-  atr_threshold: 0.002
-  enabled: true
-  max_positions: 20
-  stop_loss_pct: 0.01
-  take_profit_pct: 0.04
-  volume_spike: 2.0
-  ws_failures_before_disable: 5
-  ws_max_retries: 5
-  ws_ohlcv_timeout: 30
-  ws_ping_interval: 10
-  ws_reconnect_delay: 15
+excluded_symbols:
+- So11111111111111111111111111111111111111112/USDC
+- So11111111111111111111111111111111111111112/USDT
 symbols:
+- BTC/USD
+- ETH/USD
+- SOL/USD
+- ADA/USD
+- DOT/USD
+- LINK/USD
+- UNI/USD
+- AAVE/USD
+- MATIC/USD
+- AVAX/USD
+- BTC/EUR
+- ETH/EUR
+- SOL/EUR
+- ADA/EUR
+- DOT/EUR
+- LINK/EUR
+- UNI/EUR
+- AAVE/EUR
+- MATIC/EUR
+- AVAX/EUR
+- BTC/USDT
+- ETH/USDT
+- SOL/USDT
+- ADA/USDT
+- DOT/USDT
+- LINK/USDT
+- UNI/USDT
+- AAVE/USDT
+- MATIC/USDT
+- AVAX/USDT
+- BTC/USDC
+- ETH/USDC
+- SOL/USDC
+- ADA/USDC
+- DOT/USDC
+- LINK/USDC
+- UNI/USDC
+- AAVE/USDC
+- MATIC/USDC
+- AVAX/USDC
 - 1INCH/EUR
 - 1INCH/USD
 - AAVE/ETH
-- AAVE/EUR
 - AAVE/GBP
 - AAVE/BTC
 - AB/EUR
@@ -663,10 +695,7 @@ symbols:
 - ACX/USD
 - ADA/AUD
 - ADA/ETH
-- ADA/EUR
 - ADA/GBP
-- ADA/USDC
-- ADA/USDT
 - ADA/BTC
 - ADX/EUR
 - ADX/USD
@@ -761,10 +790,6 @@ symbols:
 - A/USD
 - AVAAI/EUR
 - AVAAI/USD
-- AVAX/EUR
-- AVAX/USD
-- AVAX/USDC
-- AVAX/USDT
 - AXS/EUR
 - AXS/USD
 - B3/EUR
@@ -921,12 +946,8 @@ symbols:
 - DOLO/EUR
 - DOLO/USD
 - DOT/ETH
-- DOT/EUR
 - DOT/GBP
 - DOT/JPY
-- DOT/USD
-- DOT/USDC
-- DOT/USDT
 - DOT/BTC
 - DRIFT/EUR
 - DRIFT/USD
@@ -965,8 +986,6 @@ symbols:
 - ETHFI/USD
 - ETH/PYUSD
 - ETH/USD1
-- ETH/USDC
-- ETH/USDT
 - ETHW/ETH
 - ETHW/EUR
 - ETHW/USD
@@ -1157,12 +1176,8 @@ symbols:
 - LDO/USD
 - LINK/AUD
 - LINK/ETH
-- LINK/EUR
 - LINK/GBP
 - LINK/JPY
-- LINK/USD
-- LINK/USDC
-- LINK/USDT
 - LINK/BTC
 - LIT/EUR
 - LIT/USD
@@ -1477,11 +1492,8 @@ symbols:
 - SOL/AUD
 - SOL/CAD
 - SOL/ETH
-- SOL/EUR
 - SOL/GBP
 - SOL/USD1
-- SOL/USDC
-- SOL/USDT
 - SOL/BTC
 - SONIC/EUR
 - SONIC/USD
@@ -1600,10 +1612,8 @@ symbols:
 - UNFI/EUR
 - UNFI/USD
 - UNI/ETH
-- UNI/EUR
 - UNITE/EUR
 - UNITE/USD
-- UNI/USD
 - UNI/BTC
 - USD1/USD
 - USD1/USDC
@@ -1689,8 +1699,6 @@ symbols:
 - BTC/DAI
 - BTC/PYUSD
 - BTC/USD1
-- BTC/USDC
-- BTC/USDT
 - XCN/EUR
 - XCN/USD
 - DOGE/AUD
@@ -1706,10 +1714,8 @@ symbols:
 - ETC/USD
 - ETH/BTC
 - ETH/CAD
-- ETH/EUR
 - ETH/GBP
 - ETH/JPY
-- ETH/USD
 - LTC/BTC
 - LTC/EUR
 - LTC/JPY
@@ -1739,10 +1745,8 @@ symbols:
 - BTC/USDQ
 - BTC/USDR
 - BTC/CAD
-- BTC/EUR
 - BTC/GBP
 - BTC/JPY
-- BTC/USD
 - DOGE/BTC
 - XLM/BTC
 - XLM/EUR
@@ -1802,53 +1806,41 @@ symbols:
 - AIBTC/USD
 - AIBTC/EUR
 - AIBTC/USD
-- AIBTC/EUR
-- AIBTC/USD
-- AIBTC/EUR
-- AIBTC/USD
-- AIBTC/EUR
-- AIBTC/USD
-- AIBTC/EUR
-- AIBTC/USD
-- AIBTC/EUR
-- AIBTC/USD
-- AIBTC/EUR
-- AIBTC/USD
-- AIBTC/EUR
-- AIBTC/USD
-- AIBTC/EUR
-- AIBTC/USD
-- AIBTC/EUR
-- AIBTC/USD
 - AIXBT/EUR
 - AIXBT/USD
-
-# Strategy-specific configurations
+- WLFI/EUR
+- WLFI/USD
+loop_interval_minutes: 0.5
+liquidity_check: true
+liquidity_depth: 3
+higher_timeframe: 1d
+scalp_timeframe: 1m
+sl_pct: 0.008
+tp_pct: 0.045
+tp_mult: 2.5
+trade_size_pct: 0.1
+allow_short: true
 flash_crash:
   drop_pct: 0.1
   volume_mult: 5.0
   vol_window: 20
   ema_window: 200
   atr_normalization: true
-
 dex_scalper:
   min_spread_pct: 0.5
   max_slippage_pct: 1.0
   volume_threshold: 1000
   atr_normalization: true
-
 range_arb_bot:
   min_range_pct: 2.0
   max_range_pct: 10.0
   volume_threshold: 500
   atr_normalization: true
-
 dip_hunter:
   rsi_oversold: 30
   rsi_overbought: 70
   volume_mult: 2.0
   atr_normalization: true
-
 meme_wave_bot:
   vol_threshold: 2.0
   vol_mult: 3.0
@@ -1857,7 +1849,6 @@ meme_wave_bot:
   vol_spike_threshold: 5.0
   atr_window: 14
   atr_normalization: true
-
 cross_chain_arb_bot:
   min_spread_pct: 1.0
   max_slippage_pct: 2.0

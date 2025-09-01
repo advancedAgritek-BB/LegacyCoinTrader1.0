@@ -17,6 +17,7 @@ except Exception:  # pragma: no cover - provide minimal shim for import-time tes
 from pathlib import Path
 import os
 import signal
+from typing import Optional, Dict, Any
 
 try:
     from dotenv import dotenv_values
@@ -34,8 +35,19 @@ from crypto_bot import log_reader
 from crypto_bot import ml_signal_model as ml
 import frontend.utils as utils
 from typing import Dict
+import logging
+
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# Disable caching for development
+@app.after_request
+def add_header(response):
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 # Handle the async trading bot process
 bot_proc = None
@@ -151,11 +163,59 @@ def load_execution_mode() -> str:
 def get_paper_wallet_balance() -> float:
     """Get paper wallet balance from multiple sources, prioritizing the most recent."""
     try:
-        # Priority 1: Check positions.log for most recent balance
+        # Priority 1: Check paper wallet state file (most accurate)
+        paper_wallet_state_file = Path('crypto_bot/logs/paper_wallet_state.yaml')
+        if paper_wallet_state_file.exists():
+            try:
+                import numpy as np
+                from yaml import Loader, SafeLoader
+
+                # Custom loader to handle numpy scalars
+                class NumpyLoader(SafeLoader):
+                    pass
+
+                def construct_numpy_scalar(loader, node):
+                    """Construct numpy scalar from YAML node."""
+                    try:
+                        # Get the numpy dtype and binary data
+                        if hasattr(node, 'value') and isinstance(node.value, list):
+                            dtype_info = node.value[0]
+                            binary_data = node.value[1]
+
+                            # Extract binary data
+                            if hasattr(binary_data, 'value'):
+                                import base64
+                                import struct
+
+                                # Decode base64 binary data
+                                decoded = base64.b64decode(binary_data.value)
+                                # Convert to float64 (little endian)
+                                value = struct.unpack('<d', decoded)[0]
+                                return float(value)
+                    except Exception as e:
+                        print(f"Error decoding numpy scalar: {e}")
+                        return 0.0
+
+                    return 0.0
+
+                # Add constructor for numpy scalars
+                NumpyLoader.add_constructor('tag:yaml.org,2002:python/object/apply:numpy._core.multiarray.scalar', construct_numpy_scalar)
+
+                with open(paper_wallet_state_file, 'r') as f:
+                    state = yaml.load(f, Loader=NumpyLoader) or {}
+                    balance = state.get('balance', 0.0)
+
+                    if isinstance(balance, (int, float)) and balance > 0:
+                        print(f"Frontend got paper wallet balance from state file: ${balance:.2f}")
+                        return float(balance)
+            except Exception as e:
+                print(f"Error reading paper wallet state file: {e}")
+
+        # Priority 2: Check positions.log for most recent balance
         if POSITIONS_FILE.exists():
             with open(POSITIONS_FILE, 'r') as f:
                 lines = f.readlines()
-                
+
             # Look for the most recent balance entry
             for line in reversed(lines):
                 if 'balance $' in line:
@@ -165,8 +225,8 @@ def get_paper_wallet_balance() -> float:
                         balance = float(balance_match.group(1))
                         print(f"Frontend got paper wallet balance from positions.log: ${balance:.2f}")
                         return balance
-        
-        # Priority 2: Check paper_wallet.yaml
+
+        # Priority 3: Check paper_wallet.yaml
         paper_wallet_file = LOG_DIR / 'paper_wallet.yaml'
         if paper_wallet_file.exists():
             try:
@@ -177,8 +237,8 @@ def get_paper_wallet_balance() -> float:
                     return balance
             except Exception as e:
                 print(f"Error reading paper_wallet.yaml: {e}")
-        
-        # Priority 3: Check user_config.yaml
+
+        # Priority 4: Check user_config.yaml
         user_config_file = Path('crypto_bot/user_config.yaml')
         if user_config_file.exists():
             try:
@@ -189,12 +249,12 @@ def get_paper_wallet_balance() -> float:
                     return balance
             except Exception as e:
                 print(f"Error reading user_config.yaml: {e}")
-        
+
         # Fallback: Default balance
         default_balance = 10000.0
         print(f"Frontend using default paper wallet balance: ${default_balance:.2f}")
         return default_balance
-        
+
     except Exception as e:
         print(f"Error getting paper wallet balance: {e}")
         return 10000.0
@@ -203,6 +263,34 @@ def get_paper_wallet_balance() -> float:
 def set_paper_wallet_balance(balance: float) -> None:
     """Set paper wallet balance in multiple locations for consistency."""
     try:
+        # Update paper wallet state file (highest priority)
+        paper_wallet_state_file = Path('crypto_bot/logs/paper_wallet_state.yaml')
+        if paper_wallet_state_file.exists():
+            try:
+                with open(paper_wallet_state_file, 'r') as f:
+                    state = yaml.safe_load(f) or {}
+                state['balance'] = balance
+                state['initial_balance'] = balance  # Also update initial balance
+                with open(paper_wallet_state_file, 'w') as f:
+                    yaml.dump(state, f, default_flow_style=False)
+                print(f"Frontend updated paper wallet state file: ${balance:.2f}")
+            except Exception as e:
+                print(f"Frontend failed to update paper wallet state file: {e}")
+        else:
+            # Create new state file
+            state = {
+                'balance': balance,
+                'initial_balance': balance,
+                'realized_pnl': 0.0,
+                'total_trades': 0,
+                'winning_trades': 0,
+                'positions': {}
+            }
+            paper_wallet_state_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(paper_wallet_state_file, 'w') as f:
+                yaml.dump(state, f, default_flow_style=False)
+            print(f"Frontend created new paper wallet state file: ${balance:.2f}")
+        
         # Update paper_wallet.yaml
         paper_wallet_file = LOG_DIR / 'paper_wallet.yaml'
         paper_config = {'initial_balance': balance}
@@ -244,7 +332,120 @@ def set_paper_wallet_balance(balance: float) -> None:
 
 
 def get_open_positions() -> list:
-    """Parse open positions from positions.log file."""
+    """Get open positions from paper wallet state file."""
+    try:
+        # Try to load from paper wallet state file first (most accurate)
+        paper_wallet_state_file = Path('crypto_bot/logs/paper_wallet_state.yaml')
+        if paper_wallet_state_file.exists():
+            import numpy as np
+            from yaml import Loader, SafeLoader
+
+            # Custom loader to handle numpy scalars
+            class NumpyLoader(SafeLoader):
+                pass
+
+            def construct_numpy_scalar(loader, node):
+                """Construct numpy scalar from YAML node."""
+                try:
+                    # Get the numpy dtype and binary data
+                    if hasattr(node, 'value') and isinstance(node.value, list):
+                        dtype_info = node.value[0]
+                        binary_data = node.value[1]
+
+                        # Extract binary data
+                        if hasattr(binary_data, 'value'):
+                            import base64
+                            import struct
+
+                            # Decode base64 binary data
+                            decoded = base64.b64decode(binary_data.value)
+                            # Convert to float64 (little endian)
+                            value = struct.unpack('<d', decoded)[0]
+                            return float(value)
+                except Exception as e:
+                    print(f"Error decoding numpy scalar: {e}")
+                    return 0.0
+
+                return 0.0
+
+            # Add constructor for numpy scalars
+            NumpyLoader.add_constructor('tag:yaml.org,2002:python/object/apply:numpy._core.multiarray.scalar', construct_numpy_scalar)
+
+            with open(paper_wallet_state_file, 'r') as f:
+                state = yaml.load(f, Loader=NumpyLoader) or {}
+
+            positions = state.get('positions', {})
+            if not positions:
+                return []
+
+            open_positions = []
+            for pos_id, pos_data in positions.items():
+                symbol = pos_data.get('symbol')
+                if not symbol:
+                    continue
+
+                side = pos_data.get('side', 'buy')
+
+                # Handle numpy scalars for amount/size
+                amount = pos_data.get('size', pos_data.get('amount', 0))
+                if hasattr(amount, 'item'):  # numpy scalar
+                    amount = amount.item()
+                elif isinstance(amount, dict) and 'item' in amount:  # numpy scalar serialized
+                    try:
+                        amount = float(amount.get('item', 0))
+                    except:
+                        amount = 0
+
+                # Handle numpy scalars for entry_price
+                entry_price = pos_data.get('entry_price', 0)
+                if hasattr(entry_price, 'item'):  # numpy scalar
+                    entry_price = entry_price.item()
+                elif isinstance(entry_price, dict) and 'item' in entry_price:  # numpy scalar serialized
+                    try:
+                        entry_price = float(entry_price.get('item', 0))
+                    except:
+                        entry_price = 0
+
+                # Convert to float
+                amount = float(amount) if amount else 0.0
+                entry_price = float(entry_price) if entry_price else 0.0
+
+                if amount <= 0 or entry_price <= 0:
+                    continue
+
+                # Get current price
+                current_price = get_current_price_for_symbol(symbol)
+                if current_price <= 0:
+                    # Use entry price if no current price available
+                    current_price = entry_price
+
+                # Calculate PnL
+                if side == 'buy':
+                    pnl = (current_price - entry_price) * amount
+                else:
+                    pnl = (entry_price - current_price) * amount
+
+                open_positions.append({
+                    'symbol': symbol,
+                    'side': side,
+                    'amount': amount,
+                    'entry_price': entry_price,
+                    'current_price': current_price,
+                    'pnl': pnl,
+                    'pnl_percentage': (pnl / (entry_price * amount)) * 100 if entry_price > 0 else 0
+                })
+
+            return open_positions
+
+        # Fallback to parsing positions.log (legacy method)
+        return get_open_positions_from_log()
+
+    except Exception as e:
+        print(f"Error getting open positions: {e}")
+        return []
+
+def get_open_positions_from_log() -> list:
+    """Parse open positions from positions.log file (legacy method)."""
     import re
     from datetime import datetime, timedelta
     
@@ -360,7 +561,8 @@ def get_open_positions() -> list:
         return list(reversed(unique_positions))
         
     except Exception as e:
-        print(f"Error reading positions: {e}")
+        print(f"Error parsing positions from log: {e}")
+        return []
     
     return []
 
@@ -414,33 +616,149 @@ def get_uptime() -> str:
 
 
 def calculate_wallet_pnl() -> Dict[str, float]:
-    """Calculate current wallet PnL based on open positions and paper wallet balance."""
+    """Calculate current wallet PnL based on paper wallet state, open positions, and trade history."""
     try:
-        # Get initial balance
-        initial_balance = get_paper_wallet_balance()
-        
+        # Try to load paper wallet state first
+        paper_wallet_state_file = Path('crypto_bot/logs/paper_wallet_state.yaml')
+        if paper_wallet_state_file.exists():
+            try:
+                import numpy as np
+                from yaml import Loader, SafeLoader
+
+                # Custom loader to handle numpy scalars
+                class NumpyLoader(SafeLoader):
+                    pass
+
+                def construct_numpy_scalar(loader, node):
+                    """Construct numpy scalar from YAML node."""
+                    try:
+                        # Get the numpy dtype and binary data
+                        if hasattr(node, 'value') and isinstance(node.value, list):
+                            dtype_info = node.value[0]
+                            binary_data = node.value[1]
+
+                            # Extract binary data
+                            if hasattr(binary_data, 'value'):
+                                import base64
+                                import struct
+
+                                # Decode base64 binary data
+                                decoded = base64.b64decode(binary_data.value)
+                                # Convert to float64 (little endian)
+                                value = struct.unpack('<d', decoded)[0]
+                                return float(value)
+                    except Exception as e:
+                        print(f"Error decoding numpy scalar: {e}")
+                        return 0.0
+
+                    return 0.0
+
+                # Add constructor for numpy scalars
+                NumpyLoader.add_constructor('tag:yaml.org,2002:python/object/apply:numpy._core.multiarray.scalar', construct_numpy_scalar)
+
+                with open(paper_wallet_state_file, 'r') as f:
+                    state = yaml.load(f, Loader=NumpyLoader) or {}
+                    current_balance = state.get('balance', 0.0)
+                    initial_balance = state.get('initial_balance', 10000.0)
+                    realized_pnl = state.get('realized_pnl', 0.0)
+                    logger.info(f"Loaded paper wallet state: balance=${current_balance:.2f}, realized_pnl=${realized_pnl:.2f}")
+            except Exception as e:
+                logger.error(f"Error reading paper wallet state: {e}")
+                current_balance = get_paper_wallet_balance()
+                initial_balance = current_balance
+                realized_pnl = 0.0
+        else:
+            # Fallback to reading from positions.log
+            current_balance = get_paper_wallet_balance()
+            initial_balance = current_balance
+            realized_pnl = 0.0
+
+        # Calculate realized P&L from trade history if paper wallet state doesn't have it
+        if realized_pnl == 0.0:
+            try:
+                from crypto_bot import log_reader
+                df = log_reader._read_trades(TRADE_FILE)
+
+                if not df.empty:
+                    # Track position history for realized P&L calculation
+                    position_history = {}
+                    calculated_realized_pnl = 0.0
+
+                    for _, row in df.iterrows():
+                        symbol = str(row.get('symbol', ''))
+                        side = str(row.get('side', ''))
+                        amount = float(row.get('amount', 0))
+                        price = float(row.get('price', 0))
+
+                        if symbol and amount > 0 and price > 0:
+                            # Calculate trade total
+                            total = amount * price
+
+                            # Check if this trade closes an existing position
+                            if symbol in position_history:
+                                existing_pos = position_history[symbol]
+
+                                # Check if this is a closing trade (opposite side)
+                                if ((side == 'sell' and existing_pos['side'] == 'buy') or
+                                    (side == 'buy' and existing_pos['side'] == 'sell')):
+
+                                    # Calculate realized PnL
+                                    if side == 'sell':  # Closing long position
+                                        pnl = (price - existing_pos['price']) * min(amount, existing_pos['amount'])
+                                    else:  # Closing short position
+                                        pnl = (existing_pos['price'] - price) * min(amount, existing_pos['amount'])
+
+                                    calculated_realized_pnl += pnl
+
+                                    # Update or remove position
+                                    if amount >= existing_pos['amount']:
+                                        del position_history[symbol]
+                                    else:
+                                        position_history[symbol]['amount'] -= amount
+                                else:
+                                    # Same side trade - average the position
+                                    if symbol in position_history:
+                                        total_cost = (existing_pos['price'] * existing_pos['amount']) + total
+                                        total_amount = existing_pos['amount'] + amount
+                                        position_history[symbol] = {
+                                            'side': side,
+                                            'price': total_cost / total_amount,
+                                            'amount': total_amount
+                                        }
+                                    else:
+                                        position_history[symbol] = {'side': side, 'price': price, 'amount': amount}
+                            else:
+                                # New position
+                                position_history[symbol] = {'side': side, 'price': price, 'amount': amount}
+
+                    realized_pnl = calculated_realized_pnl
+                    print(f"Calculated realized P&L from trade history: ${realized_pnl:.2f}")
+
+            except Exception as e:
+                print(f"Error calculating realized P&L from trade history: {e}")
+
         # Get open positions
         open_positions = get_open_positions()
-        
+
         # Calculate unrealized PnL from open positions
         unrealized_pnl = 0.0
         position_details = []
-        
+
         for position in open_positions:
             symbol = position['symbol']
             side = position['side']
             amount = position['amount']
             entry_price = position['entry_price']
             current_price = position['current_price']
-            
+
             # Calculate position PnL
             if side == 'buy':  # Long position
                 position_pnl = (current_price - entry_price) * amount
             else:  # Short position
                 position_pnl = (entry_price - current_price) * amount
-            
+
             unrealized_pnl += position_pnl
-            
+
             position_details.append({
                 'symbol': symbol,
                 'side': side,
@@ -450,24 +768,16 @@ def calculate_wallet_pnl() -> Dict[str, float]:
                 'pnl': position_pnl,
                 'pnl_percentage': (position_pnl / (entry_price * amount)) * 100 if entry_price > 0 else 0
             })
-        
-        # Calculate realized PnL from completed trades
-        df = log_reader._read_trades(TRADE_FILE)
-        realized_pnl = 0.0
-        if not df.empty:
-            # Use the compute_performance function to get realized PnL
-            perf = utils.compute_performance(df)
-            realized_pnl = perf.get('total_pnl', 0.0)
-        
+
         # Calculate total PnL (realized + unrealized)
         total_pnl = realized_pnl + unrealized_pnl
-        
-        # Calculate current balance
-        current_balance = initial_balance + total_pnl
-        
+
+        # Update current balance to include unrealized PnL
+        total_balance = current_balance + unrealized_pnl
+
         return {
             'initial_balance': initial_balance,
-            'current_balance': current_balance,
+            'current_balance': total_balance,
             'realized_pnl': realized_pnl,
             'unrealized_pnl': unrealized_pnl,
             'total_pnl': total_pnl,
@@ -475,7 +785,7 @@ def calculate_wallet_pnl() -> Dict[str, float]:
             'open_positions': position_details,
             'position_count': len(open_positions)
         }
-        
+
     except Exception as e:
         print(f"Error calculating wallet PnL: {e}")
         return {
@@ -534,7 +844,8 @@ def index():
     # Calculate total PnL including both realized and unrealized
     pnl_data = calculate_wallet_pnl()
     total_pnl = pnl_data.get('total_pnl', 0.0)
-    
+    initial_balance = pnl_data.get('initial_balance', 10000.0)
+
     return render_template(
         'index.html',
         running=is_running(),
@@ -547,6 +858,7 @@ def index():
         performance=perf,
         allocation=allocation,
         paper_wallet_balance=paper_wallet_balance,
+        initial_balance=initial_balance,
         open_positions=open_positions,
         pnl_data=pnl_data,  # Pass the full PnL data for JavaScript
     )
@@ -1029,26 +1341,312 @@ def api_current_prices():
         return jsonify({'error': str(e)})
 
 
+# Price caching system
+_price_cache = {}
+_CACHE_TTL = 60  # Cache prices for 60 seconds
+
+# Price source health monitoring
+_price_source_health = {}
+_HEALTH_CHECK_WINDOW = 10  # Track last 10 attempts per source
+_HEALTH_DECAY_FACTOR = 0.9  # Decay factor for old health data
+
+# Manual price overrides
+_manual_prices = {}
+_MANUAL_PRICES_FILE = LOG_DIR / 'manual_prices.json'
+
+def _update_price_source_health(source_name: str, success: bool) -> None:
+    """Update health status for a price source."""
+    if source_name not in _price_source_health:
+        _price_source_health[source_name] = {
+            'successes': 0,
+            'failures': 0,
+            'last_success': None,
+            'last_failure': None,
+            'consecutive_failures': 0
+        }
+
+    health = _price_source_health[source_name]
+
+    if success:
+        health['successes'] += 1
+        health['last_success'] = time.time()
+        health['consecutive_failures'] = 0
+    else:
+        health['failures'] += 1
+        health['last_failure'] = time.time()
+        health['consecutive_failures'] += 1
+
+    # Apply decay to prevent old data from dominating
+    health['successes'] = int(health['successes'] * _HEALTH_DECAY_FACTOR)
+    health['failures'] = int(health['failures'] * _HEALTH_DECAY_FACTOR)
+
+def _get_price_source_health(source_name: str) -> dict:
+    """Get health metrics for a price source."""
+    if source_name not in _price_source_health:
+        return {'health_score': 0.5, 'total_attempts': 0, 'success_rate': 0.0}
+
+    health = _price_source_health[source_name]
+    total_attempts = health['successes'] + health['failures']
+
+    if total_attempts == 0:
+        return {'health_score': 0.5, 'total_attempts': 0, 'success_rate': 0.0}
+
+    success_rate = health['successes'] / total_attempts
+
+    # Calculate health score (0-1, higher is better)
+    # Penalize consecutive failures and recent failures
+    health_score = success_rate
+
+    if health['consecutive_failures'] > 0:
+        health_score *= (0.8 ** health['consecutive_failures'])
+
+    # Boost score if recently successful
+    if health['last_success'] and health['last_failure']:
+        if health['last_success'] > health['last_failure']:
+            health_score *= 1.2  # Recent success bonus
+        else:
+            health_score *= 0.8  # Recent failure penalty
+
+    health_score = min(1.0, max(0.0, health_score))
+
+    return {
+        'health_score': health_score,
+        'total_attempts': total_attempts,
+        'success_rate': success_rate,
+        'consecutive_failures': health['consecutive_failures']
+    }
+
+def _get_best_price_sources() -> list:
+    """Get price sources sorted by health score (best first)."""
+    sources = []
+    for source_name in _price_source_health.keys():
+        health = _get_price_source_health(source_name)
+        sources.append((source_name, health['health_score']))
+
+    # Sort by health score (highest first)
+    sources.sort(key=lambda x: x[1], reverse=True)
+    return [source[0] for source in sources]
+
+
+def _load_manual_prices():
+    """Load manual price overrides from file."""
+    global _manual_prices
+    try:
+        if _MANUAL_PRICES_FILE.exists():
+            with open(_MANUAL_PRICES_FILE, 'r') as f:
+                data = json.load(f)
+                # Filter out expired manual prices (older than 24 hours)
+                current_time = time.time()
+                _manual_prices = {
+                    symbol: price_data
+                    for symbol, price_data in data.items()
+                    if current_time - price_data.get('timestamp', 0) < 86400  # 24 hours
+                }
+    except Exception as e:
+        print(f"Error loading manual prices: {e}")
+        _manual_prices = {}
+
+
+def _save_manual_prices():
+    """Save manual price overrides to file."""
+    try:
+        with open(_MANUAL_PRICES_FILE, 'w') as f:
+            json.dump(_manual_prices, f, indent=2)
+    except Exception as e:
+        print(f"Error saving manual prices: {e}")
+
+
+def _get_manual_price(symbol: str) -> Optional[float]:
+    """Get manual price override for a symbol."""
+    if symbol in _manual_prices:
+        price_data = _manual_prices[symbol]
+        current_time = time.time()
+
+        # Check if manual price is still valid (not expired)
+        if current_time - price_data.get('timestamp', 0) < price_data.get('validity_hours', 24) * 3600:
+            return price_data['price']
+        else:
+            # Remove expired manual price
+            del _manual_prices[symbol]
+            _save_manual_prices()
+
+    return None
+
+
+def _set_manual_price(symbol: str, price: float, validity_hours: int = 24):
+    """Set manual price override for a symbol."""
+    _manual_prices[symbol] = {
+        'price': price,
+        'timestamp': time.time(),
+        'validity_hours': validity_hours
+    }
+    _save_manual_prices()
+
+
+# Load manual prices on startup
+_load_manual_prices()
+
 def get_current_price_for_symbol(symbol: str) -> float:
-    """Get current price for a symbol using available price sources."""
+    """Get current price for a symbol using available price sources with caching."""
     if not symbol or symbol.strip() == '':
         return 0.0
-    
+
     symbol = symbol.strip().upper()
+
+    # Check cache first
+    now = time.time()
+    if symbol in _price_cache:
+        cached_price, timestamp = _price_cache[symbol]
+        if now - timestamp < _CACHE_TTL:
+            print(f"Using cached price for {symbol}: ${cached_price}")
+            return cached_price
+        else:
+            # Cache expired, remove it
+            del _price_cache[symbol]
     
     try:
+        # Check for manual price override first
+        manual_price = _get_manual_price(symbol)
+        if manual_price and manual_price > 0:
+            print(f"Using manual price override for {symbol}: ${manual_price}")
+            _price_cache[symbol] = (manual_price, time.time())
+            return manual_price
+
         # Try Pyth network first for Solana tokens
         try:
             from crypto_bot.utils.pyth import get_pyth_price
             price = get_pyth_price(symbol)
             if price and price > 0:
                 print(f"Got price for {symbol} from Pyth: ${price}")
+                _price_cache[symbol] = (price, time.time())  # Cache the price
+                _update_price_source_health('Pyth', True)
                 return price
+            else:
+                _update_price_source_health('Pyth', False)
         except Exception as e:
             print(f"Pyth price fetch failed for {symbol}: {e}")
+            _update_price_source_health('Pyth', False)
             pass
         
-        # Try Jupiter API for Solana tokens
+        # Try Helius API for Solana tokens (enhanced price data)
+        try:
+            import requests
+
+            # Clean symbol for Helius API
+            base = symbol.split('/')[0] if '/' in symbol else symbol
+            # Remove common prefixes/suffixes
+            base = base.replace('USDT', '').replace('USDC', '').replace('USD', '')
+
+            # Helius token address mapping for common tokens
+            helius_token_mapping = {
+                'SOL': 'So11111111111111111111111111111111111111112',
+                'BTC': '9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E',  # Wrapped BTC
+                'ETH': '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs',  # Wrapped ETH
+                'USDC': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+                'USDT': 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'
+            }
+
+            if base in helius_token_mapping:
+                token_address = helius_token_mapping[base]
+                # Try Helius enhanced price API
+                response = requests.get(
+                    f"https://mainnet.helius-rpc.com/?api-key=demo",  # Using demo key for public access
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "1",
+                        "method": "getAsset",
+                        "params": {
+                            "id": token_address,
+                            "displayOptions": {
+                                "showFungible": True
+                            }
+                        }
+                    },
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if 'result' in data and data['result']:
+                        price = float(data['result'].get('price', {}).get('usd', 0.0))
+                        if price > 0:
+                            print(f"Got price for {symbol} from Helius: ${price}")
+                            _price_cache[symbol] = (price, time.time())
+                            _update_price_source_health('Helius', True)
+                            return price
+                        else:
+                            _update_price_source_health('Helius', False)
+        except Exception as e:
+            print(f"Helius price fetch failed for {symbol}: {e}")
+            _update_price_source_health('Helius', False)
+            pass
+
+        # Try Raydium API for Solana DEX prices
+        try:
+            import requests
+
+            # Clean symbol for Raydium API
+            base = symbol.split('/')[0] if '/' in symbol else symbol
+            base = base.replace('USDT', '').replace('USDC', '').replace('USD', '')
+
+            # Raydium token mint mapping
+            raydium_token_mapping = {
+                'SOL': 'So11111111111111111111111111111111111111112',
+                'USDC': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+                'USDT': 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+                'RAY': '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R'
+            }
+
+            if base in raydium_token_mapping:
+                # Try Raydium price API
+                response = requests.get(
+                    "https://api.raydium.io/v2/sdk/price",
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if base in data:
+                        price = float(data[base])
+                        if price > 0:
+                            print(f"Got price for {symbol} from Raydium: ${price}")
+                            _price_cache[symbol] = (price, time.time())
+                            _update_price_source_health('Raydium', True)
+                            return price
+                        else:
+                            _update_price_source_health('Raydium', False)
+        except Exception as e:
+            print(f"Raydium price fetch failed for {symbol}: {e}")
+            _update_price_source_health('Raydium', False)
+            pass
+
+        # Try Orca API for Solana DEX prices
+        try:
+            import requests
+
+            # Clean symbol for Orca API
+            base = symbol.split('/')[0] if '/' in symbol else symbol
+            base = base.replace('USDT', '').replace('USDC', '').replace('USD', '')
+
+            # Try Orca Whirlpool API
+            response = requests.get(
+                f"https://www.orca.so/api/v1/token/{base.lower()}/info",
+                timeout=5
+            )
+            if response.status_code == 200:
+                data = response.json()
+                price = float(data.get('price', 0.0))
+                if price > 0:
+                    print(f"Got price for {symbol} from Orca: ${price}")
+                    _price_cache[symbol] = (price, time.time())
+                    _update_price_source_health('Orca', True)
+                    return price
+                else:
+                    _update_price_source_health('Orca', False)
+        except Exception as e:
+            print(f"Orca price fetch failed for {symbol}: {e}")
+            _update_price_source_health('Orca', False)
+            pass
+
+        # Try Jupiter API for Solana tokens (legacy fallback)
         try:
             import requests
 
@@ -1068,10 +1666,15 @@ def get_current_price_for_symbol(symbol: str) -> float:
                     price = float(data.get("data", {}).get(base, {}).get("price", 0.0))
                     if price > 0:
                         print(f"Got price for {symbol} from Jupiter: ${price}")
+                        _price_cache[symbol] = (price, time.time())
+                        _update_price_source_health('Jupiter', True)
                         return price
+                    else:
+                        _update_price_source_health('Jupiter', False)
         except Exception as e:
             # Jupiter API appears to be unavailable/deprecated, skip silently
             # This avoids repeated DNS error messages in the terminal
+            _update_price_source_health('Jupiter', False)
             pass
         
         # Try Kraken API for major pairs
@@ -1090,7 +1693,25 @@ def get_current_price_for_symbol(symbol: str) -> float:
                 'SOLUSDT': 'SOLUSD',
                 'SOLUSD': 'SOLUSD',
                 'ADAUSDT': 'ADAUSD',
-                'ADAUSD': 'ADAUSD'
+                'ADAUSD': 'ADAUSD',
+                'DOTUSDT': 'DOTUSD',
+                'DOTUSD': 'DOTUSD',
+                'LINKUSDT': 'LINKUSD',
+                'LINKUSD': 'LINKUSD',
+                'UNIUSDT': 'UNIUSD',
+                'UNIUSD': 'UNIUSD',
+                'AAVEUSDT': 'AAVEUSD',
+                'AAVEUSD': 'AAVEUSD',
+                'SUSHIUSDT': 'SUSHIUSD',
+                'SUSHIUSD': 'SUSHIUSD',
+                'COMPUSDT': 'COMPUSD',
+                'COMPUSD': 'COMPUSD',
+                'MKRUSDT': 'MKRUSD',
+                'MKRUSD': 'MKRUSD',
+                'YFIUSDT': 'YFIUSD',
+                'YFIUSD': 'YFIUSD',
+                'HBARUSDT': 'HBARUSD',
+                'HBARUSD': 'HBARUSD'
             }
 
             kraken_pair = kraken_mapping.get(kraken_symbol)
@@ -1105,9 +1726,338 @@ def get_current_price_for_symbol(symbol: str) -> float:
                         price = float(data['result'][kraken_pair]['c'][0])  # Current price
                         if price > 0:
                             print(f"Got price for {symbol} from Kraken: ${price}")
+                            _price_cache[symbol] = (price, time.time())
+                            _update_price_source_health('Kraken', True)
                             return price
+                        else:
+                            _update_price_source_health('Kraken', False)
         except Exception as e:
             print(f"Kraken price fetch failed for {symbol}: {e}")
+            _update_price_source_health('Kraken', False)
+            pass
+
+        # Try Binance API as additional exchange fallback
+        try:
+            import requests
+
+            # Convert symbol format for Binance
+            binance_symbol = symbol.replace('/', '')
+
+            # Map common symbol formats to Binance format
+            binance_mapping = {
+                'BTCUSDT': 'BTCUSDT',
+                'BTCUSD': 'BTCUSDT',  # Binance uses USDT pairs
+                'ETHUSDT': 'ETHUSDT',
+                'ETHUSD': 'ETHUSDT',
+                'SOLUSDT': 'SOLUSDT',
+                'SOLUSD': 'SOLUSDT',
+                'ADAUSDT': 'ADAUSDT',
+                'ADAUSD': 'ADAUSDT',
+                'DOTUSDT': 'DOTUSDT',
+                'DOTUSD': 'DOTUSDT',
+                'LINKUSDT': 'LINKUSDT',
+                'LINKUSD': 'LINKUSDT',
+                'UNIUSDT': 'UNIUSDT',
+                'UNIUSD': 'UNIUSDT',
+                'HBARUSDT': 'HBARUSDT',
+                'HBARUSD': 'HBARUSDT'
+            }
+
+            binance_pair = binance_mapping.get(binance_symbol)
+            if binance_pair:
+                response = requests.get(
+                    f"https://api.binance.com/api/v3/ticker/price?symbol={binance_pair}",
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    price = float(data.get('price', 0.0))
+                    if price > 0:
+                        print(f"Got price for {symbol} from Binance: ${price}")
+                        _price_cache[symbol] = (price, time.time())
+                        _update_price_source_health('Binance', True)
+                        return price
+                    else:
+                        _update_price_source_health('Binance', False)
+        except Exception as e:
+            print(f"Binance price fetch failed for {symbol}: {e}")
+            _update_price_source_health('Binance', False)
+            pass
+
+        # Try CoinGecko API for altcoins and smaller tokens
+        try:
+            import requests
+
+            # Clean symbol for CoinGecko
+            base = symbol.split('/')[0] if '/' in symbol else symbol
+            base = base.replace('USDT', '').replace('USDC', '').replace('USD', '')
+
+            # Comprehensive CoinGecko ID mapping for popular tokens and altcoins
+            coingecko_mapping = {
+                # Major cryptocurrencies
+                'BTC': 'bitcoin',
+                'ETH': 'ethereum',
+                'BNB': 'binancecoin',
+                'SOL': 'solana',
+                'ADA': 'cardano',
+                'XRP': 'ripple',
+                'DOT': 'polkadot',
+                'DOGE': 'dogecoin',
+                'AVAX': 'avalanche-2',
+                'MATIC': 'matic-network',
+                'LTC': 'litecoin',
+                'ETC': 'ethereum-classic',
+                'BCH': 'bitcoin-cash',
+                'LINK': 'chainlink',
+                'UNI': 'uniswap',
+                'ALGO': 'algorand',
+                'ICP': 'internet-computer',
+                'FIL': 'filecoin',
+                'TRX': 'tron',
+                'ETC': 'ethereum-classic',
+                'VET': 'vechain',
+                'HBAR': 'hedera-hashgraph',
+                'FLOW': 'flow',
+                'MANA': 'decentraland',
+                'SAND': 'the-sandbox',
+                'AXS': 'axie-infinity',
+                'CHZ': 'chiliz',
+                'ENJ': 'enjincoin',
+
+                # DeFi tokens
+                'AAVE': 'aave',
+                'SUSHI': 'sushi',
+                'COMP': 'compound-governance-token',
+                'MKR': 'maker',
+                'YFI': 'yearn-finance',
+                'BAL': 'balancer',
+                'CRV': 'curve-dao-token',
+                'REN': 'ren',
+                'BAT': 'basic-attention-token',
+                'OMG': 'omisego',
+                'LRC': 'loopring',
+                'REP': 'augur',
+                'ANT': 'aragon',
+                'STORJ': 'storj',
+                'GNT': 'golem',
+
+                # Solana ecosystem
+                'RAY': 'raydium',
+                'SRM': 'serum',
+                'FTT': 'ftx-token',
+                'KIN': 'kin',
+                'ORCA': 'orca',
+                'COPE': 'cope',
+                'SAMO': 'samoyedcoin',
+                'BONK': 'bonk',
+                'SHIB': 'shiba-inu',
+                'AKITA': 'akita-inu',
+                'Hoge': 'hoge-finance',
+                'WOOF': 'woof-token',
+                'ELON': 'dogelon-mars',
+                'SAFEMOON': 'safemoon',
+                'CUMMIES': 'cumrocket',
+                'SAFEMOON': 'safemoon-2',
+                'MOONSHOT': 'moonshot',
+                'GOAT': 'goatseus-maximus',
+                'MEW': 'cat-in-a-dogs-world',
+                'WIF': 'dogwifcoin',
+                'BOME': 'book-of-meme',
+                'POPCAT': 'popcat',
+                'CLOUD': 'cloudtx',
+                'MOTHER': 'mother-iggy',
+
+                # Meme coins and altcoins
+                'PEPE': 'pepe',
+                'FLOKI': 'floki',
+                'BABYDOGE': 'baby-doge-coin',
+                'SHIB': 'shiba-inu',
+                'CUMMIES': 'cumrocket',
+                'SAFEMOON': 'safemoon-2',
+                'MOONSHOT': 'moonshot',
+                'ELON': 'dogelon-mars',
+                'AKITA': 'akita-inu',
+                'Hoge': 'hoge-finance',
+                'WOOF': 'woof-token',
+                'RAIIN': 'raiinmaker',
+                'USDUC': 'usduc',
+                'FEG': 'feg-token',
+                'YOOSHI': 'yooshi',
+                'QUACK': 'richquack',
+                'PIT': 'pitbull',
+                'HOGE': 'hoge-finance',
+                'CUMMIES': 'cumrocket',
+                'SAFEMOON': 'safemoon-2',
+                'MOONSHOT': 'moonshot',
+                'ELON': 'dogelon-mars',
+
+                # Gaming tokens
+                'GAL': 'galatasaray-fan-token',
+                'JUV': 'juventus-fan-token',
+                'BAR': 'fc-barcelona-fan-token',
+                'PSG': 'paris-saint-germain-fan-token',
+                'ASR': 'as-roma-fan-token',
+                'CITY': 'manchester-city-fan-token',
+                'ATM': 'atletico-madrid',
+                'NAP': 'napoli-fan-token',
+                'ACM': 'ac-milan-fan-token',
+                'IMX': 'immutable-x',
+                'GALAXY': 'galaxy-fight-club',
+                'GF': 'guildfi',
+                'YGG': 'yield-guild-games',
+                'ILV': 'illuvium',
+                'REEF': 'reef',
+                'SUPER': 'superfarm',
+                'TLM': 'alien-worlds',
+                'ATLAS': 'star-atlas',
+                'POLIS': 'star-atlas-dao',
+
+                # Layer 1 tokens
+                'AVAX': 'avalanche-2',
+                'FTM': 'fantom',
+                'ONE': 'harmony',
+                'NEAR': 'near',
+                'CELO': 'celo',
+                'KAVA': 'kava',
+                'ONT': 'ontology',
+                'QTUM': 'qtum',
+                'ZIL': 'zilliqa',
+                'ICX': 'icon',
+                'WAVES': 'waves',
+                'LSK': 'lisk',
+                'ARK': 'ark',
+                'STRAT': 'stratis',
+                'BTG': 'bitcoin-gold',
+
+                # Stablecoins
+                'USDT': 'tether',
+                'USDC': 'usd-coin',
+                'BUSD': 'binance-usd',
+                'DAI': 'dai',
+                'FRAX': 'frax',
+                'LUSD': 'liquity-usd',
+                'SUSD': 'nusd',
+                'USDP': 'paxos-standard',
+                'GUSD': 'gemini-dollar',
+                'USDN': 'neutrino',
+
+                # Oracle tokens
+                'API3': 'api3',
+                'TRU': 'truefi',
+                'DIA': 'dia-data',
+                'OCEAN': 'ocean-protocol',
+                'RLC': 'iexec-rlc',
+                'GRT': 'the-graph',
+
+                # Privacy tokens
+                'XMR': 'monero',
+                'ZEC': 'zcash',
+                'DASH': 'dash',
+                'BTCP': 'bitcoin-private',
+                'XVG': 'verge',
+                'PIVX': 'pivx',
+
+                # Storage tokens
+                'STORJ': 'storj',
+                'FIL': 'filecoin',
+                'SC': 'siacoin',
+                'AR': 'arweave',
+                'HOT': 'holotoken',
+                'BTFS': 'bitf',
+                'LPT': 'livepeer',
+                'HIVE': 'hive',
+                'STEEM': 'steem',
+
+                # Exchange tokens
+                'BNB': 'binancecoin',
+                'CRO': 'crypto-com-chain',
+                'LEO': 'leo-token',
+                'OKB': 'okb',
+                'HT': 'huobi-token',
+                'FTT': 'ftx-token',
+                'KCS': 'kucoin-shares',
+                'GT': 'gatechain-token',
+
+                # Utility tokens
+                'BAT': 'basic-attention-token',
+                'ANT': 'aragon',
+                'GNO': 'gnosis',
+                'LPT': 'livepeer',
+                'REP': 'augur',
+                'NMR': 'numeraire',
+                'AGI': 'singularitynet',
+                'FET': 'fetch-ai',
+                'OCEAN': 'ocean-protocol',
+                'RLC': 'iexec-rlc',
+                'GRT': 'the-graph'
+            }
+
+            coin_id = coingecko_mapping.get(base.upper())
+            if coin_id:
+                response = requests.get(
+                    f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd",
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    price = float(data.get(coin_id, {}).get('usd', 0.0))
+                    if price > 0:
+                        print(f"Got price for {symbol} from CoinGecko: ${price}")
+                        _price_cache[symbol] = (price, time.time())
+                        _update_price_source_health('CoinGecko', True)
+                        return price
+                    else:
+                        _update_price_source_health('CoinGecko', False)
+        except Exception as e:
+            print(f"CoinGecko price fetch failed for {symbol}: {e}")
+            _update_price_source_health('CoinGecko', False)
+            pass
+
+        # Try Coinbase Pro API as another fallback
+        try:
+            import requests
+
+            # Convert symbol format for Coinbase
+            coinbase_symbol = symbol.replace('/', '-').upper()
+
+            # Map common symbol formats to Coinbase format
+            coinbase_mapping = {
+                'BTC-USDT': 'BTC-USD',  # Coinbase uses USD pairs
+                'BTC-USD': 'BTC-USD',
+                'ETH-USDT': 'ETH-USD',
+                'ETH-USD': 'ETH-USD',
+                'SOL-USDT': 'SOL-USD',
+                'SOL-USD': 'SOL-USD',
+                'ADA-USDT': 'ADA-USD',
+                'ADA-USD': 'ADA-USD',
+                'DOT-USDT': 'DOT-USD',
+                'DOT-USD': 'DOT-USD',
+                'LINK-USDT': 'LINK-USD',
+                'LINK-USD': 'LINK-USD',
+                'HBAR-USDT': 'HBAR-USD',
+                'HBAR-USD': 'HBAR-USD'
+            }
+
+            coinbase_pair = coinbase_mapping.get(coinbase_symbol)
+            if coinbase_pair:
+                response = requests.get(
+                    f"https://api.coinbase.com/v2/exchange-rates?currency={coinbase_pair.split('-')[0]}",
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if 'data' in data and 'rates' in data['data'] and 'USD' in data['data']['rates']:
+                        price = float(data['data']['rates']['USD'])
+                        if price > 0:
+                            print(f"Got price for {symbol} from Coinbase: ${price}")
+                            _price_cache[symbol] = (price, time.time())
+                            _update_price_source_health('Coinbase', True)
+                            return price
+                        else:
+                            _update_price_source_health('Coinbase', False)
+        except Exception as e:
+            print(f"Coinbase price fetch failed for {symbol}: {e}")
+            _update_price_source_health('Coinbase', False)
             pass
         
         # Fallback: try to get from cached data if available
@@ -1120,6 +2070,7 @@ def get_current_price_for_symbol(symbol: str) -> float:
                         price = float(data[symbol]['price'])
                         if price > 0:
                             print(f"Got cached price for {symbol}: ${price}")
+                            _price_cache[symbol] = (price, time.time())
                             return price
         except Exception as e:
             print(f"Cached price fetch failed for {symbol}: {e}")
@@ -1130,19 +2081,45 @@ def get_current_price_for_symbol(symbol: str) -> float:
             import requests
             base_symbol = symbol.split('/')[0] if '/' in symbol else symbol
             # Remove common suffixes/prefixes for CoinGecko
-            base_symbol = base_symbol.replace('USDT', '').replace('USDC', '').replace('USD', '')
+            base_symbol = base_symbol.replace('USDT', '').replace('USDC', '').replace('USD', '').replace('EUR', '')
 
-            if base_symbol:
+            # CoinGecko ID mapping for common tokens
+            coingecko_mapping = {
+                'BTC': 'bitcoin',
+                'ETH': 'ethereum',
+                'SOL': 'solana',
+                'ADA': 'cardano',
+                'DOT': 'polkadot',
+                'LINK': 'chainlink',
+                'UNI': 'uniswap',
+                'AAVE': 'aave',
+                'SUSHI': 'sushi',
+                'COMP': 'compound-governance-token',
+                'MKR': 'maker',
+                'YFI': 'yearn-finance',
+                'HBAR': 'hedera-hashgraph',
+                'RAIIN': 'raiinmaker'
+            }
+
+            # Try direct mapping first
+            if base_symbol in coingecko_mapping:
+                coin_id = coingecko_mapping[base_symbol]
+            else:
+                # Fallback to lowercase base symbol
+                coin_id = base_symbol.lower()
+
+            if coin_id:
                 response = requests.get(
-                    f"https://api.coingecko.com/api/v3/simple/price?ids={base_symbol.lower()}&vs_currencies=usd",
+                    f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd",
                     timeout=5
                 )
                 if response.status_code == 200:
                     data = response.json()
-                    if base_symbol.lower() in data and 'usd' in data[base_symbol.lower()]:
-                        price = float(data[base_symbol.lower()]['usd'])
+                    if coin_id in data and 'usd' in data[coin_id]:
+                        price = float(data[coin_id]['usd'])
                         if price > 0:
                             print(f"Got price for {symbol} from CoinGecko: ${price}")
+                            _price_cache[symbol] = (price, time.time())
                             return price
         except Exception as e:
             print(f"CoinGecko price fetch failed for {symbol}: {e}")
@@ -1151,19 +2128,71 @@ def get_current_price_for_symbol(symbol: str) -> float:
         # Try CoinMarketCap API as final fallback
         try:
             import requests
-            # This would require an API key, so we'll skip the actual call
-            # but show the pattern for completeness
-            print(f"All price sources failed for {symbol}, returning 0.0 (will use entry price)")
+            base_symbol = symbol.split('/')[0] if '/' in symbol else symbol
+            # Remove common suffixes/prefixes for CoinMarketCap
+            base_symbol = base_symbol.replace('USDT', '').replace('USDC', '').replace('USD', '').replace('EUR', '')
+
+            # CoinMarketCap ID mapping for common tokens
+            cmc_mapping = {
+                'BTC': '1',      # Bitcoin
+                'ETH': '1027',   # Ethereum
+                'SOL': '5426',   # Solana
+                'ADA': '2010',   # Cardano
+                'DOT': '6636',   # Polkadot
+                'LINK': '1975',  # Chainlink
+                'UNI': '7083',   # Uniswap
+                'AAVE': '7278',  # Aave
+                'SUSHI': '6758', # Sushi
+                'COMP': '5692',  # Compound
+                'MKR': '1518',   # Maker
+                'YFI': '5864',   # Yearn Finance
+                'HBAR': '4642',  # Hedera Hashgraph
+                'RAIIN': '10098' # Raiinmaker (if available)
+            }
+
+            # Check if we have a direct mapping
+            if base_symbol in cmc_mapping:
+                coin_id = cmc_mapping[base_symbol]
+                # Try free tier API (limited to top 100 coins)
+                response = requests.get(
+                    f"https://api.coinmarketcap.com/data-api/v3/cryptocurrency/detail?id={coin_id}",
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if 'data' in data and data['data']:
+                        price = float(data['data'].get('price', 0.0))
+                        if price > 0:
+                            print(f"Got price for {symbol} from CoinMarketCap: ${price}")
+                            _price_cache[symbol] = (price, time.time())
+                            return price
+
+            # Fallback to free API for top coins
+            response = requests.get(
+                "https://api.coinmarketcap.com/data-api/v3/cryptocurrency/listing?start=1&limit=100",
+                timeout=5
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if 'data' in data and 'cryptoCurrencyList' in data['data']:
+                    for coin in data['data']['cryptoCurrencyList']:
+                        if coin.get('symbol', '').upper() == base_symbol:
+                            price = float(coin.get('quotes', [{}])[0].get('price', 0.0))
+                            if price > 0:
+                                print(f"Got price for {symbol} from CoinMarketCap: ${price}")
+                                _price_cache[symbol] = (price, time.time())
+                                return price
+
         except Exception as e:
             print(f"CoinMarketCap price fetch failed for {symbol}: {e}")
             pass
-        
-        # Final fallback: try to get from positions.log if it's a recent position
+
+        # Enhanced fallback: try to get from positions.log if it's a recent position
         try:
             if POSITIONS_FILE.exists():
                 with open(POSITIONS_FILE, 'r') as f:
                     lines = f.readlines()
-                
+
                 # Look for recent position with this symbol
                 for line in reversed(lines[-50:]):  # Check last 50 lines
                     if symbol in line and 'current' in line:
@@ -1172,13 +2201,42 @@ def get_current_price_for_symbol(symbol: str) -> float:
                         if current_match:
                             price = float(current_match.group(1))
                             if price > 0:
-                                print(f"Got recent position price for {symbol}: ${price}")
+                                print(f"Got fallback price for {symbol} from positions log: ${price}")
+                                _price_cache[symbol] = (price, time.time())
                                 return price
         except Exception as e:
-            print(f"Recent position price fetch failed for {symbol}: {e}")
+            print(f"Positions log fallback failed for {symbol}: {e}")
             pass
-        
-        print(f"No price source available for {symbol}")
+
+        # Last resort: try to get entry price from trades.csv
+        try:
+            if hasattr(TRADE_FILE, 'exists') and TRADE_FILE.exists():
+                import pandas as pd
+                df = pd.read_csv(TRADE_FILE)
+                if not df.empty and 'symbol' in df.columns and 'price' in df.columns:
+                    symbol_trades = df[df['symbol'] == symbol]
+                    if not symbol_trades.empty:
+                        # Get the most recent trade price for this symbol
+                        latest_price = symbol_trades['price'].iloc[-1]
+                        if latest_price > 0:
+                            print(f"Got fallback price for {symbol} from trade history: ${latest_price}")
+                            _price_cache[symbol] = (latest_price, time.time())
+                            return latest_price
+        except Exception as e:
+            print(f"Trade history fallback failed for {symbol}: {e}")
+            pass
+
+        # Only log final failure once per symbol per session to reduce noise
+        if not hasattr(get_current_price_for_symbol, '_failed_symbols'):
+            get_current_price_for_symbol._failed_symbols = set()
+
+        if symbol not in get_current_price_for_symbol._failed_symbols:
+            print(f"All price sources failed for {symbol}, returning 0.0 (entry price will be used)")
+            print(f"💡 Tip: You can set a manual price for {symbol} via the dashboard or API")
+            get_current_price_for_symbol._failed_symbols.add(symbol)
+        else:
+            print(f"Price fetch still failing for {symbol} (entry price will be used)")
+
         return 0.0
         
     except Exception as e:
@@ -1229,6 +2287,9 @@ def trades_data():
                 # Calculate PnL for each trade
                 records = []
                 
+                # Track position history for realized P&L calculation
+                position_history = {}
+                
                 for _, row in df.iterrows():
                     symbol = str(row.get('symbol', ''))
                     side = str(row.get('side', ''))
@@ -1239,16 +2300,65 @@ def trades_data():
                     # Calculate trade total
                     total = amount * price
                     
-                    # Calculate realized PnL for this trade (if it closes a position)
+                    # Calculate realized PnL for this trade
                     pnl = 0.0
                     pnl_percentage = 0.0
                     
-                    # Calculate unrealized PnL for open positions
+                    # Check if this trade closes an existing position
+                    if symbol in position_history:
+                        existing_pos = position_history[symbol]
+                        
+                        # Check if this is a closing trade (opposite side)
+                        if ((side == 'sell' and existing_pos['side'] == 'buy') or 
+                            (side == 'buy' and existing_pos['side'] == 'sell')):
+                            
+                            # Calculate realized P&L
+                            if side == 'sell':  # Closing long position
+                                pnl = (price - existing_pos['price']) * min(amount, existing_pos['amount'])
+                            else:  # Closing short position
+                                pnl = (existing_pos['price'] - price) * min(amount, existing_pos['amount'])
+                            
+                            # Calculate percentage
+                            if existing_pos['price'] > 0:
+                                pnl_percentage = (pnl / (existing_pos['price'] * min(amount, existing_pos['amount']))) * 100
+                            
+                            # Update or remove position
+                            if amount >= existing_pos['amount']:
+                                del position_history[symbol]
+                            else:
+                                position_history[symbol]['amount'] -= amount
+                        else:
+                            # Same side trade - average the position
+                            total_cost = (existing_pos['price'] * existing_pos['amount']) + total
+                            total_amount = existing_pos['amount'] + amount
+                            position_history[symbol] = {
+                                'side': side,
+                                'price': total_cost / total_amount,
+                                'amount': total_amount
+                            }
+                    else:
+                        # New position
+                        position_history[symbol] = {
+                            'side': side,
+                            'price': price,
+                            'amount': amount
+                        }
+                    
+                    # Calculate unrealized PnL for open positions only
                     unrealized_pnl = 0.0
                     unrealized_pnl_percentage = 0.0
                     
-                    # Check if this symbol has an open position
-                    if symbol in open_positions and symbol in current_prices:
+                    # Determine if this trade is still open
+                    is_open = symbol in open_positions
+                    
+                    # Check for very small amounts that should be considered closed (precision issues)
+                    if is_open and symbol in open_positions:
+                        pos = open_positions[symbol]
+                        if pos['amount'] < 0.0001:  # Less than 0.01% - consider closed
+                            is_open = False
+                    
+                    # Only calculate unrealized P&L for truly open positions
+                    if is_open and symbol in current_prices and symbol in open_positions:
                         current_price = current_prices[symbol]
                         if current_price > 0:
                             pos = open_positions[symbol]
@@ -1260,6 +2370,13 @@ def trades_data():
                             if pos['price'] > 0:
                                 unrealized_pnl_percentage = (unrealized_pnl / (pos['price'] * pos['amount'])) * 100
                     
+                    # Set status based on whether the position is still open
+                    status = 'active' if is_open else 'completed'
+                    
+                    # Debug: Log P&L values for completed trades
+                    if status == 'completed' and pnl != 0:
+                        print(f"DEBUG: {symbol} {side} - Realized P&L: {pnl}, Unrealized: {unrealized_pnl}, Status: {status}")
+                    
                     record = {
                         'symbol': symbol,
                         'side': side,
@@ -1267,7 +2384,7 @@ def trades_data():
                         'price': price,
                         'timestamp': timestamp,
                         'total': total,
-                        'status': 'completed',
+                        'status': status,
                         'pnl': pnl,
                         'pnl_percentage': pnl_percentage,
                         'unrealized_pnl': unrealized_pnl,
@@ -1414,6 +2531,90 @@ def stop_conflicts():
     """Stop any conflicting bot processes."""
     stop_conflicting_bots()
     return jsonify({'status': 'conflicts_stopped'})
+
+
+@app.route('/api/price-source-health')
+def price_source_health():
+    """Return health status of all price sources."""
+    try:
+        health_data = {}
+        for source_name in _price_source_health.keys():
+            health_data[source_name] = _get_price_source_health(source_name)
+
+        # Add sources that haven't been used yet with default values
+        # Focus on Kraken + complementary sources for better coverage
+        all_sources = ['Pyth', 'Helius', 'Raydium', 'Orca', 'Jupiter', 'Kraken', 'CoinGecko', 'Coinbase']
+        for source in all_sources:
+            if source not in health_data:
+                health_data[source] = {
+                    'health_score': 0.5,
+                    'total_attempts': 0,
+                    'success_rate': 0.0,
+                    'consecutive_failures': 0
+                }
+
+        return jsonify({
+            'price_sources': health_data,
+            'best_sources': _get_best_price_sources()[:5]  # Top 5 healthiest sources
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
+@app.route('/api/manual-prices', methods=['GET'])
+def get_manual_prices():
+    """Get all manual price overrides."""
+    try:
+        return jsonify({
+            'manual_prices': _manual_prices,
+            'count': len(_manual_prices)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
+@app.route('/api/manual-prices', methods=['POST'])
+def set_manual_price_endpoint():
+    """Set a manual price override."""
+    try:
+        data = request.get_json()
+        if not data or 'symbol' not in data or 'price' not in data:
+            return jsonify({'error': 'Missing symbol or price'}), 400
+
+        symbol = data['symbol'].strip().upper()
+        price = float(data['price'])
+        validity_hours = int(data.get('validity_hours', 24))
+
+        if price <= 0:
+            return jsonify({'error': 'Price must be positive'}), 400
+
+        _set_manual_price(symbol, price, validity_hours)
+
+        return jsonify({
+            'status': 'success',
+            'symbol': symbol,
+            'price': price,
+            'validity_hours': validity_hours
+        })
+    except ValueError as e:
+        return jsonify({'error': 'Invalid price format'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/manual-prices/<symbol>', methods=['DELETE'])
+def delete_manual_price(symbol):
+    """Delete a manual price override."""
+    try:
+        symbol = symbol.strip().upper()
+        if symbol in _manual_prices:
+            del _manual_prices[symbol]
+            _save_manual_prices()
+            return jsonify({'status': 'deleted', 'symbol': symbol})
+        else:
+            return jsonify({'error': 'Manual price not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/dashboard-metrics')

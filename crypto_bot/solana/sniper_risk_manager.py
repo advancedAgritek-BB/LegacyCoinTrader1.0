@@ -82,9 +82,11 @@ class SniperRiskManager:
     - Emergency position liquidation
     """
     
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, dry_run: bool = True, paper_wallet=None):
         self.config = config
         self.risk_config = config.get("sniper_risk_manager", {})
+        self.dry_run = dry_run
+        self.paper_wallet = paper_wallet
         
         # Risk profiles for different market conditions
         self.risk_profiles = {
@@ -553,8 +555,11 @@ class SniperRiskManager:
         
     def _get_account_balance(self) -> float:
         """Get current account balance."""
+        if self.dry_run and self.paper_wallet:
+            # Use paper wallet balance
+            return self.paper_wallet.balance
         # This would integrate with your wallet balance
-        return 10.0  # Placeholder: 10 SOL
+        return 10.0  # Placeholder: 10 SOL for live trading
         
     def _estimate_volatility(self, token_mint: str) -> float:
         """Estimate token volatility."""

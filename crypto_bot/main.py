@@ -3,6 +3,7 @@ import asyncio
 import contextlib
 import json
 import time
+import signal
 from pathlib import Path
 from datetime import datetime
 from collections import deque, OrderedDict, defaultdict
@@ -98,6 +99,7 @@ from crypto_bot.utils.telemetry import telemetry, write_cycle_metrics
 from crypto_bot.utils.correlation import compute_correlation_matrix
 from crypto_bot.utils.strategy_analytics import write_scores, write_stats
 from crypto_bot.monitoring import record_sol_scanner_metrics
+from crypto_bot.position_monitor import PositionMonitor
 from crypto_bot.fund_manager import (
     auto_convert_funds,
     check_wallet_balances,
@@ -727,7 +729,20 @@ def reload_config(
         "take_profit_atr_mult", 4.0
     )
     risk_params["volume_ratio"] = volume_ratio
-    risk_manager.config = RiskConfig(**risk_params)
+    
+    # Filter out unknown fields that aren't in RiskConfig
+    valid_fields = {
+        'max_drawdown', 'stop_loss_pct', 'take_profit_pct', 'min_fng', 'min_sentiment',
+        'bull_fng', 'bull_sentiment', 'min_atr_pct', 'max_funding_rate', 'symbol',
+        'trade_size_pct', 'risk_pct', 'min_volume', 'volume_threshold_ratio',
+        'strategy_allocation', 'volume_ratio', 'atr_short_window', 'atr_long_window',
+        'max_volatility_factor', 'min_expected_value', 'default_expected_value',
+        'atr_period', 'stop_loss_atr_mult', 'take_profit_atr_mult', 'max_pair_drawdown',
+        'pair_drawdown_lookback'
+    }
+    filtered_risk_params = {k: v for k, v in risk_params.items() if k in valid_fields}
+    
+    risk_manager.config = RiskConfig(**filtered_risk_params)
 
 
 async def _ws_ping_loop(exchange: object, interval: float) -> None:
@@ -1183,6 +1198,10 @@ async def execute_solana_trade(
                 "highest_price": price,
                 "lowest_price": price,
             }
+            
+            # Start real-time monitoring for this position
+            if hasattr(ctx, 'position_monitor'):
+                await ctx.position_monitor.start_monitoring(sym, ctx.positions[sym])
 
             # Handle paper wallet updates
             if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
@@ -1294,6 +1313,14 @@ async def execute_cex_trade(
                 "highest_price": price,
                 "lowest_price": price,
             }
+            
+            # Start real-time monitoring for this position
+            if hasattr(ctx, 'position_monitor'):
+                await ctx.position_monitor.start_monitoring(sym, ctx.positions[sym])
+            
+            # Start real-time monitoring for this position
+            if hasattr(ctx, 'position_monitor'):
+                await ctx.position_monitor.start_monitoring(sym, ctx.positions[sym])
 
             # Handle paper wallet updates
             if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
@@ -1527,17 +1554,25 @@ async def execute_signals(ctx: BotContext) -> None:
 
 
 async def handle_exits(ctx: BotContext) -> None:
-    """Check open positions for exit conditions."""
+    """Check open positions for exit conditions with enhanced monitoring."""
     tf = ctx.config.get("timeframe", "1h")
     tf_cache = ctx.df_cache.get(tf, {})
+    
+    # Clean up old monitors for closed positions
+    if hasattr(ctx, 'position_monitor'):
+        await ctx.position_monitor.cleanup_old_monitors()
+    
     for sym, pos in list(ctx.positions.items()):
         df = tf_cache.get(sym)
         if df is None or df.empty:
             continue
+            
         current_price = float(df["close"].iloc[-1])
         pnl_pct = ((current_price - pos["entry_price"]) / pos["entry_price"]) * (
             1 if pos["side"] == "buy" else -1
         )
+        
+        # Enhanced trailing stop logic with real-time monitoring
         if pnl_pct >= ctx.config.get("exit_strategy", {}).get("min_gain_to_trail", 0):
             if pos["side"] == "buy":  # Long position
                 if current_price > pos.get("highest_price", pos["entry_price"]):
@@ -1549,6 +1584,8 @@ async def handle_exits(ctx: BotContext) -> None:
                     pos["lowest_price"] = current_price
                 # Calculate trailing stop from the actual lowest price since entry
                 pos["trailing_stop"] = pos["lowest_price"] * (1 + ctx.config.get("exit_strategy", {}).get("trailing_stop_pct", 0.02))
+        
+        # Check exit conditions with enhanced monitoring
         exit_signal, new_stop = should_exit(
             df,
             current_price,
@@ -1559,6 +1596,7 @@ async def handle_exits(ctx: BotContext) -> None:
             pos["entry_price"],  # Pass entry price for take profit
         )
         pos["trailing_stop"] = new_stop
+        
         if exit_signal:
             await cex_trade_async(
                 ctx.exchange,
@@ -1597,21 +1635,30 @@ async def handle_exits(ctx: BotContext) -> None:
             
             # Ensure balance is synchronized
             sync_paper_wallet_balance(ctx)
-            ctx.risk_manager.deallocate_capital(
-                pos.get("strategy", ""), pos["size"] * pos["entry_price"]
+            # Stop monitoring this position
+            if hasattr(ctx, 'position_monitor'):
+                await ctx.position_monitor.stop_monitoring(sym)
+            
+                    # Stop monitoring this position
+        if hasattr(ctx, 'position_monitor'):
+            await ctx.position_monitor.stop_monitoring(sym)
+            
+        ctx.risk_manager.deallocate_capital(
+            pos.get("strategy", ""), pos["size"] * pos["entry_price"]
+        )
+        ctx.positions.pop(sym, None)
+
+        try:
+            log_position(
+                sym,
+                pos["side"],
+                pos["size"],
+                pos["entry_price"],
+                current_price,
+                ctx.balance,
             )
-            ctx.positions.pop(sym, None)
-            try:
-                log_position(
-                    sym,
-                    pos["side"],
-                    pos["size"],
-                    pos["entry_price"],
-                    current_price,
-                    ctx.balance,
-                )
-            except Exception:
-                pass
+        except Exception:
+            pass
 
 
 async def force_exit_all(ctx: BotContext) -> None:
@@ -2017,7 +2064,20 @@ async def _main_impl() -> TelegramNotifier:
         "take_profit_atr_mult", 4.0
     )
     risk_params["volume_ratio"] = volume_ratio
-    risk_config = RiskConfig(**risk_params)
+    
+    # Filter out unknown fields that aren't in RiskConfig
+    valid_fields = {
+        'max_drawdown', 'stop_loss_pct', 'take_profit_pct', 'min_fng', 'min_sentiment',
+        'bull_fng', 'bull_sentiment', 'min_atr_pct', 'max_funding_rate', 'symbol',
+        'trade_size_pct', 'risk_pct', 'min_volume', 'volume_threshold_ratio',
+        'strategy_allocation', 'volume_ratio', 'atr_short_window', 'atr_long_window',
+        'max_volatility_factor', 'min_expected_value', 'default_expected_value',
+        'atr_period', 'stop_loss_atr_mult', 'take_profit_atr_mult', 'max_pair_drawdown',
+        'pair_drawdown_lookback'
+    }
+    filtered_risk_params = {k: v for k, v in risk_params.items() if k in valid_fields}
+    
+    risk_config = RiskConfig(**filtered_risk_params)
     risk_manager = RiskManager(risk_config)
 
     paper_wallet = None
@@ -2080,6 +2140,13 @@ async def _main_impl() -> TelegramNotifier:
             config.get("paper_wallet", {}).get("max_open_trades", config.get("max_open_trades", 1)),
             config.get("paper_wallet", {}).get("allow_short", config.get("allow_short", False)),
         )
+        
+        # Try to load saved state
+        if paper_wallet.load_state():
+            logger.info(f"Loaded saved paper wallet state: balance=${paper_wallet.balance:.2f}")
+        else:
+            logger.info(f"Using initial paper wallet balance: ${start_bal:.2f}")
+        
         log_balance(paper_wallet.balance)
         last_balance = notify_balance_change(
             notifier,
@@ -2145,7 +2212,13 @@ async def _main_impl() -> TelegramNotifier:
     if config.get("meme_wave_sniper", {}).get("enabled"):
         from crypto_bot.solana import start_runner
 
-        meme_wave_task = start_runner(config.get("meme_wave_sniper", {}))
+        # Add paper trading parameters to meme wave config
+        meme_wave_cfg = config.get("meme_wave_sniper", {}).copy()
+        meme_wave_cfg["execution"] = meme_wave_cfg.get("execution", {})
+        meme_wave_cfg["execution"]["dry_run"] = config.get("execution_mode") == "dry_run"
+        meme_wave_cfg["execution"]["paper_wallet"] = ctx.paper_wallet if config.get("execution_mode") == "dry_run" else None
+
+        meme_wave_task = start_runner(meme_wave_cfg)
     sniper_cfg = config.get("meme_wave_sniper", {})
     sniper_task = None
     if sniper_cfg.get("enabled"):
@@ -2159,7 +2232,11 @@ async def _main_impl() -> TelegramNotifier:
         from crypto_bot.solana.pump_sniper_integration import start_pump_sniper_system
 
         try:
-            pump_sniper_started = await start_pump_sniper_system(config)
+            pump_sniper_started = await start_pump_sniper_system(
+                config,
+                dry_run=config.get("execution_mode") == "dry_run",
+                paper_wallet=ctx.paper_wallet if config.get("execution_mode") == "dry_run" else None
+            )
             if pump_sniper_started:
                 logger.info("Advanced Pump Sniper System started successfully")
             else:
@@ -2197,6 +2274,14 @@ async def _main_impl() -> TelegramNotifier:
     ctx.paper_wallet = paper_wallet
     ctx.position_guard = position_guard
     ctx.balance = last_balance
+    
+    # Initialize real-time position monitor
+    ctx.position_monitor = PositionMonitor(
+        exchange=exchange,
+        config=config,
+        positions=ctx.positions,
+        notifier=notifier
+    )
     runner = PhaseRunner(
         [
             fetch_candidates,
@@ -2332,11 +2417,16 @@ async def _main_impl() -> TelegramNotifier:
                 if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
                     ensure_paper_wallet_sync(ctx)
 
-                    # Log comprehensive wallet status every cycle
-                    if loop_count % 10 == 0:  # Log every 10 cycles
-                        status = get_paper_wallet_status(ctx)
-                        if status:
-                            logger.info(f"Cycle {loop_count} - Paper wallet summary: {status}")
+                # Log comprehensive wallet status every cycle
+                if loop_count % 10 == 0:  # Log every 10 cycles
+                    status = get_paper_wallet_status(ctx)
+                    if status:
+                        logger.info(f"Cycle {loop_count} - Paper wallet summary: {status}")
+
+                    # Log position monitoring statistics
+                    if hasattr(ctx, 'position_monitor'):
+                        monitor_stats = await ctx.position_monitor.get_monitoring_stats()
+                        logger.info(f"Cycle {loop_count} - Position monitoring: {monitor_stats}")
 
                 if open_syms:
                     tf_cache = ctx.df_cache.get(tf, {})
@@ -2399,8 +2489,27 @@ async def _main_impl() -> TelegramNotifier:
             unknown_rate = UNKNOWN_COUNT / max(TOTAL_ANALYSES, 1)
             if unknown_rate > 0.2 and ctx.notifier:
                 ctx.notifier.notify(f"⚠️ Unknown regime rate {unknown_rate:.1%}")
-            delay = config.get("loop_interval_minutes", 1) / max(ctx.volatility_factor, 1e-6)
-            logger.info("Sleeping for %.2f minutes", delay)
+            # Adaptive loop interval based on volatility and active positions
+            base_interval = config.get("loop_interval_minutes", 0.5)
+            
+            # Speed up if we have active positions that need monitoring
+            if hasattr(ctx, 'position_monitor') and ctx.position_monitor.active_monitors:
+                active_positions_factor = 0.5  # 2x faster when monitoring positions
+            else:
+                active_positions_factor = 1.0
+            
+            # Adjust based on volatility
+            volatility_factor = max(ctx.volatility_factor, 1e-6)
+            
+            # Final delay calculation
+            delay = (base_interval * active_positions_factor) / volatility_factor
+            
+            # Ensure minimum and maximum bounds
+            delay = max(0.1, min(delay, 5.0))  # Between 6 seconds and 5 minutes
+            
+            logger.info("Sleeping for %.2f minutes (volatility: %.2f, active positions: %d)", 
+                       delay, ctx.volatility_factor, 
+                       len(ctx.position_monitor.active_monitors) if hasattr(ctx, 'position_monitor') else 0)
             await asyncio.sleep(delay * 60)
 
     finally:
@@ -2442,6 +2551,10 @@ async def _main_impl() -> TelegramNotifier:
                 await meme_wave_task
             except asyncio.CancelledError:
                 pass
+        # Stop all position monitoring
+        if hasattr(ctx, 'position_monitor'):
+            await ctx.position_monitor.stop_all_monitoring()
+        
         # Cancel and cleanup any remaining trading tasks
         trade_manager.cancel_all()
         try:
@@ -2480,8 +2593,69 @@ async def _main_impl() -> TelegramNotifier:
     return notifier
 
 
+def check_existing_instance(bot_pid_file: Path) -> bool:
+    """Check if another bot instance is already running."""
+    if not bot_pid_file.exists():
+        return False
+
+    try:
+        with open(bot_pid_file, 'r') as f:
+            pid_str = f.read().strip()
+
+        if not pid_str:
+            return False
+
+        pid = int(pid_str)
+
+        # Check if process is still running
+        os.kill(pid, 0)  # Signal 0 just checks if process exists
+        return True
+
+    except (ValueError, OSError):
+        # PID file contains invalid data or process doesn't exist
+        return False
+
+
+def write_pid_file(bot_pid_file: Path) -> None:
+    """Write current process PID to file."""
+    with open(bot_pid_file, 'w') as f:
+        f.write(str(os.getpid()))
+
+
+def cleanup_pid_file(bot_pid_file: Path) -> None:
+    """Remove PID file on shutdown."""
+    try:
+        if bot_pid_file.exists():
+            bot_pid_file.unlink()
+    except Exception:
+        pass  # Ignore cleanup errors
+
+
 async def main() -> None:
     """Entry point for running the trading bot with error handling."""
+    bot_pid_file = Path("bot_pid.txt")
+
+    # Check for existing instance
+    if check_existing_instance(bot_pid_file):
+        logger.error("Another bot instance is already running! Please stop it first or remove bot_pid.txt if it's stale.")
+        logger.error("To stop the existing bot, you can:")
+        logger.error("1. Use the Telegram bot's /stop command")
+        logger.error("2. Kill the process manually: pkill -f 'crypto_bot'")
+        logger.error("3. Remove the PID file if you're sure no bot is running: rm bot_pid.txt")
+        sys.exit(1)
+
+    # Write our PID file
+    write_pid_file(bot_pid_file)
+
+    # Set up signal handlers for cleanup
+    def signal_handler(signum, frame):
+        logger.info("Received signal %d, shutting down...", signum)
+        cleanup_pid_file(bot_pid_file)
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     notifier: Union[TelegramNotifier, None] = None
     try:
         notifier = await _main_impl()
@@ -2513,6 +2687,7 @@ async def main() -> None:
         if notifier:
             notifier.notify("Bot shutting down")
         logger.info("Bot shutting down")
+        cleanup_pid_file(bot_pid_file)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual execution

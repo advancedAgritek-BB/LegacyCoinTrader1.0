@@ -79,15 +79,17 @@ class PumpSniperOrchestrator:
     - Emergency controls and safeguards
     """
     
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, dry_run: bool = True, paper_wallet=None):
         self.config = config
         self.orchestrator_config = config.get("pump_sniper_orchestrator", {})
-        
+        self.dry_run = dry_run
+        self.paper_wallet = paper_wallet
+
         # Core components
         self.pump_detector = PumpDetector(config)
         self.pool_analyzer = LiquidityPoolAnalyzer(config)
-        self.rapid_executor = RapidExecutor(config)
-        self.risk_manager = SniperRiskManager(config)
+        self.rapid_executor = RapidExecutor(config, dry_run=dry_run, paper_wallet=paper_wallet)
+        self.risk_manager = SniperRiskManager(config, dry_run=dry_run, paper_wallet=paper_wallet)
         self.sentiment_analyzer = SocialSentimentAnalyzer(config)
         self.momentum_detector = MomentumDetector(config)
         self.pool_watcher = PoolWatcher()

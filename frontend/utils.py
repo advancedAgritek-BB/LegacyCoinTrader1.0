@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import time
+from datetime import datetime, date
 from typing import Optional, Dict, Tuple
 import pandas as pd
 
@@ -45,7 +46,36 @@ def compute_performance(df: pd.DataFrame) -> Dict[str, float]:
     try:
         # Calculate basic metrics
         total_trades = len(df)
-        
+
+        # Calculate trades today
+        trades_today = 0
+        today = date.today()
+        if 'timestamp' in df.columns and not df.empty:
+            try:
+                # Parse timestamps with mixed formats (ISO with T and space-separated)
+                df_copy = df.copy()
+                parsed_timestamps = []
+                for ts in df_copy['timestamp']:
+                    try:
+                        ts_str = str(ts).strip()
+                        if 'T' in ts_str:
+                            # ISO format: 2025-09-01T07:11:43.740121
+                            parsed = pd.to_datetime(ts_str, format='%Y-%m-%dT%H:%M:%S.%f')
+                        else:
+                            # Space format: 2025-08-29 19:34:03
+                            parsed = pd.to_datetime(ts_str, format='%Y-%m-%d %H:%M:%S')
+                        parsed_timestamps.append(parsed)
+                    except Exception:
+                        parsed_timestamps.append(pd.NaT)
+
+                df_copy['timestamp'] = parsed_timestamps
+                df_copy = df_copy.dropna(subset=['timestamp'])
+                today_trades = df_copy[df_copy['timestamp'].dt.date == today]
+                trades_today = len(today_trades)
+            except Exception as e:
+                print(f"Error calculating trades today: {e}")
+                trades_today = 0
+
         # Calculate PnL per symbol with improved logic
         perf: Dict[str, float] = {}
         open_pos: dict[str, list[Tuple[float, float]]] = {}
@@ -156,6 +186,7 @@ def compute_performance(df: pd.DataFrame) -> Dict[str, float]:
         
         return {
             'total_trades': total_trades,
+            'trades_today': trades_today,
             'win_rate': win_rate,
             'total_pnl': total_pnl,
             'avg_trade_size': avg_trade_size,
@@ -171,6 +202,7 @@ def compute_performance(df: pd.DataFrame) -> Dict[str, float]:
         print(f"Error computing performance: {e}")
         return {
             'total_trades': 0,
+            'trades_today': 0,
             'win_rate': 0.0,
             'total_pnl': 0.0,
             'avg_trade_size': 0.0,

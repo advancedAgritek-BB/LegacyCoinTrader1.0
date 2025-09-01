@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Card Sizing Test</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #00d4aa;
+            --secondary-color: #6366f1;
+            --success-color: #10b981;
+            --danger-color: #ef4444;
+            --info-color: #3b82f6;
+            --bg-primary: #0f0f23;
+            --bg-secondary: #1a1a2e;
+            --bg-tertiary: #16213e;
+            --bg-card: #1e293b;
+            --text-primary: #f8fafc;
+            --text-secondary: #cbd5e1;
+            --border-color: #334155;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .row {
+            display: flex;
+            flex-wrap: wrap;
+            margin: 0 -15px;
+        }
+
+        .col-xl-3, .col-md-6 {
+            padding: 0 15px;
+            margin-bottom: 30px;
+            flex: 0 0 25%;
+            max-width: 25%;
+        }
+
+        @media (max-width: 768px) {
+            .col-xl-3, .col-md-6 {
+                flex: 0 0 50%;
+                max-width: 50%;
+            }
+        }
+
+        /* Metric Cards - High specificity to override Bootstrap */
+        .row .col-xl-3 .metric-card,
+        .row .col-md-6 .metric-card,
+        .row .col-lg-4 .metric-card {
+            background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-tertiary) 100%) !important;
+            border: 1px solid var(--border-color) !important;
+            border-radius: 1rem !important;
+            padding: 1.5rem !important;
+            text-align: center !important;
+            transition: all 0.3s ease !important;
+            min-height: 180px !important;
+            height: auto !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+            align-items: center !important;
+            position: relative !important;
+            box-sizing: border-box !important;
+        }
+
+        .metric-card .metric-icon {
+            margin-bottom: 0.75rem !important;
+            font-size: 2rem !important;
+            color: var(--primary-color) !important;
+        }
+
+        .metric-card .metric-value {
+            font-size: 2.25rem !important;
+            font-weight: 700 !important;
+            color: var(--primary-color) !important;
+            margin-bottom: 0.5rem !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            max-width: 100% !important;
+            line-height: 1.2 !important;
+        }
+
+        .metric-card #totalPnl,
+        #totalPnl {
+            color: var(--success-color) !important;
+        }
+
+        .metric-card .metric-label {
+            color: var(--text-secondary) !important;
+            font-size: 0.875rem !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.05em !important;
+            margin-bottom: 0.5rem !important;
+            font-weight: 500 !important;
+        }
+
+        .metric-card .metric-change {
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 0.25rem !important;
+            font-size: 0.875rem !important;
+            margin-top: auto !important;
+            position: relative !important;
+            z-index: 1 !important;
+        }
+
+        /* Ensure proper flex layout for metric cards */
+        .metric-card > * {
+            flex-shrink: 0 !important;
+        }
+
+        .metric-card .metric-value {
+            flex-shrink: 0 !important;
+        }
+
+        .metric-card .metric-change {
+            flex-shrink: 0 !important;
+            margin-top: 0.5rem !important;
+        }
+
+        .metric-change.positive {
+            color: var(--success-color) !important;
+            font-weight: 600 !important;
+        }
+
+        .text-success {
+            color: var(--success-color) !important;
+        }
+
+        .test-info {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-info">
+        <h2>Card Sizing Test</h2>
+        <p>This test verifies that all metric cards have consistent sizing and alignment.</p>
+        <p>Expected: All cards should be 180px tall and properly aligned.</p>
+    </div>
+
+    <div class="row">
+        <div class="col-xl-3 col-md-6">
+            <div class="metric-card">
+                <div class="metric-icon">
+                    <i class="fas fa-chart-line"></i>
+                </div>
+                <div class="metric-value text-success" id="totalPnl">
+                    $2,945.24
+                </div>
+                <div class="metric-label">Total P&L</div>
+                <div class="metric-change positive">
+                    <i class="fas fa-arrow-up"></i>
+                    <span id="totalPnlPercentage">+29.45%</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="metric-card">
+                <div class="metric-icon">
+                    <i class="fas fa-exchange-alt"></i>
+                </div>
+                <div class="metric-value" id="totalTrades">
+                    9
+                </div>
+                <div class="metric-label">Total Trades</div>
+                <div class="metric-change positive">
+                    <i class="fas fa-arrow-up"></i>
+                    <span id="tradesToday">+0 today</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="metric-card">
+                <div class="metric-icon">
+                    <i class="fas fa-percentage"></i>
+                </div>
+                <div class="metric-value" id="winRate">
+                    100.0%
+                </div>
+                <div class="metric-label">Win Rate</div>
+                <div class="metric-change positive">
+                    <i class="fas fa-arrow-up"></i>
+                    <span id="winRateChange">+0.0%</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="metric-card">
+                <div class="metric-icon">
+                    <i class="fas fa-clock"></i>
+                </div>
+                <div class="metric-value" id="uptime">
+                    5m 23s
+                </div>
+                <div class="metric-label">Bot Uptime</div>
+                <div class="metric-change positive">
+                    <i class="fas fa-circle"></i>
+                    <span>Active</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Test function to verify card sizes
+        function checkCardSizes() {
+            const cards = document.querySelectorAll('.metric-card');
+            console.log('Card sizing test results:');
+
+            cards.forEach((card, index) => {
+                const rect = card.getBoundingClientRect();
+                console.log(`Card ${index + 1}: ${rect.height}px height`);
+
+                if (rect.height < 170) {
+                    console.error(`Card ${index + 1} is too small: ${rect.height}px`);
+                } else {
+                    console.log(`Card ${index + 1} size OK: ${rect.height}px`);
+                }
+            });
+        }
+
+        // Run test after page loads
+        window.addEventListener('load', function() {
+            setTimeout(checkCardSizes, 100);
+        });
+
+        // Also test after a delay to catch any dynamic changes
+        setTimeout(checkCardSizes, 1000);
+    </script>
+</body>
+</html>

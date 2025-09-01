@@ -28,8 +28,10 @@ class PumpSniperIntegration:
     - Notification routing
     """
     
-    def __init__(self, main_config: Dict):
+    def __init__(self, main_config: Dict, dry_run: bool = True, paper_wallet=None):
         self.main_config = main_config
+        self.dry_run = dry_run
+        self.paper_wallet = paper_wallet
         self.pump_sniper_config = self._load_pump_sniper_config()
         self.orchestrator: Optional[PumpSniperOrchestrator] = None
         self.integration_enabled = False
@@ -66,8 +68,12 @@ class PumpSniperIntegration:
                 logger.info("Pump sniper system disabled in configuration")
                 return False
                 
-            # Initialize orchestrator
-            self.orchestrator = PumpSniperOrchestrator(self.pump_sniper_config)
+            # Initialize orchestrator with paper trading parameters
+            self.orchestrator = PumpSniperOrchestrator(
+                self.pump_sniper_config,
+                dry_run=self.dry_run,
+                paper_wallet=self.paper_wallet
+            )
             
             # Set up notifications
             self.orchestrator.add_notification_callback(self._handle_sniper_notification)
@@ -232,10 +238,13 @@ def get_pump_sniper_integration(main_config: Dict) -> PumpSniperIntegration:
     return _pump_sniper_integration
 
 
-async def start_pump_sniper_system(main_config: Dict) -> bool:
+async def start_pump_sniper_system(main_config: Dict, dry_run: bool = True, paper_wallet=None) -> bool:
     """Start the pump sniper system."""
-    integration = get_pump_sniper_integration(main_config)
-    return await integration.start()
+    global _pump_sniper_integration
+
+    # Create new integration instance with paper trading parameters
+    _pump_sniper_integration = PumpSniperIntegration(main_config, dry_run, paper_wallet)
+    return await _pump_sniper_integration.start()
 
 
 async def stop_pump_sniper_system():

@@ -8,21 +8,21 @@
   --danger-color: #ef4444;
   --warning-color: #f59e0b;
   --info-color: #3b82f6;
-  
+
   --bg-primary: #0f0f23;
   --bg-secondary: #1a1a2e;
   --bg-tertiary: #16213e;
   --bg-card: #1e293b;
   --bg-sidebar: #0f172a;
-  
+
   --text-primary: #f8fafc;
   --text-secondary: #cbd5e1;
   --text-muted: #64748b;
   --text-accent: #00d4aa;
-  
+
   --border-color: #334155;
   --border-light: #475569;
-  
+
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
@@ -520,14 +520,24 @@ body {
   border: 1px solid var(--border-color);
 }
 
-/* Metric Cards */
-.metric-card {
-  background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-tertiary) 100%);
-  border: 1px solid var(--border-color);
-  border-radius: 1rem;
-  padding: 1.5rem;
-  text-align: center;
-  transition: all 0.3s ease;
+/* Metric Cards - High specificity to override Bootstrap */
+.row .col-xl-3 .metric-card,
+.row .col-md-6 .metric-card,
+.row .col-lg-4 .metric-card {
+  background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-tertiary) 100%) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 1rem !important;
+  padding: 1.5rem !important;
+  text-align: center !important;
+  transition: all 0.3s ease !important;
+  min-height: 180px !important;
+  height: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  position: relative !important;
+  box-sizing: border-box !important;
 }
 
 .metric-card:hover {
@@ -535,34 +545,94 @@ body {
   box-shadow: var(--shadow-xl);
 }
 
-.metric-value {
-  font-size: 2.5rem;
-  font-weight: 700;
-  color: var(--primary-color);
-  margin-bottom: 0.5rem;
+.metric-card .metric-icon {
+  margin-bottom: 0.75rem !important;
+  font-size: 2rem !important;
+  color: var(--primary-color) !important;
 }
 
-.metric-label {
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+.metric-card .metric-value {
+  font-size: 2.25rem !important;
+  font-weight: 700 !important;
+  color: var(--primary-color) !important;
+  margin-bottom: 0.5rem !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 100% !important;
+  line-height: 1.2 !important;
 }
 
-.metric-change {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.875rem;
-  margin-top: 0.5rem;
+/* Ensure P&L value maintains success color */
+.metric-card #totalPnl,
+#totalPnl {
+  color: var(--success-color) !important;
+}
+
+.metric-card .metric-label {
+  color: var(--text-secondary) !important;
+  font-size: 0.875rem !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  margin-bottom: 0.5rem !important;
+  font-weight: 500 !important;
+}
+
+.metric-card .metric-change {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.25rem !important;
+  font-size: 0.875rem !important;
+  margin-top: auto !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+/* Ensure proper flex layout for metric cards */
+.metric-card > * {
+  flex-shrink: 0 !important;
+}
+
+.metric-card .metric-value {
+  flex-shrink: 0 !important;
+}
+
+.metric-card .metric-change {
+  flex-shrink: 0 !important;
+  margin-top: 0.5rem !important;
 }
 
 .metric-change.positive {
   color: var(--success-color);
+  font-weight: 600;
 }
 
 .metric-change.negative {
   color: var(--danger-color);
+  font-weight: 600;
+}
+
+.metric-change.info {
+  color: var(--info-color);
+  font-weight: 600;
+}
+
+/* Responsive adjustments for metric cards */
+@media (max-width: 768px) {
+  .row .col-xl-3 .metric-card,
+  .row .col-md-6 .metric-card,
+  .row .col-lg-4 .metric-card {
+    min-height: 160px !important;
+    padding: 1rem !important;
+  }
+
+  .metric-card .metric-value {
+    font-size: 2rem !important;
+  }
+
+  .metric-card .metric-icon {
+    font-size: 1.5rem !important;
+  }
 }
 
 /* Position items and market sell button styles */
@@ -669,3 +739,305 @@ body {
 .toast-error i { color: var(--danger-color); }
 .toast-warning i { color: var(--warning-color); }
 .toast-info i { color: var(--info-color); }
+
+/* Custom text color classes for P&L values */
+.text-success {
+  color: var(--success-color) !important;
+}
+
+.text-danger {
+  color: var(--danger-color) !important;
+}
+
+.text-muted {
+  color: var(--text-muted) !important;
+}
+
+/* Summary value styling for better visibility */
+.summary-value {
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.summary-value.text-success {
+  color: var(--success-color) !important;
+}
+
+.summary-value.text-danger {
+  color: var(--danger-color) !important;
+}
+
+.summary-value.text-muted {
+  color: var(--text-muted) !important;
+}
+
+/* Dashboard specific styles */
+.welcome-section {
+  background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-tertiary) 100%);
+  border: 1px solid var(--border-color);
+  border-radius: 1rem;
+  padding: 2rem;
+  margin-bottom: 2rem;
+}
+
+.welcome-title {
+  color: var(--text-primary);
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.welcome-subtitle {
+  color: var(--text-secondary);
+  font-size: 1.125rem;
+  margin: 0;
+}
+
+.status-display {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.status-display .badge {
+  font-size: 0.875rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+}
+
+.bot-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.position-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  transition: all 0.2s ease;
+}
+
+.position-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.position-symbol {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 1.1rem;
+}
+
+.position-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.position-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.position-row .label {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.position-row .value {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.position-actions {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color);
+  text-align: right;
+}
+
+.no-positions {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 2rem;
+}
+
+.no-positions i {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  display: block;
+}
+
+.recent-trade {
+  background: var(--bg-secondary);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.trade-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.trade-pair {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.trade-details {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.no-trades, .no-allocation {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 2rem;
+}
+
+.no-trades i, .no-allocation i {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  display: block;
+}
+
+.view-all-trades, .model-actions {
+  text-align: center;
+}
+
+.model-status {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.status-label {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.status-value {
+  font-weight: 500;
+}
+
+.strategy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+}
+
+.strategy-item {
+  background: var(--bg-secondary);
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+.strategy-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+}
+
+.strategy-weight {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.weight-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.weight-fill {
+  height: 100%;
+  background: var(--primary-color);
+  transition: width 0.3s ease;
+}
+
+.weight-percentage {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  min-width: 3rem;
+  text-align: right;
+}
+
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.action-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  text-decoration: none;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+}
+
+.action-item:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  transform: translateY(-2px);
+  border-color: var(--primary-color);
+}
+
+.action-item i {
+  font-size: 2rem;
+  color: var(--primary-color);
+}
+
+.action-item span {
+  font-weight: 500;
+}
+
+.wallet-metric {
+  text-align: center;
+  padding: 1rem;
+}
+
+.wallet-label {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+
+.wallet-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.paper-wallet-balance {
+  color: var(--success-color);
+}

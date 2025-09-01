@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Callable
 from enum import Enum
 import json
+import numpy as np
 
 from .pump_detector import PoolAnalysis, PumpSignal
 from .pool_analyzer import PoolMetrics
@@ -105,15 +106,17 @@ class RapidExecutor:
     - Advanced risk controls
     """
     
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, dry_run: bool = True, paper_wallet=None):
         self.config = config
         self.executor_config = config.get("rapid_executor", {})
-        
+        self.dry_run = dry_run
+        self.paper_wallet = paper_wallet
+
         # Execution settings
         self.default_slippage = self.executor_config.get("default_slippage_pct", 0.03)
         self.max_position_size = self.executor_config.get("max_position_size_pct", 0.1)
         self.priority_fee_base = self.executor_config.get("priority_fee_base", 1000)
-        
+
         # DEX preferences (in order of preference)
         self.dex_preferences = self.executor_config.get("dex_preferences", [
             "raydium",
@@ -121,20 +124,20 @@ class RapidExecutor:
             "orca",
             "serum"
         ])
-        
+
         # Position tracking
         self.active_positions: Dict[str, Dict] = {}
         self.execution_queue: asyncio.Queue = asyncio.Queue()
         self.execution_history: List[ExecutionResult] = []
-        
+
         # Performance optimization
         self.route_cache: Dict[str, Tuple] = {}  # Cache for routing information
         self.price_cache: Dict[str, Tuple[float, float]] = {}  # token -> (price, timestamp)
-        
+
         # Execution workers
         self.workers: List[asyncio.Task] = []
         self.running = False
-        
+
         # Statistics
         self.stats = {
             "total_executions": 0,
@@ -465,32 +468,109 @@ class RapidExecutor:
     ) -> ExecutionResult:
         """Execute a single order."""
         try:
-            # Prepare transaction
-            tx_data = await self._prepare_transaction(params, route, priority_fee)
-            
-            # MEV protection
-            if params.mev_protection:
-                tx_data = await self._apply_mev_protection(tx_data)
-                
-            # Submit transaction
-            tx_hash = await self._submit_transaction(tx_data)
-            
-            # Wait for confirmation
-            result = await self._wait_for_confirmation(tx_hash, params.max_execution_time)
-            
-            if result.success:
-                # Create position
-                position_id = await self._create_position(params, result)
-                result.position_id = position_id
-                
-            return result
-            
+            if self.dry_run:
+                # Paper trading mode - simulate execution
+                return await self._execute_paper_trade(params, route)
+            else:
+                # Live trading mode
+                # Prepare transaction
+                tx_data = await self._prepare_transaction(params, route, priority_fee)
+
+                # MEV protection
+                if params.mev_protection:
+                    tx_data = await self._apply_mev_protection(tx_data)
+
+                # Submit transaction
+                tx_hash = await self._submit_transaction(tx_data)
+
+                # Wait for confirmation
+                result = await self._wait_for_confirmation(tx_hash, params.max_execution_time)
+
+                if result.success:
+                    # Create position
+                    position_id = await self._create_position(params, result)
+                    result.position_id = position_id
+
+                return result
+
         except Exception as exc:
             return ExecutionResult(
                 success=False,
                 error_message=str(exc)
             )
             
+    async def _execute_paper_trade(
+        self,
+        params: ExecutionParams,
+        route: Dict
+    ) -> ExecutionResult:
+        """Execute a paper trade simulation."""
+        try:
+            # Simulate execution time
+            execution_time = 0.1 + (params.urgency_score * 0.5)  # 0.1-0.6 seconds
+            await asyncio.sleep(execution_time)
+
+            # Get simulated price from route or use fallback
+            base_price = route.get("price", 0.001) if route else 0.001
+
+            # Simulate slippage
+            slippage_factor = 1.0 + (params.max_slippage_pct * (0.5 - np.random.random()))  # Random slippage within bounds
+            executed_price = base_price * slippage_factor
+            slippage_pct = abs(executed_price - base_price) / base_price
+
+            # Calculate executed amounts
+            executed_amount = params.amount_sol
+            amount_tokens = executed_amount / executed_price
+
+            # Create simulated transaction hash
+            tx_hash = f"paper_tx_{int(time.time() * 1000)}_{np.random.randint(1000, 9999)}"
+
+            # Update paper wallet if available
+            position_id = None
+            if self.paper_wallet:
+                try:
+                    # For buy orders, we need to simulate the token pair
+                    symbol = f"{params.token_mint[:8]}.../SOL"  # Simplified symbol for paper wallet
+
+                    if params.side == "buy":
+                        # Open a buy position in paper wallet
+                        trade_id = self.paper_wallet.open(
+                            symbol,
+                            "buy",
+                            executed_amount,
+                            executed_price
+                        )
+                        position_id = trade_id
+                        logger.info(f"Paper buy executed: {executed_amount:.4f} SOL @ ${executed_price:.6f}, slippage: {slippage_pct:.2%}")
+                    else:
+                        # For sell orders, close existing position
+                        # This would need more complex logic for position management
+                        logger.info(f"Paper sell executed: {executed_amount:.4f} SOL @ ${executed_price:.6f}, slippage: {slippage_pct:.2%}")
+                except Exception as e:
+                    logger.warning(f"Paper wallet update failed: {e}")
+
+            return ExecutionResult(
+                success=True,
+                transaction_hash=tx_hash,
+                executed_amount=executed_amount,
+                executed_price=executed_price,
+                slippage_pct=slippage_pct,
+                execution_time=execution_time,
+                amount_tokens=amount_tokens,
+                position_id=position_id,
+                gas_cost=0.0001,  # Simulated gas cost
+                block_height=100000000 + int(time.time()),  # Simulated block height
+                execution_mode="paper"
+            )
+
+        except Exception as exc:
+            logger.error(f"Paper trade execution failed: {exc}")
+            return ExecutionResult(
+                success=False,
+                error_message=str(exc),
+                execution_time=time.time()
+            )
+
     async def _execute_split_order(
         self,
         params: ExecutionParams,
@@ -501,7 +581,7 @@ class RapidExecutor:
         try:
             split_amount = params.amount_sol / params.split_count
             results = []
-            
+
             for i in range(params.split_count):
                 # Create split parameters
                 split_params = ExecutionParams(
@@ -512,15 +592,20 @@ class RapidExecutor:
                     mode=params.mode,
                     order_type=params.order_type
                 )
-                
+
                 # Execute split
-                result = await self._execute_single_order(split_params, route, priority_fee)
+                if self.dry_run:
+                    # Paper trading split
+                    result = await self._execute_paper_trade(split_params, route)
+                else:
+                    # Live trading split
+                    result = await self._execute_single_order(split_params, route, priority_fee)
                 results.append(result)
-                
-                # Small delay between splits to avoid MEV
+
+                # Small delay between splits to avoid MEV (or simulate timing)
                 if i < params.split_count - 1:
                     await asyncio.sleep(0.1)
-                    
+
             # Aggregate results
             return self._aggregate_split_results(results)
             
@@ -546,8 +631,11 @@ class RapidExecutor:
         
     async def _check_balance(self, required_sol: float) -> bool:
         """Check if account has sufficient balance."""
+        if self.dry_run and self.paper_wallet:
+            # Check paper wallet balance
+            return self.paper_wallet.balance >= required_sol
         # This would integrate with your wallet balance checking
-        # Placeholder implementation
+        # Placeholder implementation for live trading
         return True
         
     async def _validate_token(self, token_mint: str) -> bool:

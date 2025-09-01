@@ -11,6 +11,7 @@ except Exception:  # pragma: no cover - make Google Sheets optional
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 import fcntl
 import os
+import shutil
 
 
 logger = setup_logger(__name__, LOG_DIR / "execution.log")
@@ -60,7 +61,16 @@ def log_trade(order: Dict, is_stop: bool = False) -> None:
 
         df = pd.DataFrame([record])
         log_file = LOG_DIR / "trades.csv"
+        backup_file = LOG_DIR / "trades_backup.csv"
         log_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Create backup of existing file before writing
+        if log_file.exists() and log_file.stat().st_size > 0:
+            try:
+                shutil.copy2(log_file, backup_file)
+                logger.debug(f"Created backup of trades.csv: {backup_file}")
+            except Exception as backup_error:
+                logger.warning(f"Failed to create backup: {backup_error}")
         
         # Use file locking to prevent concurrent access issues
         try:
@@ -130,3 +140,112 @@ def log_trade(order: Dict, is_stop: bool = False) -> None:
             logger.info(f"Basic trade info logged as fallback: {basic_record}")
         except Exception as fallback_error:
             logger.error(f"Fallback logging also failed: {fallback_error}")
+
+
+def recover_trades_from_backup() -> bool:
+    """Attempt to recover trades from backup file."""
+    log_file = LOG_DIR / "trades.csv"
+    backup_file = LOG_DIR / "trades_backup.csv"
+    
+    if backup_file.exists() and backup_file.stat().st_size > 0:
+        try:
+            shutil.copy2(backup_file, log_file)
+            logger.info(f"Recovered trades from backup: {backup_file}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to recover from backup: {e}")
+            return False
+    return False
+
+
+def validate_trades_file() -> bool:
+    """Validate the trades.csv file and attempt to fix issues."""
+    log_file = LOG_DIR / "trades.csv"
+    
+    if not log_file.exists():
+        logger.warning("trades.csv file does not exist")
+        return False
+    
+    try:
+        # Try to read the file to check for corruption
+        df = pd.read_csv(log_file)
+        logger.info(f"trades.csv is valid, contains {len(df)} trades")
+        return True
+    except Exception as e:
+        logger.error(f"trades.csv appears to be corrupted: {e}")
+        # Try to recover from backup
+        if recover_trades_from_backup():
+            return True
+        return False
+
+
+def periodic_backup_and_validate():
+    """Periodic backup and validation of trades file."""
+    log_file = LOG_DIR / "trades.csv"
+    backup_file = LOG_DIR / "trades_backup.csv"
+    
+    if not log_file.exists():
+        logger.warning("trades.csv does not exist for backup")
+        return False
+    
+    try:
+        # Create timestamped backup
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamped_backup = LOG_DIR / f"trades_backup_{timestamp}.csv"
+        
+        # Create backup
+        shutil.copy2(log_file, timestamped_backup)
+        shutil.copy2(log_file, backup_file)  # Also update the main backup
+        
+        # Validate the file
+        df = pd.read_csv(log_file)
+        logger.info(f"Periodic backup created: {timestamped_backup} ({len(df)} trades)")
+        
+        # Keep only the last 5 timestamped backups
+        backup_files = sorted(LOG_DIR.glob("trades_backup_*.csv"))
+        if len(backup_files) > 5:
+            for old_backup in backup_files[:-5]:
+                old_backup.unlink()
+                logger.debug(f"Removed old backup: {old_backup}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Periodic backup failed: {e}")
+        return False
+
+
+def get_trade_summary() -> Dict:
+    """Get a summary of trading activity."""
+    log_file = LOG_DIR / "trades.csv"
+    
+    if not log_file.exists():
+        return {"error": "trades.csv not found"}
+    
+    try:
+        df = pd.read_csv(log_file)
+        
+        if df.empty:
+            return {"message": "No trades found"}
+        
+        # Convert timestamp to datetime
+        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+        
+        summary = {
+            "total_trades": len(df),
+            "date_range": {
+                "start": df['timestamp'].min().isoformat() if not df['timestamp'].isna().all() else None,
+                "end": df['timestamp'].max().isoformat() if not df['timestamp'].isna().all() else None
+            },
+            "symbols": df['symbol'].unique().tolist(),
+            "total_volume": float(df['amount'].sum()),
+            "buy_trades": len(df[df['side'] == 'buy']),
+            "sell_trades": len(df[df['side'] == 'sell']),
+            "file_size_bytes": log_file.stat().st_size,
+            "last_modified": datetime.fromtimestamp(log_file.stat().st_mtime).isoformat()
+        }
+        
+        return summary
+        
+    except Exception as e:
+        return {"error": f"Failed to read trades.csv: {e}"}

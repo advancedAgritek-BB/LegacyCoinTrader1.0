@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 from uuid import uuid4
 import logging
+import yaml
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ class PaperWallet:
         self.allow_short = allow_short
         self.total_trades = 0
         self.winning_trades = 0
+        self.state_file = Path("crypto_bot/logs/paper_wallet_state.yaml")
 
     # ------------------------------------------------------------------
     # Properties
@@ -189,6 +192,10 @@ class PaperWallet:
             }
 
         self.total_trades += 1
+        
+        # Save state after opening position
+        self.save_state()
+        
         return trade_id
 
     def close(self, *args) -> float:
@@ -281,6 +288,9 @@ class PaperWallet:
             self.positions[identifier] = pos
             logger.info(f"Position {identifier} partially closed, remaining: {pos[key]}")
 
+        # Save state after closing position
+        self.save_state()
+
         return pnl
 
     def unrealized(self, *args) -> float:
@@ -372,6 +382,53 @@ class PaperWallet:
         self.total_trades = 0
         self.winning_trades = 0
         logger.info(f"Wallet reset to balance: ${self.balance:.2f}")
+
+    def save_state(self) -> None:
+        """Save current wallet state to file."""
+        try:
+            state = {
+                'balance': self.balance,
+                'initial_balance': self.initial_balance,
+                'realized_pnl': self.realized_pnl,
+                'total_trades': self.total_trades,
+                'winning_trades': self.winning_trades,
+                'positions': self.positions
+            }
+            
+            # Ensure the directory exists
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(self.state_file, 'w') as f:
+                yaml.dump(state, f, default_flow_style=False)
+            
+            logger.info(f"Saved paper wallet state: balance=${self.balance:.2f}, realized_pnl=${self.realized_pnl:.2f}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save paper wallet state: {e}")
+
+    def load_state(self) -> bool:
+        """Load wallet state from file. Returns True if successful."""
+        try:
+            if not self.state_file.exists():
+                logger.info("No saved paper wallet state found, using initial values")
+                return False
+            
+            with open(self.state_file, 'r') as f:
+                state = yaml.safe_load(f) or {}
+            
+            self.balance = state.get('balance', self.balance)
+            self.initial_balance = state.get('initial_balance', self.initial_balance)
+            self.realized_pnl = state.get('realized_pnl', 0.0)
+            self.total_trades = state.get('total_trades', 0)
+            self.winning_trades = state.get('winning_trades', 0)
+            self.positions = state.get('positions', {})
+            
+            logger.info(f"Loaded paper wallet state: balance=${self.balance:.2f}, realized_pnl=${self.realized_pnl:.2f}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to load paper wallet state: {e}")
+            return False
 
     def _get_current_time(self) -> str:
         """Get current timestamp for position tracking."""

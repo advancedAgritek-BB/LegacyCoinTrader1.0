@@ -225,19 +225,7 @@ function updateBotStatus() {
         .catch(error => console.error('Error updating bot status:', error));
 }
 
-// Update metrics
-function updateMetrics() {
-    // This would fetch real-time metrics from your backend
-    // For now, we'll just simulate some updates
-    const metricValues = document.querySelectorAll('.metric-value');
-    metricValues.forEach(metric => {
-        // Add a subtle animation to show the metric is updating
-        metric.style.transform = 'scale(1.05)';
-        setTimeout(() => {
-            metric.style.transform = 'scale(1)';
-        }, 200);
-    });
-}
+// Update metrics function removed to prevent layout conflicts
 
 // Update dashboard metrics
 function updateDashboardMetrics() {
@@ -323,18 +311,98 @@ function updateOpenPositions() {
 
 // Update performance metrics
 function updatePerformanceMetrics(performance) {
-    // Update P&L
+    // Update P&L - use wallet PnL instead of performance PnL
     const totalPnl = document.getElementById('totalPnl');
-    if (totalPnl && performance.total_pnl !== undefined) {
-        totalPnl.textContent = formatCurrency(performance.total_pnl);
+
+    if (totalPnl) {
+        // Get PnL from wallet calculation instead of performance
+        fetch('/api/wallet-pnl')
+            .then(response => {
+                if (!response.ok) {
+                    console.error('Wallet PnL API error:', response.status);
+                    return null;
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (!data || data.error) {
+                    console.error('Error fetching wallet PnL:', data?.error || 'No data');
+                    return;
+                }
+
+                // Update total P&L
+                if (data.total_pnl !== undefined && data.total_pnl !== null) {
+                    const formattedPnl = formatCurrency(data.total_pnl);
+                    totalPnl.textContent = formattedPnl;
+                    // Preserve existing classes while updating color
+                    totalPnl.classList.remove('text-success', 'text-danger');
+                    totalPnl.classList.add(data.total_pnl >= 0 ? 'text-success' : 'text-danger');
+                } else {
+                    console.warn('Total P&L is undefined or null');
+                }
+
+                // Update P&L percentage
+                const totalPnlPercentage = document.getElementById('totalPnlPercentage');
+                if (totalPnlPercentage && data.pnl_percentage !== undefined && data.pnl_percentage !== null) {
+                    const percentage = data.pnl_percentage;
+                    const sign = percentage >= 0 ? '+' : '';
+                    totalPnlPercentage.textContent = `${sign}${percentage.toFixed(2)}%`;
+
+                    // Update the parent div class - preserve existing classes
+                    const metricChange = totalPnlPercentage.parentElement;
+                    if (metricChange) {
+                        metricChange.classList.remove('positive', 'negative');
+                        metricChange.classList.add(percentage >= 0 ? 'positive' : 'negative');
+                    }
+                }
+
+                // Update wallet balance displays - use total P&L instead of just unrealized
+                const walletPnl = document.getElementById('walletPnl');
+                if (walletPnl && data.total_pnl !== undefined && data.total_pnl !== null) {
+                    walletPnl.textContent = formatCurrency(data.total_pnl);
+                    // Preserve existing classes while updating color
+                    walletPnl.classList.remove('text-success', 'text-danger');
+                    walletPnl.classList.add(data.total_pnl >= 0 ? 'text-success' : 'text-danger');
+                }
+
+                const currentBalance = document.getElementById('currentWalletBalance');
+                if (currentBalance && data.current_balance !== undefined && data.current_balance !== null) {
+                    currentBalance.textContent = formatCurrency(data.current_balance);
+                }
+
+                // Update initial balance display
+                const initialBalance = document.getElementById('initialBalance');
+                if (initialBalance && data.initial_balance !== undefined && data.initial_balance !== null) {
+                    initialBalance.textContent = formatCurrency(data.initial_balance);
+                }
+
+            })
+            .catch(error => {
+                console.error('Error updating wallet P&L:', error);
+                // Fallback: show default values - preserve existing classes
+                if (totalPnl) {
+                    totalPnl.textContent = '$0.00';
+                    totalPnl.classList.remove('text-success', 'text-danger');
+                    totalPnl.classList.add('text-muted');
+                }
+            });
     }
-    
-    // Update total trades
+
+    // Update total trades (showing today's trades)
     const totalTrades = document.getElementById('totalTrades');
-    if (totalTrades && performance.total_trades !== undefined) {
-        totalTrades.textContent = performance.total_trades;
+    if (totalTrades && performance.trades_today !== undefined) {
+        totalTrades.textContent = performance.trades_today;
     }
-    
+
+    // Update trades today indicator
+    const tradesToday = document.getElementById('tradesToday');
+    if (tradesToday && performance.total_trades !== undefined && performance.trades_today !== undefined) {
+        const totalAllTime = performance.total_trades;
+        const totalToday = performance.trades_today;
+        const change = totalToday > 0 ? `+${totalToday} today` : '+0 today';
+        tradesToday.textContent = change;
+    }
+
     // Update win rate
     const winRate = document.getElementById('winRate');
     if (winRate && performance.win_rate !== undefined) {

@@ -45,9 +45,10 @@ def log_position(
         Realized profit or loss to log instead of computing from prices.
     """
     if pnl is None:
-        pnl = (current_price - entry_price) * amount
-        if side == "sell":
-            pnl = -pnl
+        if side == "buy":
+            pnl = (current_price - entry_price) * amount
+        else:  # sell/short
+            pnl = (entry_price - current_price) * amount
     status = "positive" if pnl >= 0 else "negative"
     logger.info(
         "Active %s %s %.4f entry %.6f current %.6f pnl $%.2f (%s) balance $%.2f",
