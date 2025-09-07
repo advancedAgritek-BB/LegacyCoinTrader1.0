@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chart Rendering Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ccc; }
+        canvas { border: 1px solid #333; margin: 10px 0; }
+        .debug { background: #f5f5f5; padding: 10px; margin: 10px 0; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <h1>Chart Rendering Test</h1>
+    
+    <div class="test-section">
+        <h2>Test 1: Basic Canvas Drawing</h2>
+        <canvas id="test-canvas" width="300" height="100"></canvas>
+        <div id="test1-result" class="debug"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 2: Mock Data Chart</h2>
+        <canvas id="mock-chart" width="300" height="100"></canvas>
+        <div id="test2-result" class="debug"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 3: API Data Fetch (if server running)</h2>
+        <canvas id="api-chart" width="300" height="100"></canvas>
+        <div id="test3-result" class="debug"></div>
+    </div>
+
+    <script>
+        // Test 1: Basic canvas functionality
+        function testBasicCanvas() {
+            const canvas = document.getElementById('test-canvas');
+            const ctx = canvas.getContext('2d');
+            const result = document.getElementById('test1-result');
+            
+            try {
+                // Clear canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw a simple line
+                ctx.strokeStyle = '#00ff88';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(10, 50);
+                ctx.lineTo(290, 50);
+                ctx.stroke();
+                
+                result.innerHTML = '✅ Basic canvas drawing works';
+            } catch (error) {
+                result.innerHTML = '❌ Canvas error: ' + error.message;
+            }
+        }
+        
+        // Test 2: Mock data chart
+        function testMockChart() {
+            const canvas = document.getElementById('mock-chart');
+            const ctx = canvas.getContext('2d');
+            const result = document.getElementById('test2-result');
+            
+            try {
+                // Mock price data
+                const prices = [50000, 50100, 49900, 50200, 50150, 50300, 50250, 50400];
+                const entryPrice = 50000;
+                
+                // Clear canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Calculate bounds
+                const minPrice = Math.min(...prices, entryPrice);
+                const maxPrice = Math.max(...prices, entryPrice);
+                const priceRange = maxPrice - minPrice;
+                
+                if (priceRange === 0) {
+                    result.innerHTML = '❌ No price range';
+                    return;
+                }
+                
+                // Draw price line
+                ctx.strokeStyle = '#00ff88';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                
+                for (let i = 0; i < prices.length; i++) {
+                    const x = 15 + (i / (prices.length - 1)) * (canvas.width - 30);
+                    const y = canvas.height - 15 - ((prices[i] - minPrice) / priceRange) * (canvas.height - 30);
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+                
+                // Draw entry line
+                const entryY = canvas.height - 15 - ((entryPrice - minPrice) / priceRange) * (canvas.height - 30);
+                ctx.strokeStyle = '#9966ff';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(15, entryY);
+                ctx.lineTo(canvas.width - 15, entryY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+                result.innerHTML = `✅ Mock chart drawn with ${prices.length} data points<br>Price range: $${minPrice.toFixed(2)} - $${maxPrice.toFixed(2)}`;
+            } catch (error) {
+                result.innerHTML = '❌ Mock chart error: ' + error.message;
+            }
+        }
+        
+        // Test 3: API data fetch
+        async function testApiChart() {
+            const canvas = document.getElementById('api-chart');
+            const ctx = canvas.getContext('2d');
+            const result = document.getElementById('test3-result');
+            
+            try {
+                result.innerHTML = 'Testing API connection...';
+                
+                const response = await fetch('/api/candle-data?symbol=BTC/USD&limit=10&interval=5m');
+                
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                if (!data.candles || data.candles.length === 0) {
+                    result.innerHTML = '❌ No candle data received';
+                    return;
+                }
+                
+                // Convert to prices
+                const prices = data.candles.map(candle => parseFloat(candle.close));
+                const entryPrice = 50000; // Mock entry price
+                
+                // Clear canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Calculate bounds
+                const minPrice = Math.min(...prices, entryPrice);
+                const maxPrice = Math.max(...prices, entryPrice);
+                const priceRange = maxPrice - minPrice;
+                
+                if (priceRange === 0) {
+                    result.innerHTML = '❌ No price range in API data';
+                    return;
+                }
+                
+                // Draw price line
+                ctx.strokeStyle = '#00ff88';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                
+                for (let i = 0; i < prices.length; i++) {
+                    const x = 15 + (i / (prices.length - 1)) * (canvas.width - 30);
+                    const y = canvas.height - 15 - ((prices[i] - minPrice) / priceRange) * (canvas.height - 30);
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+                
+                // Draw entry line
+                const entryY = canvas.height - 15 - ((entryPrice - minPrice) / priceRange) * (canvas.height - 30);
+                ctx.strokeStyle = '#9966ff';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(15, entryY);
+                ctx.lineTo(canvas.width - 15, entryY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+                result.innerHTML = `✅ API chart drawn with ${prices.length} real data points<br>Price range: $${minPrice.toFixed(2)} - $${maxPrice.toFixed(2)}<br>First price: $${prices[0].toFixed(2)}, Last price: $${prices[prices.length-1].toFixed(2)}`;
+                
+            } catch (error) {
+                result.innerHTML = '❌ API error: ' + error.message;
+            }
+        }
+        
+        // Run all tests when page loads
+        window.addEventListener('load', function() {
+            testBasicCanvas();
+            testMockChart();
+            testApiChart();
+        });
+    </script>
+</body>
+</html>

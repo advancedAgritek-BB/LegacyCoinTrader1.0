@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LegacyCoinTrader - Modern Design Test</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="static/styles.css">
+</head>
+<body class="dark-theme">
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <i class="fas fa-chart-line"></i>
+                <span>LegacyCoinTrader</span>
+            </div>
+        </div>
+        
+        <nav class="sidebar-nav">
+            <ul class="nav-list">
+                <li class="nav-item">
+                    <a href="#" class="nav-link active">
+                        <i class="fas fa-home"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link">
+                        <i class="fas fa-exchange-alt"></i>
+                        <span>Trades</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link">
+                        <i class="fas fa-chart-bar"></i>
+                        <span>Analytics</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link">
+                        <i class="fas fa-cogs"></i>
+                        <span>Settings</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+        
+        <div class="sidebar-footer">
+            <div class="bot-status">
+                <div class="status-indicator online"></div>
+                <span>Bot Online</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Header -->
+        <header class="top-header">
+            <div class="header-left">
+                <button class="sidebar-toggle">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <h1 class="page-title">Dashboard</h1>
+            </div>
+            <div class="header-right">
+                <div class="header-stats">
+                    <div class="stat-item">
+                        <i class="fas fa-clock"></i>
+                        <span>5m 23s</span>
+                    </div>
+                    <div class="stat-item">
+                        <i class="fas fa-cog"></i>
+                        <span>Live</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Page Content -->
+        <main class="page-content">
+            <div class="dashboard fade-in">
+                <!-- Welcome Section -->
+                <div class="welcome-section mb-4">
+                    <div class="row">
+                        <div class="col-lg-8">
+                            <h2 class="welcome-title">Welcome to LegacyCoinTrader</h2>
+                            <p class="welcome-subtitle">Professional cryptocurrency trading automation platform with modern elegant design</p>
+                        </div>
+                        <div class="col-lg-4">
+                            <div class="bot-controls">
+                                <div class="status-display">
+                                    <span class="badge bg-info">
+                                        <i class="fas fa-cog"></i> LIVE
+                                    </span>
+                                    <span class="badge bg-success">
+                                        <i class="fas fa-wallet"></i> $12,450.00
+                                    </span>
+                                </div>
+                                <button class="btn btn-success btn-sm">
+                                    <i class="fas fa-play"></i> Start Bot
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Metrics Grid -->
+                <div class="metrics-grid">
+                    <div class="metric-card ai-card">
+                        <div class="metric-icon">
+                            <i class="fas fa-dollar-sign"></i>
+                        </div>
+                        <div class="metric-content">
+                            <h3>Total P&L</h3>
+                            <div class="metric-value ai-gradient">$2,945.24</div>
+                            <div class="metric-change positive">
+                                <i class="fas fa-arrow-up"></i>
+                                <span>+29.45%</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card ai-card">
+                        <div class="metric-icon">
+                            <i class="fas fa-exchange-alt"></i>
+                        </div>
+                        <div class="metric-content">
+                            <h3>Total Trades</h3>
+                            <div class="metric-value ai-gradient">147</div>
+                            <div class="metric-change positive">
+                                <i class="fas fa-arrow-up"></i>
+                                <span>+12 today</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card ai-card">
+                        <div class="metric-icon">
+                            <i class="fas fa-percentage"></i>
+                        </div>
+                        <div class="metric-content">
+                            <h3>Win Rate</h3>
+                            <div class="metric-value ai-gradient">87.3%</div>
+                            <div class="metric-change positive">
+                                <i class="fas fa-arrow-up"></i>
+                                <span>+2.1%</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card ai-card">
+                        <div class="metric-icon">
+                            <i class="fas fa-chart-line"></i>
+                        </div>
+                        <div class="metric-content">
+                            <h3>Active Positions</h3>
+                            <div class="metric-value ai-gradient">5</div>
+                            <div class="metric-change info">
+                                <i class="fas fa-circle"></i>
+                                <span>Monitoring</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Position Cards -->
+                <div class="positions-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-chart-line"></i> Open Positions</h2>
+                        <div class="section-actions">
+                            <span class="position-count">5 positions</span>
+                            <button class="btn btn-primary">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="positions-grid">
+                        <!-- Sample Position Card -->
+                        <div class="position-card positive">
+                            <div class="position-header">
+                                <div class="position-info">
+                                    <div class="position-symbol positive">BTC/USD</div>
+                                    <div class="position-type long">LONG</div>
+                                </div>
+                                <div class="position-pnl">
+                                    <div class="pnl-percentage positive">+12.45%</div>
+                                    <div class="pnl-value positive">+$1,245.50</div>
+                                </div>
+                            </div>
+
+                            <div class="position-metrics">
+                                <div class="metrics-row">
+                                    <div class="metric-column">
+                                        <div class="metric-item">
+                                            <div class="metric-label">Entry Price</div>
+                                            <div class="metric-value">$42,350.00</div>
+                                        </div>
+                                        <div class="metric-item">
+                                            <div class="metric-label">Position Size</div>
+                                            <div class="metric-value">0.25 BTC</div>
+                                        </div>
+                                    </div>
+                                    <div class="metric-column">
+                                        <div class="metric-item">
+                                            <div class="metric-label">Current Price</div>
+                                            <div class="metric-value positive">$47,625.00</div>
+                                        </div>
+                                        <div class="metric-item">
+                                            <div class="metric-label">Current Value</div>
+                                            <div class="metric-value positive">$11,906.25</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="position-chart">
+                                <div class="chart-container">
+                                    <div class="chart-loading">
+                                        <div class="loading-spinner"></div>
+                                        <span>Loading chart...</span>
+                                    </div>
+                                </div>
+                                <div class="chart-info">
+                                    <div class="trend-indicator positive">UPWARD</div>
+                                    <div class="r-squared">R²: 85.2%</div>
+                                </div>
+                            </div>
+
+                            <div class="position-actions">
+                                <button class="btn btn-danger">
+                                    <i class="fas fa-sell"></i> Market Sell
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Sample Negative Position Card -->
+                        <div class="position-card negative">
+                            <div class="position-header">
+                                <div class="position-info">
+                                    <div class="position-symbol negative">ETH/USD</div>
+                                    <div class="position-type short">SHORT</div>
+                                </div>
+                                <div class="position-pnl">
+                                    <div class="pnl-percentage negative">-5.23%</div>
+                                    <div class="pnl-value negative">-$156.90</div>
+                                </div>
+                            </div>
+
+                            <div class="position-metrics">
+                                <div class="metrics-row">
+                                    <div class="metric-column">
+                                        <div class="metric-item">
+                                            <div class="metric-label">Entry Price</div>
+                                            <div class="metric-value">$3,200.00</div>
+                                        </div>
+                                        <div class="metric-item">
+                                            <div class="metric-label">Position Size</div>
+                                            <div class="metric-value">1.0 ETH</div>
+                                        </div>
+                                    </div>
+                                    <div class="metric-column">
+                                        <div class="metric-item">
+                                            <div class="metric-label">Current Price</div>
+                                            <div class="metric-value negative">$3,367.40</div>
+                                        </div>
+                                        <div class="metric-item">
+                                            <div class="metric-label">Current Value</div>
+                                            <div class="metric-value negative">$3,043.10</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="position-chart">
+                                <div class="chart-container">
+                                    <div class="chart-loading">
+                                        <div class="loading-spinner"></div>
+                                        <span>Loading chart...</span>
+                                    </div>
+                                </div>
+                                <div class="chart-info">
+                                    <div class="trend-indicator negative">DOWNWARD</div>
+                                    <div class="r-squared">R²: 72.8%</div>
+                                </div>
+                            </div>
+
+                            <div class="position-actions">
+                                <button class="btn btn-danger">
+                                    <i class="fas fa-sell"></i> Market Sell
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title">
+                                    <i class="fas fa-bolt"></i>
+                                    Quick Actions
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="quick-actions">
+                                    <a href="#" class="action-item">
+                                        <i class="fas fa-terminal"></i>
+                                        <span>CLI Access</span>
+                                    </a>
+                                    <a href="#" class="action-item">
+                                        <i class="fas fa-file-alt"></i>
+                                        <span>View Logs</span>
+                                    </a>
+                                    <a href="#" class="action-item">
+                                        <i class="fas fa-search"></i>
+                                        <span>Market Scans</span>
+                                    </a>
+                                    <a href="#" class="action-item">
+                                        <i class="fas fa-chart-bar"></i>
+                                        <span>Analytics</span>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Simple mobile sidebar toggle
+        document.querySelector('.sidebar-toggle')?.addEventListener('click', function() {
+            document.querySelector('.sidebar').classList.toggle('show');
+        });
+
+        // Demo: Add some interactivity
+        document.querySelectorAll('.metric-card').forEach(card => {
+            card.addEventListener('mouseenter', function() {
+                this.style.transform = 'translateY(-6px) scale(1.02)';
+            });
+            card.addEventListener('mouseleave', function() {
+                this.style.transform = '';
+            });
+        });
+    </script>
+</body>
+</html>

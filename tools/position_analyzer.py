@@ -21,21 +21,70 @@ TRADES_FILE = LOGS_DIR / "trades.csv"
 
 
 def analyze_positions():
-    """Analyze current positions and P&L status."""
+    """Analyze current positions and P&L status using TradeManager as primary source."""
+    # Try to analyze from TradeManager first
+    try:
+        from crypto_bot.utils.trade_manager import get_trade_manager
+        trade_manager = get_trade_manager()
+
+        positions = trade_manager.get_all_positions()
+        if positions:
+            logger.info(f"Analyzing {len(positions)} positions from TradeManager")
+            logger.info("\n📊 POSITION ANALYSIS (TradeManager)")
+            logger.info("=" * 50)
+
+            total_realized_pnl = float(trade_manager.total_realized_pnl)
+            total_unrealized_pnl = 0.0
+            total_open_positions = 0
+
+            for pos in positions:
+                if pos.is_open:
+                    total_open_positions += 1
+                    current_price = float(trade_manager.price_cache.get(pos.symbol, pos.average_price))
+
+                    if current_price > 0:
+                        from decimal import Decimal
+                        pnl, pnl_pct = pos.calculate_unrealized_pnl(Decimal(str(current_price)))
+                        total_unrealized_pnl += float(pnl)
+
+                        logger.info(f"Symbol: {pos.symbol}")
+                        logger.info(f"  Side: {pos.side}")
+                        logger.info(f"  Amount: {pos.total_amount}")
+                        logger.info(f"  Entry Price: ${pos.average_price}")
+                        logger.info(f"  Current Price: ${current_price}")
+                        logger.info(f"  P&L: ${float(pnl):.2f} ({float(pnl_pct):.2f}%)")
+                        logger.info(f"  Entry Time: {pos.entry_time}")
+                        logger.info("")
+
+            logger.info("SUMMARY:")
+            logger.info(f"  Open Positions: {total_open_positions}")
+            logger.info(f"  Realized P&L: ${total_realized_pnl:.2f}")
+            logger.info(f"  Unrealized P&L: ${total_unrealized_pnl:.2f}")
+            logger.info(f"  Total P&L: ${total_realized_pnl + total_unrealized_pnl:.2f}")
+
+            return positions
+
+    except Exception as e:
+        logger.warning(f"Failed to analyze from TradeManager: {e}, falling back to CSV")
+
+    # Fallback to CSV analysis (deprecated)
+    logger.info("\n📄 FALLBACK: POSITION ANALYSIS FROM CSV (DEPRECATED)")
+    logger.info("=" * 50)
+
     if not TRADES_FILE.exists():
         logger.error(f"Trades file not found: {TRADES_FILE}")
         return None
-    
+
     try:
         df = pd.read_csv(TRADES_FILE)
         logger.info(f"Loaded {len(df)} trades from {TRADES_FILE}")
-        
+
         if df.empty:
             logger.info("No trades found")
             return None
-        
+
         # Analyze each trade
-        logger.info("\n📊 POSITION ANALYSIS")
+        logger.info("\n📊 POSITION ANALYSIS FROM CSV")
         logger.info("=" * 50)
         
         open_positions = {}

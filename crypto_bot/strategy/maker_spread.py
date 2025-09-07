@@ -151,8 +151,38 @@ def generate_signal(
     timeframe: Optional[str] = None,
     **kwargs,
 ) -> Tuple[float, str]:
-    """Maker spread signal generator - placeholder for integration."""
-    return 0.0, "none"
+    """Maker spread signal generator for sideways markets."""
+    if df.empty or len(df) < 20:
+        return 0.0, "none"
+
+    # Simple spread-based signal for sideways markets
+    # Calculate recent volatility to ensure we're in a ranging market
+    returns = df["close"].pct_change()
+    volatility = returns.rolling(20).std().iloc[-1]
+
+    # In sideways markets, we want low volatility
+    if pd.isna(volatility) or volatility > 0.02:  # More than 2% daily volatility
+        return 0.0, "none"
+
+    # Check if price is within a reasonable range (not trending strongly)
+    sma_20 = df["close"].rolling(20).mean().iloc[-1]
+    current_price = df["close"].iloc[-1]
+    deviation = abs(current_price - sma_20) / sma_20
+
+    # Price should be within 3% of 20-period moving average
+    if deviation > 0.03:
+        return 0.0, "none"
+
+    # Generate a moderate confidence signal for maker spread
+    score = 0.6
+
+    # Boost score if volume is present and reasonable
+    if "volume" in df.columns:
+        vol_sma = df["volume"].rolling(20).mean().iloc[-1]
+        if not pd.isna(vol_sma) and vol_sma > 0:
+            score = min(score * 1.2, 0.8)  # Boost but cap at 0.8
+
+    return score, "maker_spread"
 
 
 class regime_filter:

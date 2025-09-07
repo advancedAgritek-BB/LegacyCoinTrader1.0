@@ -91,7 +91,19 @@ def safe_strategy_execution(
             logger.warning(f"Strategy received {type(df)} instead of DataFrame, converting...")
             try:
                 if isinstance(df, np.ndarray):
-                    df = pd.DataFrame(df)
+                    # Convert numpy array to DataFrame with proper column names
+                    if df.ndim == 2:
+                        # 2D array - assume OHLCV data
+                        if df.shape[1] >= 5:
+                            df = pd.DataFrame(df, columns=['open', 'high', 'low', 'close', 'volume'])
+                        else:
+                            df = pd.DataFrame(df, columns=['close'] + [f'col_{i}' for i in range(df.shape[1]-1)])
+                    elif df.ndim == 1:
+                        # 1D array - assume it's a series
+                        df = pd.DataFrame({'close': df})
+                    else:
+                        logger.error(f"Cannot handle numpy array with {df.ndim} dimensions")
+                        return 0.0, "none"
                 else:
                     logger.error(f"Cannot convert {type(df)} to DataFrame")
                     return 0.0, "none"

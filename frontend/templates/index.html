@@ -23,21 +23,21 @@
           
           <!-- Bot Control Buttons -->
           {% if running %}
-            <button class="btn btn-warning btn-sm me-2" onclick="pauseBot()" title="Pause bot temporarily">
+            <button class="btn btn-warning btn-sm me-2" id="btnPauseBot" title="Pause bot temporarily">
               <i class="fas fa-pause"></i> Pause
             </button>
-            <button class="btn btn-danger btn-sm me-2" onclick="stopBot()" title="Stop bot completely">
+            <button class="btn btn-danger btn-sm me-2" id="btnStopBot" title="Stop bot completely">
               <i class="fas fa-stop"></i> Stop
             </button>
           {% else %}
-            <button class="btn btn-success btn-sm me-2" onclick="startBot()" title="Start bot">
+            <button class="btn btn-success btn-sm me-2" id="btnStartBot" title="Start bot">
               <i class="fas fa-play"></i> Start
             </button>
           {% endif %}
-          <button class="btn btn-warning btn-sm me-2" onclick="stopConflicts()" title="Stop conflicting bot processes">
+          <button class="btn btn-warning btn-sm me-2" id="btnStopConflicts" title="Stop conflicting bot processes">
             <i class="fas fa-exclamation-triangle"></i> Stop Conflicts
           </button>
-          <button class="btn btn-info btn-sm me-2" onclick="forceRefresh()" title="Force refresh page">
+          <button class="btn btn-info btn-sm me-2" id="btnForceRefresh" title="Force refresh page">
             <i class="fas fa-sync-alt"></i> Refresh
           </button>
 
@@ -48,16 +48,16 @@
 
   <!-- Key Metrics Row -->
   <div class="row mb-4">
-    <div class="col-xl-3 col-md-6 mb-3">
+    <div class="col-lg-2 col-md-6 mb-3">
       <div class="metric-card">
         <div class="metric-icon">
           <i class="fas fa-chart-line"></i>
         </div>
-        <div class="metric-value text-success" id="totalPnl">
+        <div class="metric-value" id="totalPnl">
           $2,945.24
         </div>
         <div class="metric-label">Total P&L</div>
-        <div class="metric-change positive">
+        <div class="metric-change">
           <i class="fas fa-arrow-up"></i>
           <span id="totalPnlPercentage">
             +29.45%
@@ -66,7 +66,7 @@
       </div>
     </div>
     
-    <div class="col-xl-3 col-md-6 mb-3">
+    <div class="col-lg-2 col-md-6 mb-3">
       <div class="metric-card">
         <div class="metric-icon">
           <i class="fas fa-exchange-alt"></i>
@@ -82,7 +82,7 @@
       </div>
     </div>
     
-    <div class="col-xl-3 col-md-6 mb-3">
+    <div class="col-lg-2 col-md-6 mb-3">
       <div class="metric-card">
         <div class="metric-icon">
           <i class="fas fa-percentage"></i>
@@ -98,7 +98,7 @@
       </div>
     </div>
     
-    <div class="col-xl-3 col-md-6 mb-3">
+    <div class="col-lg-2 col-md-6 mb-3">
       <div class="metric-card">
         <div class="metric-icon">
           <i class="fas fa-clock"></i>
@@ -114,6 +114,21 @@
       </div>
     </div>
     
+    <div class="col-lg-2 col-md-6 mb-3">
+      <div class="metric-card">
+        <div class="metric-icon">
+          <i class="fas fa-dollar-sign"></i>
+        </div>
+        <div class="metric-value" id="totalPositionValue">
+          $0.00
+        </div>
+        <div class="metric-label">Position Value</div>
+        <div class="metric-change">
+          <i class="fas fa-chart-line"></i>
+          <span id="positionValueChange">+0.00%</span>
+        </div>
+      </div>
+    </div>
 
   </div>
 
@@ -150,7 +165,7 @@
             </div>
           </div>
           <div class="mt-3">
-            <button class="btn btn-outline-primary btn-sm" onclick="updateWalletBalance()">
+            <button class="btn btn-outline-primary btn-sm" id="btnUpdateWalletBalance">
               <i class="fas fa-edit"></i> Update Balance
             </button>
           </div>
@@ -160,35 +175,61 @@
   </div>
   {% endif %}
 
-  <!-- Charts Row -->
+  <!-- Trading Summary -->
   <div class="row mb-4">
     <div class="col-lg-8 mb-3">
       <div class="card">
         <div class="card-header">
           <h5 class="card-title">
             <i class="fas fa-chart-area"></i>
-            Portfolio Performance
+            Trading Summary
           </h5>
         </div>
         <div class="card-body">
-          <div class="chart-container">
-            <canvas id="performanceChart"></canvas>
+          <div class="trading-summary">
+            <div class="summary-stat">
+              <span class="stat-label">Total Trades:</span>
+              <span class="stat-value">0</span>
+            </div>
+            <div class="summary-stat">
+              <span class="stat-label">Win Rate:</span>
+              <span class="stat-value">0.0%</span>
+            </div>
+            <div class="summary-stat">
+              <span class="stat-label">Total P&L:</span>
+              <span class="stat-value">$0.00</span>
+            </div>
+            <div class="summary-stat">
+              <span class="stat-label">Active Positions:</span>
+              <span class="stat-value">0</span>
+            </div>
           </div>
         </div>
       </div>
     </div>
-    
+
     <div class="col-lg-4 mb-3">
       <div class="card">
         <div class="card-header">
           <h5 class="card-title">
             <i class="fas fa-chart-pie"></i>
-            Trading Volume
+            Status
           </h5>
         </div>
         <div class="card-body">
-          <div class="chart-container">
-            <canvas id="volumeChart"></canvas>
+          <div class="status-display">
+            <div class="status-item">
+              <span class="status-label">Bot Status:</span>
+              <span class="status-value status-offline">Offline</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">Active Signals:</span>
+              <span class="status-value">0</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">Last Update:</span>
+              <span class="status-value">-</span>
+            </div>
           </div>
         </div>
       </div>
@@ -205,59 +246,19 @@
             Open Positions
           </h5>
           <div>
-            <button class="btn btn-sm btn-outline-warning me-2" onclick="clearOldPositions()" title="Clear old positions">
+            <button class="btn btn-sm btn-outline-warning me-2" id="btnClearOldPositions" title="Clear old positions">
               <i class="fas fa-trash"></i> Clear Old
             </button>
-            <button class="btn btn-sm btn-outline-primary" onclick="refreshOpenPositions()" title="Refresh positions">
+            <button class="btn btn-sm btn-outline-primary" id="btnRefreshOpenPositions" title="Refresh positions">
               <i class="fas fa-sync-alt"></i>
             </button>
           </div>
         </div>
         <div class="card-body">
-          {% if open_positions %}
-            {% for position in open_positions %}
-              <div class="position-item">
-                <div class="position-header">
-                  <span class="position-symbol">{{ position.symbol }}</span>
-                  <span class="badge badge-{{ 'success' if position.side == 'buy' else 'danger' }}">
-                    {{ position.side.upper() }}
-                  </span>
-                </div>
-                <div class="position-details">
-                  <div class="position-row">
-                    <span class="label">Amount:</span>
-                    <span class="value">{{ "%.4f"|format(position.amount) }}</span>
-                  </div>
-                  <div class="position-row">
-                    <span class="label">Entry Price:</span>
-                    <span class="value">${{ "%.6f"|format(position.entry_price) }}</span>
-                  </div>
-                  <div class="position-row">
-                    <span class="label">Current Price:</span>
-                    <span class="value">${{ "%.6f"|format(position.current_price) }}</span>
-                  </div>
-                  <div class="position-row">
-                    <span class="label">PnL:</span>
-                    <span class="value {{ 'text-success' if position.pnl >= 0 else 'text-danger' }}">
-                      ${{ "%.2f"|format(position.pnl) }}
-                    </span>
-                  </div>
-                </div>
-                <div class="position-actions">
-                  <button class="btn btn-danger btn-sm" 
-                          onclick="marketSellPosition('{{ position.symbol }}', {{ position.amount }}, event)"
-                          title="Market sell this position immediately">
-                    <i class="fas fa-sell"></i> Market Sell
-                  </button>
-                </div>
-              </div>
-            {% endfor %}
-          {% else %}
-            <div class="no-positions">
-              <i class="fas fa-info-circle"></i>
-              <span>No open positions</span>
-            </div>
-          {% endif %}
+          <div class="no-positions">
+            <i class="fas fa-info-circle"></i>
+            <span>Position cards have been removed from the dashboard</span>
+          </div>
         </div>
       </div>
     </div>
@@ -352,6 +353,7 @@
                   <div class="strategy-name">{{ strategy }}</div>
                   <div class="strategy-weight">
                     <div class="weight-bar">
+                      <!-- stylelint-disable-next-line -->
                       <div class="weight-fill" style="width: {{ weight }}%"></div>
                     </div>
                     <span class="weight-percentage">{{ "{:.1f}%".format(weight) }}</span>
@@ -386,7 +388,7 @@
               <i class="fas fa-terminal"></i>
               <span>CLI Access</span>
             </a>
-            <a href="{{ url_for('logs_page') }}" class="action-item">
+            <a href="{{ url_for('bot_logs_page') }}" class="action-item">
               <i class="fas fa-file-alt"></i>
               <span>View Logs</span>
             </a>
@@ -412,7 +414,7 @@
           <h5 class="mb-0">
             <i class="fas fa-dollar-sign"></i> Manual Price Management
           </h5>
-          <button class="btn btn-primary btn-sm" onclick="showManualPriceModal()">
+          <button class="btn btn-primary btn-sm" id="btnShowManualPriceModal">
             <i class="fas fa-plus"></i> Add Manual Price
           </button>
         </div>
@@ -477,7 +479,7 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" onclick="saveManualPrice()">Save Price</button>
+        <button type="button" class="btn btn-primary" id="btnSaveManualPrice">Save Price</button>
       </div>
     </div>
   </div>
@@ -495,7 +497,7 @@
         <form id="botControlForm">
           <div class="mb-3">
             <label for="executionMode" class="form-label">Execution Mode</label>
-            <select class="form-control" id="executionMode" name="mode" onchange="toggleWalletBalanceField()">
+            <select class="form-control" id="executionMode" name="mode">
               <option value="dry_run" {{ 'selected' if mode == 'dry_run' else '' }}>Dry Run (Paper Trading)</option>
               <option value="live" {{ 'selected' if mode == 'live' else '' }}>Live Trading</option>
               <option value="backtest" {{ 'selected' if mode == 'backtest' else '' }}>Backtest Mode</option>
@@ -503,7 +505,7 @@
           </div>
           
           <!-- Wallet Balance Configuration (shown only for dry run) -->
-          <div class="mb-3" id="walletBalanceSection" style="display: none;">
+          <div class="mb-3 d-none" id="walletBalanceSection">
             <label for="walletBalance" class="form-label">Paper Wallet Balance (USD)</label>
             <div class="input-group">
               <span class="input-group-text">$</span>
@@ -515,7 +517,7 @@
           </div>
           
           <!-- Debug Status -->
-          <div class="mb-3" id="debugStatus" style="display: none;">
+          <div class="mb-3 d-none" id="debugStatus">
             <div class="alert alert-info">
               <i class="fas fa-info-circle"></i>
               <span id="debugMessage">Preparing to start bot...</span>
@@ -525,7 +527,7 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" onclick="confirmBotAction()">Confirm</button>
+        <button type="button" class="btn btn-primary" id="btnConfirmBotAction">Confirm</button>
       </div>
     </div>
   </div>
@@ -533,12 +535,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-// Bot control functions
-function startBot() {
-  console.log('=== START BOT DEBUG ===');
-  console.log('startBot function called');
-  console.log('Modal element:', document.getElementById('botControlModal'));
+<script src="{{ url_for('static', filename='dashboard.js') }}"></script>
   
   const modal = new bootstrap.Modal(document.getElementById('botControlModal'));
   console.log('Bootstrap modal created:', modal);
@@ -853,7 +850,7 @@ function updateOpenPositions() {
     })
     .then(positions => {
       console.log('Positions received:', positions);
-      updateOpenPositionsDisplay(positions);
+      // Position cards removed - no longer displaying individual positions
       
       // Also update wallet PnL when positions change
       updateWalletPnl();
@@ -875,7 +872,7 @@ function refreshOpenPositions() {
   fetch('/api/open-positions')
     .then(response => response.json())
     .then(positions => {
-      updateOpenPositionsDisplay(positions);
+      // Position cards removed - no longer displaying individual positions
       if (refreshBtn) {
         refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
         refreshBtn.disabled = false;
@@ -929,78 +926,6 @@ function clearOldPositions() {
       clearBtn.disabled = false;
     }
   });
-}
-
-function updateOpenPositionsDisplay(positions) {
-  console.log('updateOpenPositionsDisplay called with:', positions);
-  
-  // Find the open positions card using the CSS class
-  const openPositionsCard = document.querySelector('.open-positions-card');
-  
-  console.log('openPositionsCard found:', !!openPositionsCard);
-  if (!openPositionsCard) {
-    console.log('No openPositionsCard found');
-    return;
-  }
-  
-  const positionsBody = openPositionsCard.querySelector('.card-body');
-  console.log('positionsBody found:', !!positionsBody);
-  if (!positionsBody) {
-    console.log('No positionsBody found');
-    return;
-  }
-  
-  if (positions && positions.length > 0) {
-    let html = '';
-    positions.forEach(position => {
-      const pnlClass = position.pnl >= 0 ? 'text-success' : 'text-danger';
-      html += `
-        <div class="position-item">
-          <div class="position-header">
-            <span class="position-symbol">${position.symbol}</span>
-            <span class="badge badge-${position.side === 'buy' ? 'success' : 'danger'}">
-              ${position.side.toUpperCase()}
-            </span>
-          </div>
-          <div class="position-details">
-            <div class="position-row">
-              <span class="label">Amount:</span>
-              <span class="value">${parseFloat(position.amount).toFixed(4)}</span>
-            </div>
-            <div class="position-row">
-              <span class="label">Entry Price:</span>
-              <span class="value">$${parseFloat(position.entry_price).toFixed(6)}</span>
-            </div>
-            <div class="position-row">
-              <span class="label">Current Price:</span>
-              <span class="value">$${parseFloat(position.current_price).toFixed(6)}</span>
-            </div>
-            <div class="position-row">
-              <span class="label">PnL:</span>
-              <span class="value ${pnlClass}">
-                $${parseFloat(position.pnl).toFixed(2)}
-              </span>
-            </div>
-          </div>
-          <div class="position-actions">
-            <button class="btn btn-danger btn-sm" 
-                    onclick="marketSellPosition('${position.symbol}', ${position.amount}, event)"
-                    title="Market sell this position immediately">
-              <i class="fas fa-sell"></i> Market Sell
-            </button>
-          </div>
-        </div>
-      `;
-    });
-    positionsBody.innerHTML = html;
-  } else {
-    positionsBody.innerHTML = `
-      <div class="no-positions">
-        <i class="fas fa-info-circle"></i>
-        <span>No open positions</span>
-      </div>
-    `;
-  }
 }
 
 // Bot status updates are now handled by app.js to prevent conflicts
@@ -1350,17 +1275,7 @@ function loadPriceSourceHealth() {
   });
 }
 
-// Load manual prices and price source health on page load
-document.addEventListener('DOMContentLoaded', function() {
-  loadManualPrices();
-  loadPriceSourceHealth();
-});
-
-// Auto-refresh data every 30 seconds
-setInterval(() => {
-  updateOpenPositions();
-  loadManualPrices();
-  loadPriceSourceHealth();
-}, 30000);
-</script>
 {% endblock %}
+
+<!-- eslint-enable -->
+<!-- stylelint-enable -->

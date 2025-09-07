@@ -1,0 +1,5 @@
+execution_mode: dry_run
+paper_wallet_initial_balance: 10000.0
+position_sync_enabled: true
+use_trade_manager_as_source: true
+exchange: coinbase

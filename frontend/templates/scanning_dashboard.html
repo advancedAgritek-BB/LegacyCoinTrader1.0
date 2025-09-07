@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Scanning Dashboard</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .content {
+            padding: 20px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        .stat-title {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        .scan-results {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .scan-results h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .token-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .token-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .token-item:last-child {
+            border-bottom: none;
+        }
+        .token-symbol {
+            font-weight: bold;
+            color: #667eea;
+        }
+        .token-score {
+            background: #667eea;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .refresh-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .refresh-btn:hover {
+            background: #5a6fd8;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        .status-active {
+            background: #28a745;
+        }
+        .status-inactive {
+            background: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Enhanced Scanning Dashboard</h1>
+            <p>Real-time monitoring of token discovery and analysis</p>
+        </div>
+        
+        <div class="content">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-title">Scanner Status</div>
+                    <div class="stat-value">
+                        <span class="status-indicator status-active" id="scanner-status"></span>
+                        <span id="scanner-status-text">Active</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Total Scans</div>
+                    <div class="stat-value" id="total-scans">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Tokens Discovered</div>
+                    <div class="stat-value" id="tokens-discovered">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Execution Opportunities</div>
+                    <div class="stat-value" id="execution-opportunities">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Cache Hit Rate</div>
+                    <div class="stat-value" id="cache-hit-rate">0%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Last Scan</div>
+                    <div class="stat-value" id="last-scan">Never</div>
+                </div>
+            </div>
+            
+            <div class="scan-results">
+                <h3>Recent Token Discoveries</h3>
+                <div class="token-list" id="token-list">
+                    <div style="text-align: center; color: #666; padding: 20px;">
+                        No tokens discovered yet...
+                    </div>
+                </div>
+            </div>
+            
+            <button class="refresh-btn" onclick="refreshData()">🔄 Refresh Data</button>
+        </div>
+    </div>
+
+    <script>
+        async function refreshData() {
+            try {
+                const response = await fetch('/api/scanning/stats');
+                const data = await response.json();
+                
+                // Update stats
+                document.getElementById('total-scans').textContent = data.total_scans || 0;
+                document.getElementById('tokens-discovered').textContent = data.tokens_discovered || 0;
+                document.getElementById('execution-opportunities').textContent = data.execution_opportunities || 0;
+                document.getElementById('cache-hit-rate').textContent = (data.cache_hit_rate || 0) + '%';
+                document.getElementById('last-scan').textContent = data.last_scan || 'Never';
+                
+                // Update scanner status
+                const statusElement = document.getElementById('scanner-status');
+                const statusText = document.getElementById('scanner-status-text');
+                if (data.scanner_active) {
+                    statusElement.className = 'status-indicator status-active';
+                    statusText.textContent = 'Active';
+                } else {
+                    statusElement.className = 'status-indicator status-inactive';
+                    statusText.textContent = 'Inactive';
+                }
+                
+                // Update token list
+                const tokenList = document.getElementById('token-list');
+                if (data.recent_tokens && data.recent_tokens.length > 0) {
+                    tokenList.innerHTML = data.recent_tokens.map(token => `
+                        <div class="token-item">
+                            <span class="token-symbol">${token.symbol}</span>
+                            <span class="token-score">${token.score.toFixed(2)}</span>
+                        </div>
+                    `).join('');
+                } else {
+                    tokenList.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">No tokens discovered yet...</div>';
+                }
+                
+            } catch (error) {
+                console.error('Failed to refresh data:', error);
+            }
+        }
+        
+        // Auto-refresh every 30 seconds
+        setInterval(refreshData, 30000);
+        
+        // Initial load
+        refreshData();
+    </script>
+</body>
+</html>

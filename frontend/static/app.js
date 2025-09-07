@@ -63,118 +63,21 @@ function initNavigation() {
     });
 }
 
-// Initialize charts with real data
+// Chart.js implementations removed to prevent conflicts with custom canvas charts
 function initCharts() {
-    // Performance Chart
-    const performanceCtx = document.getElementById('performanceChart');
-    if (performanceCtx) {
-        window.performanceChart = new Chart(performanceCtx, {
-            type: 'line',
-            data: {
-                labels: [],
-                datasets: [{
-                    label: 'Portfolio Value',
-                    data: [],
-                    borderColor: '#00d4aa',
-                    backgroundColor: 'rgba(0, 212, 170, 0.1)',
-                    tension: 0.4,
-                    fill: true
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        labels: {
-                            color: '#f8fafc'
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        ticks: {
-                            color: '#cbd5e1'
-                        },
-                        grid: {
-                            color: '#334155'
-                        }
-                    },
-                    y: {
-                        ticks: {
-                            color: '#cbd5e1'
-                        },
-                        grid: {
-                            color: '#334155'
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    // Trading Volume Chart
-    const volumeCtx = document.getElementById('volumeChart');
-    if (volumeCtx) {
-        window.volumeChart = new Chart(volumeCtx, {
-            type: 'bar',
-            data: {
-                labels: [],
-                datasets: [{
-                    label: '24h Volume',
-                    data: [],
-                    backgroundColor: [
-                        '#00d4aa',
-                        '#6366f1',
-                        '#f59e0b',
-                        '#10b981',
-                        '#ef4444'
-                    ]
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        labels: {
-                            color: '#f8fafc'
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        ticks: {
-                            color: '#cbd5e1'
-                        },
-                        grid: {
-                            color: '#334155'
-                        }
-                    },
-                    y: {
-                        ticks: {
-                            color: '#cbd5e1'
-                        },
-                        grid: {
-                            color: '#334155'
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    // Fetch and update chart data
-    updateChartData();
+    console.log('Charts initialization skipped - using custom canvas implementations');
 }
 
 // Real-time updates - SINGLE interval to prevent conflicts
 function initRealTimeUpdates() {
     // Single update interval every 10 seconds to prevent conflicts
     setInterval(updateAllData, 10000);
+    // Header-specific refresh every 60 seconds
+    setInterval(updateHeaderFinance, 60000);
     
     // Initial update
     updateAllData();
+    updateHeaderFinance();
 }
 
 // Update all data in one function to prevent conflicts
@@ -189,11 +92,41 @@ function updateAllData() {
     updateLiveSignals();
     
     // Update open positions (throttled to prevent excessive updates)
-if (typeof window.updateOpenPositions === 'function') {
-    updateOpenPositionsThrottled();
-} else {
-    console.log('updateOpenPositions function not available yet, skipping update');
+    // Only update if we're not in dashboard context (where positions are static)
+    if (typeof window.updateOpenPositions === 'function' && window.location.pathname !== '/dashboard') {
+        updateOpenPositionsThrottled();
+    } else if (window.location.pathname === '/dashboard') {
+        console.log('Dashboard context - positions are loaded statically');
+    } else {
+        console.log('updateOpenPositions function not available yet, skipping update');
+    }
 }
+
+// Update header wallet balance and unrealized PnL
+function updateHeaderFinance() {
+    const balanceEl = document.getElementById('headerWalletBalance');
+    const unrealEl = document.getElementById('headerUnrealizedPnl');
+    if (!balanceEl && !unrealEl) return;
+
+    const mode = document.body?.getAttribute('data-mode') || 'dry_run';
+
+    // In all modes, we can use wallet-pnl for unrealized and balance (it computes balance)
+    fetch('/api/wallet-pnl')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (!data) return;
+            if (balanceEl && (data.balance !== undefined && data.balance !== null)) {
+                balanceEl.textContent = formatCurrency(data.balance);
+            }
+            if (unrealEl && (data.unrealized_pnl !== undefined && data.unrealized_pnl !== null)) {
+                const sign = data.unrealized_pnl >= 0 ? '+' : '-';
+                const formatted = formatCurrency(Math.abs(data.unrealized_pnl));
+                unrealEl.textContent = `${sign}${formatted}`;
+                unrealEl.classList.toggle('text-success', data.unrealized_pnl >= 0);
+                unrealEl.classList.toggle('text-danger', data.unrealized_pnl < 0);
+            }
+        })
+        .catch(() => {});
 }
 
 // Update bot status
@@ -205,7 +138,7 @@ function updateBotStatus() {
             const statusText = document.querySelector('.bot-status span');
             
             if (statusIndicator && statusText) {
-                if (data.running) {
+                if (data.data && data.data.bot_running) {
                     statusIndicator.classList.add('online');
                     statusIndicator.classList.remove('offline');
                     statusText.textContent = 'Bot Online';
@@ -252,14 +185,7 @@ function updateDashboardMetrics() {
                 updateRecentTrades(data.recent_trades);
             }
 
-            // Update charts with real data
-            if (data.performance && window.performanceChart) {
-                updatePerformanceChart(data.performance);
-            }
-
-            if (data.asset_scores && window.volumeChart) {
-                updateVolumeChart(data.asset_scores);
-            }
+            // Chart updates removed to prevent conflicts with custom canvas charts
         })
         .catch(error => console.error('Error updating dashboard metrics:', error));
 }
@@ -300,13 +226,9 @@ function updateOpenPositionsThrottled() {
 // Update open positions function
 function updateOpenPositions() {
     console.log('updateOpenPositions called from app.js');
-    // This function is defined in the HTML template
-    // We just need to ensure it exists before calling it
-    if (typeof window.updateOpenPositions === 'function') {
-        window.updateOpenPositions();
-    } else {
-        console.log('updateOpenPositions function not available yet');
-    }
+    // For dashboard, positions are loaded statically when page renders
+    // If we need to update positions, we should reload the page
+    console.log('Dashboard positions are loaded statically - no dynamic update needed');
 }
 
 // Update performance metrics
@@ -431,88 +353,7 @@ function updateAssetScores(assetScores) {
     console.log('Asset scores updated:', assetScores);
 }
 
-// Update chart data with real data from backend
-function updateChartData() {
-    // Fetch dashboard metrics which includes performance data
-    fetch('/api/dashboard-metrics')
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                console.error('Error fetching chart data:', data.error);
-                return;
-            }
-
-            // Update performance chart
-            if (data.performance && window.performanceChart) {
-                updatePerformanceChart(data.performance);
-            }
-
-            // Update volume chart with asset scores data
-            if (data.asset_scores && window.volumeChart) {
-                updateVolumeChart(data.asset_scores);
-            }
-        })
-        .catch(error => console.error('Error updating chart data:', error));
-}
-
-// Update performance chart with real data
-function updatePerformanceChart(performance) {
-    if (!window.performanceChart) return;
-
-    // Generate time labels for the last 7 days
-    const labels = [];
-    const dataPoints = [];
-    const baseValue = performance.initial_balance || 10000;
-    let currentValue = baseValue;
-
-    // Generate sample daily data points based on performance
-    for (let i = 6; i >= 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        labels.push(date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-
-        // Simulate portfolio value changes based on total PnL
-        if (performance.total_pnl) {
-            const dailyChange = (performance.total_pnl / 7) * (Math.random() - 0.5) * 2;
-            currentValue += dailyChange;
-        }
-        dataPoints.push(Math.max(0, currentValue));
-    }
-
-    window.performanceChart.data.labels = labels;
-    window.performanceChart.data.datasets[0].data = dataPoints;
-    window.performanceChart.update();
-}
-
-// Update volume chart with real asset data
-function updateVolumeChart(assetScores) {
-    if (!window.volumeChart || !assetScores) return;
-
-    const labels = [];
-    const volumes = [];
-
-    // Extract top 5 assets with highest scores
-    const sortedAssets = Object.entries(assetScores)
-        .filter(([symbol, data]) => data && typeof data === 'object' && data.score !== undefined)
-        .sort(([, a], [, b]) => (b.score || 0) - (a.score || 0))
-        .slice(0, 5);
-
-    sortedAssets.forEach(([symbol, data]) => {
-        labels.push(symbol);
-        // Use score as a proxy for volume, scaled appropriately
-        volumes.push((data.score || 0) * 100000);
-    });
-
-    // If no real data, show some default values
-    if (labels.length === 0) {
-        labels.push('BTC', 'ETH', 'SOL', 'MATIC', 'ADA');
-        volumes.push(1200000, 800000, 500000, 300000, 200000);
-    }
-
-    window.volumeChart.data.labels = labels;
-    window.volumeChart.data.datasets[0].data = volumes;
-    window.volumeChart.update();
-}
+// Chart.js update functions removed to prevent conflicts
 
 // Bot control functions
 function startBot() {
@@ -605,13 +446,21 @@ function formatNumber(value) {
 function showToast(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `toast toast-${type} fade-in`;
-    toast.innerHTML = `
-        <div class="toast-content">
-            <i class="fas fa-${getToastIcon(type)}"></i>
-            <span>${message}</span>
-        </div>
-    `;
-    
+
+    // Create elements without inline HTML to avoid CSP issues
+    const toastContent = document.createElement('div');
+    toastContent.className = 'toast-content';
+
+    const icon = document.createElement('i');
+    icon.className = `fas fa-${getToastIcon(type)}`;
+
+    const span = document.createElement('span');
+    span.textContent = message;
+
+    toastContent.appendChild(icon);
+    toastContent.appendChild(span);
+    toast.appendChild(toastContent);
+
     document.body.appendChild(toast);
     
     // Remove toast after 3 seconds

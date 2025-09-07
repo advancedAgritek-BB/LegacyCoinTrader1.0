@@ -580,6 +580,7 @@ def test_update_ohlcv_cache_skip_after_retry(caplog):
 
 class DummyMultiTFExchange:
     has = {"fetchOHLCV": True}
+    id = "dummy"
 
     def __init__(self):
         self.calls: List[str] = []

@@ -43,10 +43,23 @@ echo "📊 Starting main trading bot..."
 python -m crypto_bot.main &
 MAIN_PID=$!
 
-# Start web frontend
+# Start web frontend and capture its port using a temporary file
 echo "🌐 Starting web dashboard..."
-python -m frontend.app &
+TEMP_FILE=$(mktemp)
+python -m frontend.app > "$TEMP_FILE" 2>&1 &
 FRONTEND_PID=$!
+
+# Wait a moment for Flask to start and write to the temp file
+sleep 2
+
+# Extract the port from the Flask output
+FLASK_PORT=$(grep "FLASK_PORT=" "$TEMP_FILE" | cut -d'=' -f2)
+if [[ -z "$FLASK_PORT" ]]; then
+    FLASK_PORT=8000  # fallback to default
+fi
+
+# Clean up temp file
+rm -f "$TEMP_FILE"
 
 # Start Telegram bot
 echo "📱 Starting Telegram bot..."
@@ -56,7 +69,7 @@ TELEGRAM_PID=$!
 echo ""
 echo "🎉 LegacyCoinTrader is now running!"
 echo "📊 Main bot PID: $MAIN_PID"
-echo "🌐 Web dashboard: http://localhost:8000"
+echo "🌐 Web dashboard: http://localhost:$FLASK_PORT"
 echo "📱 Telegram bot PID: $TELEGRAM_PID"
 echo ""
 
@@ -97,7 +110,7 @@ open_browser() {
 }
 
 # Open browser in background after a delay
-open_browser "http://localhost:8000" 3 &
+open_browser "http://localhost:$FLASK_PORT" 3 &
 
 echo "Press Ctrl+C to stop all services"
 

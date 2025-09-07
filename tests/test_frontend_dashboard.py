@@ -17,7 +17,7 @@ def test_dashboard_route(tmp_path, monkeypatch):
     client = app.test_client()
     resp = client.get("/dashboard")
     assert resp.status_code == 200
-    assert b"Total PnL" in resp.data
+    assert b"Total P&L" in resp.data
 
 
 def test_static_resources_load():

@@ -54,7 +54,7 @@ def test_long_breakout_signal():
     prices = [100] * 35 + [102]
     volumes = [100] * 35 + [300]
     df = _make_df(prices, volumes)
-    score, direction, atr = breakout_bot.generate_signal(df)
+    score, direction = breakout_bot.generate_signal(df)
     assert direction == "long"
     assert score > 0
 
@@ -63,7 +63,7 @@ def test_short_breakout_signal():
     prices = [100] * 35 + [98]
     volumes = [100] * 35 + [300]
     df = _make_df(prices, volumes)
-    score, direction, atr = breakout_bot.generate_signal(df)
+    score, direction = breakout_bot.generate_signal(df)
     assert direction == "short"
     assert score > 0
 
@@ -72,7 +72,7 @@ def test_requires_squeeze():
     prices = list(range(80, 106))
     volumes = [100] * 26
     df = _make_df(prices, volumes)
-    score, direction, atr = breakout_bot.generate_signal(df)
+    score, direction = breakout_bot.generate_signal(df)
     assert direction == "none"
     assert score == 0.0
 
@@ -124,7 +124,7 @@ def test_squeeze_zscore(monkeypatch):
             "volume_window": 3,
         },
     }
-    score, direction, _ = breakout_bot.generate_signal(df, cfg)
+    score, direction = breakout_bot.generate_signal(df, cfg)
     assert direction == "long"
     assert score > 0
 
@@ -132,5 +132,5 @@ def test_squeeze_zscore(monkeypatch):
 def test_no_volume_confirmation_still_signals(breakout_df):
     df = breakout_df("long", volume_spike=False)
     cfg = {"breakout": {"vol_confirmation": False}}
-    score, direction, _ = breakout_bot.generate_signal(df, cfg)
+    score, direction = breakout_bot.generate_signal(df, cfg)
     assert direction == "long" and score > 0

@@ -35,7 +35,7 @@ def generate_signal(
     recent = df.iloc[-(lookback + 1) :]
 
     vol_ma = recent["volume"].rolling(vol_window).mean()
-    ema = ta.trend.ema_indicator(recent["close"], window=ema_window)
+    ema = recent["close"].ewm(span=ema_window, adjust=False).mean()
 
     last = recent.iloc[-1]
     prev_close = recent["close"].iloc[-2]

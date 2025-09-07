@@ -70,32 +70,121 @@ class WebSocketHealthChecker:
     def test_kraken_websocket(self) -> bool:
         """Test basic Kraken WebSocket connectivity."""
         print("🔗 Testing Kraken WebSocket connectivity...")
-        
+
         try:
             # Test public WebSocket
             ws = websocket.create_connection(
                 "wss://ws.kraken.com/v2",
                 timeout=10
             )
-            
+
             # Send a simple ping
             ping_msg = {"method": "ping"}
             ws.send(json.dumps(ping_msg))
-            
+
             # Wait for response
             response = ws.recv()
             ws.close()
-            
-            if "pong" in response.lower():
+
+            # Check for pong or valid status response
+            response_lower = response.lower()
+            if "pong" in response_lower or ("status" in response_lower and "online" in response_lower):
                 print("✅ Kraken public WebSocket is accessible")
                 return True
             else:
                 print(f"⚠️  Unexpected response from Kraken: {response}")
                 return False
-                
+
         except Exception as e:
             print(f"❌ Kraken WebSocket test failed: {e}")
             return False
+
+    def test_enhanced_websocket_features(self) -> Dict[str, bool]:
+        """Test enhanced WebSocket features like health checks and validation."""
+        print("🔧 Testing Enhanced WebSocket Features...")
+        results = {}
+
+        try:
+            # Test if enhanced Kraken client can be imported
+            import sys
+            import os
+            # Add the project root directory to the path
+            project_root = os.path.dirname(os.path.dirname(__file__))
+            sys.path.insert(0, project_root)
+
+            from crypto_bot.execution.kraken_ws import KrakenWSClient
+            client = KrakenWSClient()
+            results["kraken_enhancements"] = True
+            print("✅ Enhanced Kraken WebSocket client available")
+
+            # Test health monitoring methods
+            if hasattr(client, 'start_health_monitoring'):
+                results["health_monitoring"] = True
+                print("✅ Health monitoring available")
+            else:
+                results["health_monitoring"] = False
+                print("❌ Health monitoring not available")
+
+            # Test message validation
+            if hasattr(client, '_validate_message'):
+                test_msg = '{"test": "message"}'
+                is_valid = client._validate_message(test_msg)
+                results["message_validation"] = is_valid
+                if is_valid:
+                    print("✅ Message validation working")
+                else:
+                    print("⚠️  Message validation not working properly")
+            else:
+                results["message_validation"] = False
+                print("❌ Message validation not available")
+
+        except (ImportError, Exception) as e:
+            results["kraken_enhancements"] = False
+            print(f"❌ Enhanced Kraken WebSocket client not available: {e}")
+
+        try:
+            # Test if enhanced Solana monitor can be imported
+            from crypto_bot.solana.pool_ws_monitor import EnhancedPoolMonitor
+            monitor = EnhancedPoolMonitor("test_key", "test_pool")
+            results["solana_enhancements"] = True
+            print("✅ Enhanced Solana pool monitor available")
+
+            # Test exponential backoff
+            if hasattr(monitor, '_calculate_reconnect_delay'):
+                delay = monitor._calculate_reconnect_delay()
+                results["exponential_backoff"] = isinstance(delay, float)
+                if results["exponential_backoff"]:
+                    print("✅ Exponential backoff working")
+                else:
+                    print("⚠️  Exponential backoff not working properly")
+            else:
+                results["exponential_backoff"] = False
+                print("❌ Exponential backoff not available")
+
+        except (ImportError, Exception) as e:
+            results["solana_enhancements"] = False
+            print(f"❌ Enhanced Solana pool monitor not available: {e}")
+
+        try:
+            # Test WebSocket pool
+            from crypto_bot.utils.websocket_pool import WebSocketPool
+            pool = WebSocketPool(max_connections=2)
+            results["websocket_pool"] = True
+            print("✅ WebSocket connection pool available")
+
+            # Test pool stats
+            stats = pool.get_pool_stats()
+            results["pool_stats"] = isinstance(stats, dict)
+            if results["pool_stats"]:
+                print("✅ Connection pool statistics working")
+            else:
+                print("⚠️  Connection pool statistics not working properly")
+
+        except (ImportError, Exception) as e:
+            results["websocket_pool"] = False
+            print(f"❌ WebSocket connection pool not available: {e}")
+
+        return results
     
     def check_ohlcv_quality(self) -> List[str]:
         """Check OHLCV quality configuration."""
@@ -139,7 +228,7 @@ class WebSocketHealthChecker:
 
 def main():
     """Main health check function."""
-    config_path = "crypto_bot/config.yaml"
+    config_path = "config.yaml"
     
     if not Path(config_path).exists():
         print(f"❌ Configuration file not found: {config_path}")
@@ -183,10 +272,31 @@ def main():
             print("❌ Kraken WebSocket connectivity issues detected")
     else:
         print("ℹ️  Skipping WebSocket test (disabled in config)")
-    
+
+    # Test enhanced WebSocket features
+    print("\n🔧 Enhanced Features Test:")
+    enhanced_results = checker.test_enhanced_websocket_features()
+
     # Generate recommendations
     print("\n💡 Recommendations:")
     recommendations = checker.generate_recommendations()
+
+    # Add recommendations based on enhanced features test
+    if enhanced_results.get("kraken_enhancements", False):
+        recommendations.append("✅ Enhanced Kraken WebSocket client is available")
+    else:
+        recommendations.append("⚠️  Consider upgrading to enhanced Kraken WebSocket client")
+
+    if enhanced_results.get("solana_enhancements", False):
+        recommendations.append("✅ Enhanced Solana pool monitor is available")
+    else:
+        recommendations.append("⚠️  Consider upgrading to enhanced Solana pool monitor")
+
+    if enhanced_results.get("websocket_pool", False):
+        recommendations.append("✅ WebSocket connection pooling is available")
+    else:
+        recommendations.append("💡 Consider implementing WebSocket connection pooling")
+
     for rec in recommendations:
         print(f"  {rec}")
     

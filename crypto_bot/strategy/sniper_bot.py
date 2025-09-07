@@ -173,9 +173,9 @@ def generate_signal(
                     if df["close"].iloc[-1] < df["open"].iloc[-1]
                     else "long"
                 )
-            return score, trade_direction, atr, event
+            return score, trade_direction
 
-    return 0.0, "none", atr, event
+    return 0.0, "none"
 
 
 class regime_filter:

@@ -418,11 +418,51 @@ class KrakenWSClient:
         ws_token: Optional[str] = None,
         api_token: Optional[str] = None,
     ):
-        self.api_key = api_key or os.getenv("API_KEY")
-        self.api_secret = api_secret or os.getenv("API_SECRET")
-        # Tokens can be supplied via environment variables to avoid repeated REST calls
-        self.ws_token = ws_token or os.getenv("KRAKEN_WS_TOKEN")
-        self.api_token = api_token or os.getenv("KRAKEN_API_TOKEN")
+        # First try direct parameters
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.ws_token = ws_token
+        self.api_token = api_token
+
+        # If not provided, try environment variables
+        if not self.api_key:
+            self.api_key = os.getenv("API_KEY")
+        if not self.api_secret:
+            self.api_secret = os.getenv("API_SECRET")
+        if not self.ws_token:
+            self.ws_token = os.getenv("KRAKEN_WS_TOKEN")
+        if not self.api_token:
+            self.api_token = os.getenv("KRAKEN_API_TOKEN")
+
+        # If still not found, try loading from .env file directly
+        if not self.api_key or not self.api_secret:
+            try:
+                from dotenv import dotenv_values
+                from pathlib import Path
+                import sys
+
+                # Try multiple possible .env file locations
+                env_paths = [
+                    Path.cwd() / ".env",  # Project root
+                    Path(__file__).resolve().parent.parent.parent / ".env",  # crypto_bot/.env
+                    Path(sys.path[0]) / ".env" if sys.path[0] else None
+                ]
+
+                for env_path in env_paths:
+                    if env_path and env_path.exists():
+                        secrets = dotenv_values(str(env_path))
+                        if not self.api_key and secrets.get("API_KEY"):
+                            self.api_key = secrets["API_KEY"]
+                        if not self.api_secret and secrets.get("API_SECRET"):
+                            self.api_secret = secrets["API_SECRET"]
+                        if not self.ws_token and secrets.get("KRAKEN_WS_TOKEN"):
+                            self.ws_token = secrets["KRAKEN_WS_TOKEN"]
+                        if not self.api_token and secrets.get("KRAKEN_API_TOKEN"):
+                            self.api_token = secrets["KRAKEN_API_TOKEN"]
+                        break
+            except Exception:
+                # Silently ignore .env loading errors
+                pass
 
         self.exchange = None
         if self.api_key and self.api_secret:
@@ -433,34 +473,164 @@ class KrakenWSClient:
                 "enable_nonce_improvements": True,
                 "api_retry_attempts": 3
             }
-            self.exchange, _ = get_exchange(config)
+            # Temporarily set environment variables for get_exchange to use
+            old_api_key = os.environ.get('API_KEY')
+            old_api_secret = os.environ.get('API_SECRET')
+            old_ws_token = os.environ.get('KRAKEN_WS_TOKEN')
+            old_api_token = os.environ.get('KRAKEN_API_TOKEN')
+
+            try:
+                os.environ['API_KEY'] = self.api_key
+                os.environ['API_SECRET'] = self.api_secret
+                if self.ws_token:
+                    os.environ['KRAKEN_WS_TOKEN'] = self.ws_token
+                if self.api_token:
+                    os.environ['KRAKEN_API_TOKEN'] = self.api_token
+
+                self.exchange, _ = get_exchange(config)
+            finally:
+                # Restore original environment variables
+                if old_api_key is not None:
+                    os.environ['API_KEY'] = old_api_key
+                elif 'API_KEY' in os.environ:
+                    del os.environ['API_KEY']
+
+                if old_api_secret is not None:
+                    os.environ['API_SECRET'] = old_api_secret
+                elif 'API_SECRET' in os.environ:
+                    del os.environ['API_SECRET']
+
+                if old_ws_token is not None:
+                    os.environ['KRAKEN_WS_TOKEN'] = old_ws_token
+                elif 'KRAKEN_WS_TOKEN' in os.environ:
+                    del os.environ['KRAKEN_WS_TOKEN']
+
+                if old_api_token is not None:
+                    os.environ['KRAKEN_API_TOKEN'] = old_api_token
+                elif 'KRAKEN_API_TOKEN' in os.environ:
+                    del os.environ['KRAKEN_API_TOKEN']
 
         self.token: Optional[str] = self.ws_token
         self.token_created: Optional[datetime] = None
         if self.token:
             self.token_created = datetime.now(timezone.utc)
+
+        # Connection tracking
+        self.start_time = datetime.now(timezone.utc)
         self.public_ws: Optional[WebSocketApp] = None
         self.private_ws: Optional[WebSocketApp] = None
         self.last_public_heartbeat: Optional[datetime] = None
         self.last_private_heartbeat: Optional[datetime] = None
         self._public_subs = []
         self._private_subs = []
+        
+        # Real-time price data storage
+        self.price_cache: Dict[str, Dict] = {}
+        self.price_callbacks: Dict[str, List[Callable]] = {}
+
+        # Health check and monitoring
+        self.health_check_task: Optional[asyncio.Task] = None
+        self.connection_health = {
+            "public": {"last_heartbeat": None, "is_alive": False, "errors": 0},
+            "private": {"last_heartbeat": None, "is_alive": False, "errors": 0}
+        }
+        self.message_stats = {
+            "total_received": 0,
+            "total_sent": 0,
+            "errors": 0,
+            "reconnections": 0
+        }
+
+    def add_price_callback(self, symbol: str, callback: Callable[[str, float], None]) -> None:
+        """Add a callback function to be called when price updates for a symbol.
+        
+        Parameters
+        ----------
+        symbol : str
+            Trading pair symbol (e.g., "XBT/USD")
+        callback : Callable
+            Function to call with (symbol, price) when price updates
+        """
+        if symbol not in self.price_callbacks:
+            self.price_callbacks[symbol] = []
+        self.price_callbacks[symbol].append(callback)
+
+    def get_current_price(self, symbol: str) -> Optional[float]:
+        """Get the most recent price for a symbol from WebSocket cache.
+        
+        Parameters
+        ----------
+        symbol : str
+            Trading pair symbol (e.g., "XBT/USD")
+        
+        Returns
+        -------
+        Optional[float]
+            Current price if available, None otherwise
+        """
+        return self.price_cache.get(symbol, {}).get('last')
 
     def _handle_message(self, ws: WebSocketApp, message: str) -> None:
-        """Default ``on_message`` handler that records heartbeats."""
-        logger.info("WS message: %s", message)
+        """Default ``on_message`` handler that records heartbeats and processes ticker data."""
+        logger.debug("WS message: %s", message)
+        self.message_stats["total_received"] += 1
+
+        # Validate message before processing
+        if not self._validate_message(message):
+            return
+
         try:
             data = json.loads(message)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse JSON message: {e}")
+            self.message_stats["errors"] += 1
             return
 
         def update(obj: Any) -> None:
-            if isinstance(obj, dict) and obj.get("channel") == "heartbeat":
-                now = datetime.now(timezone.utc)
-                if ws == self.private_ws:
-                    self.last_private_heartbeat = now
-                else:
-                    self.last_public_heartbeat = now
+            if isinstance(obj, dict):
+                # Handle heartbeat
+                if obj.get("channel") == "heartbeat":
+                    now = datetime.now(timezone.utc)
+                    conn_type = "private" if ws == self.private_ws else "public"
+                    self.connection_health[conn_type]["last_heartbeat"] = now
+                    self.connection_health[conn_type]["is_alive"] = True
+
+                    # Update legacy heartbeat tracking for backwards compatibility
+                    if ws == self.private_ws:
+                        self.last_private_heartbeat = now
+                    else:
+                        self.last_public_heartbeat = now
+                
+                # Handle ticker data
+                elif obj.get("channel") == "ticker" and obj.get("type") in {"snapshot", "update"}:
+                    ticker_data = obj.get("data", [])
+                    if isinstance(ticker_data, list) and ticker_data:
+                        ticker = ticker_data[0]
+                        if isinstance(ticker, dict):
+                            symbol = ticker.get("symbol")
+                            if symbol:
+                                # Convert Kraken format back to CCXT format
+                                ccxt_symbol = symbol.replace("XBT", "BTC") + "/USD"
+                                
+                                # Extract price data
+                                price_data = {
+                                    'last': float(ticker.get("last", 0)),
+                                    'bid': float(ticker.get("bid", 0)),
+                                    'ask': float(ticker.get("ask", 0)),
+                                    'volume': float(ticker.get("volume", 0)),
+                                    'timestamp': datetime.now(timezone.utc).timestamp()
+                                }
+                                
+                                # Update price cache
+                                self.price_cache[ccxt_symbol] = price_data
+                                
+                                # Call registered callbacks
+                                if ccxt_symbol in self.price_callbacks:
+                                    for callback in self.price_callbacks[ccxt_symbol]:
+                                        try:
+                                            callback(ccxt_symbol, price_data['last'])
+                                        except Exception as e:
+                                            logger.error(f"Error in price callback for {ccxt_symbol}: {e}")
 
         if isinstance(data, list):
             for item in data:
@@ -553,6 +723,116 @@ class KrakenWSClient:
         if not self.token_created:
             return False
         return datetime.now(timezone.utc) - self.token_created > timedelta(minutes=14)
+
+    def _handle_connection_error(self, conn_type: str, error: Exception):
+        """Enhanced error handling with specific recovery strategies."""
+        logger.error(f"WebSocket {conn_type} error: {error}")
+        self.connection_health[conn_type]["errors"] += 1
+        self.message_stats["errors"] += 1
+
+        # Different strategies for different error types
+        if "timeout" in str(error).lower():
+            self._handle_timeout_error(conn_type)
+        elif "rate limit" in str(error).lower():
+            self._handle_rate_limit_error(conn_type)
+        else:
+            self._handle_generic_error(conn_type)
+
+    def _handle_timeout_error(self, conn_type: str):
+        """Handle timeout errors with exponential backoff."""
+        logger.warning(f"Timeout error on {conn_type} connection, marking as unhealthy")
+        self.connection_health[conn_type]["is_alive"] = False
+
+    def _handle_rate_limit_error(self, conn_type: str):
+        """Handle rate limiting errors."""
+        logger.warning(f"Rate limit error on {conn_type} connection, implementing backoff")
+        self.connection_health[conn_type]["is_alive"] = False
+
+    def _handle_generic_error(self, conn_type: str):
+        """Handle generic connection errors."""
+        logger.warning(f"Generic error on {conn_type} connection")
+        self.connection_health[conn_type]["is_alive"] = False
+
+    def _validate_message(self, message: str, max_size: int = 1048576) -> bool:
+        """Validate incoming WebSocket message."""
+        try:
+            # Check message size limits
+            if len(message) > max_size:
+                logger.warning(f"Message too large: {len(message)} bytes")
+                return False
+
+            # Validate JSON structure
+            json.loads(message)
+            return True
+        except json.JSONDecodeError:
+            logger.warning("Invalid JSON received")
+            self.message_stats["errors"] += 1
+            return False
+        except Exception as e:
+            logger.warning(f"Message validation error: {e}")
+            self.message_stats["errors"] += 1
+            return False
+
+    async def health_check_loop(self, interval: int = 30):
+        """Periodic health check for websocket connections."""
+        logger.info("Starting WebSocket health check loop")
+
+        while True:
+            try:
+                await asyncio.sleep(interval)
+
+                now = datetime.now(timezone.utc)
+
+                # Check public connection
+                if self.public_ws:
+                    last_heartbeat = self.connection_health["public"]["last_heartbeat"]
+                    if last_heartbeat and (now - last_heartbeat) > timedelta(seconds=60):
+                        logger.warning("Public WebSocket connection appears stale, attempting reconnect")
+                        self.connection_health["public"]["is_alive"] = False
+                        self.connect_public()
+                    elif not self.connection_health["public"]["is_alive"]:
+                        logger.info("Attempting to restore public WebSocket connection")
+                        self.connect_public()
+
+                # Check private connection
+                if self.private_ws:
+                    last_heartbeat = self.connection_health["private"]["last_heartbeat"]
+                    if last_heartbeat and (now - last_heartbeat) > timedelta(seconds=60):
+                        logger.warning("Private WebSocket connection appears stale, attempting reconnect")
+                        self.connection_health["private"]["is_alive"] = False
+                        self.connect_private()
+                    elif not self.connection_health["private"]["is_alive"]:
+                        logger.info("Attempting to restore private WebSocket connection")
+                        self.connect_private()
+
+                # Log health statistics
+                self._log_health_stats()
+
+            except asyncio.CancelledError:
+                logger.info("Health check loop cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in health check loop: {e}")
+                await asyncio.sleep(5)  # Brief pause before retrying
+
+    def _log_health_stats(self):
+        """Log connection health statistics."""
+        total_errors = sum(conn["errors"] for conn in self.connection_health.values())
+
+        logger.debug(
+            f"WebSocket health - Public: {self.connection_health['public']['is_alive']}, "
+            f"Private: {self.connection_health['private']['is_alive']}, "
+            f"Total errors: {total_errors}, "
+            f"Messages: {self.message_stats['total_received']}"
+        )
+
+    def get_connection_health(self) -> Dict[str, Any]:
+        """Get detailed connection health information."""
+        return {
+            "connections": self.connection_health.copy(),
+            "message_stats": self.message_stats.copy(),
+            "uptime": str(datetime.now() - self.start_time) if hasattr(self, 'start_time') else None
+        }
 
 
     def connect_public(self) -> None:
@@ -986,21 +1266,132 @@ class KrakenWSClient:
         side: str,
         order_qty: float,
         order_type: str = "market",
+        *,
+        limit_price: Optional[float] = None,
+        limit_price_type: Optional[str] = None,
+        triggers: Optional[Dict[str, Any]] = None,
+        time_in_force: Optional[str] = None,
+        margin: Optional[bool] = None,
+        post_only: Optional[bool] = None,
+        reduce_only: Optional[bool] = None,
+        effective_time: Optional[str] = None,
+        expire_time: Optional[str] = None,
+        deadline: Optional[str] = None,
+        cl_ord_id: Optional[str] = None,
+        order_userref: Optional[int] = None,
+        conditional: Optional[Dict[str, Any]] = None,
+        display_qty: Optional[float] = None,
+        fee_preference: Optional[str] = None,
+        no_mpp: Optional[bool] = None,
+        stp_type: Optional[str] = None,
+        cash_order_qty: Optional[float] = None,
+        validate: Optional[bool] = None,
+        sender_sub_id: Optional[str] = None,
+        req_id: Optional[int] = None,
     ) -> dict:
-        """Send an add_order request via the private websocket."""
+        """Send an add_order request via the private websocket.
+
+        Parameters
+        ----------
+        symbol : Union[str, List[str]]
+            Trading pair symbol (e.g., "XBT/USD")
+        side : str
+            Order side ("buy" or "sell")
+        order_qty : float
+            Order quantity in base asset
+        order_type : str, default "market"
+            Order type: "market", "limit", "stop-loss", "take-profit", etc.
+        limit_price : Optional[float]
+            Limit price for limit orders
+        limit_price_type : Optional[str]
+            Units for limit price ("static", "pct", "quote")
+        triggers : Optional[Dict[str, Any]]
+            Trigger parameters for stop-loss/take-profit orders
+        time_in_force : Optional[str]
+            Time-in-force ("gtc", "gtd", "ioc")
+        margin : Optional[bool]
+            Enable margin funding
+        post_only : Optional[bool]
+            Only post if it adds liquidity
+        reduce_only : Optional[bool]
+            Reduce existing position only
+        effective_time : Optional[str]
+            Scheduled start time (RFC3339)
+        expire_time : Optional[str]
+            Expiration time for GTD orders (RFC3339)
+        deadline : Optional[str]
+            Max lifetime before matching (RFC3339)
+        cl_ord_id : Optional[str]
+            Client order ID
+        order_userref : Optional[int]
+            User reference number
+        conditional : Optional[Dict[str, Any]]
+            Parameters for OTO orders
+        display_qty : Optional[float]
+            Display quantity for iceberg orders
+        fee_preference : Optional[str]
+            Fee preference ("base" or "quote")
+        no_mpp : Optional[bool]
+            Disable Market Price Protection
+        stp_type : Optional[str]
+            Self-trade prevention type
+        cash_order_qty : Optional[float]
+            Quote currency volume for buy market orders
+        validate : Optional[bool]
+            Validate only without trading
+        sender_sub_id : Optional[str]
+            Sub-account identifier
+        req_id : Optional[int]
+            Request ID for tracking
+
+        Returns
+        -------
+        dict
+            The WebSocket message sent
+        """
         self.connect_private()
         if isinstance(symbol, list):
             symbol = symbol[0] if symbol else ""
-        msg = {
-            "method": "add_order",
-            "params": {
-                "symbol": symbol,
-                "side": side,
-                "order_type": order_type,
-                "order_qty": str(order_qty),
-                "token": self.token,
-            },
+
+        params = {
+            "symbol": symbol,
+            "side": side,
+            "order_type": order_type,
+            "order_qty": order_qty,  # Keep as float, not string
+            "token": self.token,
         }
+
+        # Add optional parameters if provided
+        optional_params = {
+            "limit_price": limit_price,
+            "limit_price_type": limit_price_type,
+            "triggers": triggers,
+            "time_in_force": time_in_force,
+            "margin": margin,
+            "post_only": post_only,
+            "reduce_only": reduce_only,
+            "effective_time": effective_time,
+            "expire_time": expire_time,
+            "deadline": deadline,
+            "cl_ord_id": cl_ord_id,
+            "order_userref": order_userref,
+            "conditional": conditional,
+            "display_qty": display_qty,
+            "fee_preference": fee_preference,
+            "no_mpp": no_mpp,
+            "stp_type": stp_type,
+            "cash_order_qty": cash_order_qty,
+            "validate": validate,
+            "sender_sub_id": sender_sub_id,
+        }
+
+        # Only include non-None values
+        params.update({k: v for k, v in optional_params.items() if v is not None})
+
+        msg = {"method": "add_order", "params": params}
+        if req_id is not None:
+            msg["req_id"] = req_id
+
         data = json.dumps(msg)
         self.private_ws.send(data)
         return msg
@@ -1106,6 +1497,112 @@ class KrakenWSClient:
         self.private_ws.send(data)
         return msg
 
+    def subscribe_ticker(self, symbol: str) -> dict:
+        """Subscribe to ticker data for a symbol.
+        
+        Parameters
+        ----------
+        symbol : str
+            Trading pair symbol (e.g., "XBT/USD")
+        
+        Returns
+        -------
+        dict
+            Subscription message sent to WebSocket
+        """
+        # Convert symbol format from CCXT to Kraken format
+        kraken_symbol = symbol.replace("/", "")
+        
+        msg = {
+            "method": "subscribe",
+            "params": {
+                "channel": "ticker",
+                "symbol": [kraken_symbol]
+            }
+        }
+        
+        data = json.dumps(msg)
+        
+        # Ensure public WebSocket is connected
+        if not self.public_ws:
+            self.connect_public()
+            # Wait a moment for connection to establish
+            import time
+            time.sleep(0.5)
+        
+        # Check if connection is ready
+        if self.public_ws and self.public_ws.sock and self.public_ws.sock.connected:
+            self.public_ws.send(data)
+            self._public_subs.append(data)
+            logger.info(f"Subscribed to ticker for {symbol}")
+        else:
+            logger.warning(f"WebSocket not ready for {symbol}, subscription queued")
+            self._public_subs.append(data)
+        
+        return msg
+
+    def subscribe_ohlcv(self, symbol: str, interval: int = 1) -> dict:
+        """Subscribe to OHLCV data for a symbol.
+        
+        Parameters
+        ----------
+        symbol : str
+            Trading pair symbol (e.g., "XBT/USD")
+        interval : int
+            Interval in minutes (1, 5, 15, 30, 60, 240, 1440, 10080, 21600)
+        
+        Returns
+        -------
+        dict
+            Subscription message sent to WebSocket
+        """
+        # Convert symbol format from CCXT to Kraken format
+        kraken_symbol = symbol.replace("/", "")
+        
+        # Map interval to Kraken format
+        interval_map = {
+            1: 1,      # 1m
+            5: 5,      # 5m  
+            15: 15,    # 15m
+            30: 30,    # 30m
+            60: 60,    # 1h
+            240: 240,  # 4h
+            1440: 1440, # 1d
+            10080: 10080, # 1w
+            21600: 21600  # 1M
+        }
+        
+        kraken_interval = interval_map.get(interval, 1)
+        
+        msg = {
+            "method": "subscribe",
+            "params": {
+                "channel": "ohlc",
+                "symbol": [kraken_symbol],
+                "interval": kraken_interval
+            }
+        }
+        
+        data = json.dumps(msg)
+        
+        # Ensure public WebSocket is connected
+        if not self.public_ws:
+            self.connect_public()
+            # Wait a moment for connection to establish
+            import time
+            time.sleep(0.5)
+        
+        # Check if connection is ready
+        if self.public_ws and self.public_ws.sock and self.public_ws.sock.connected:
+            self.public_ws.send(data)
+            self._public_subs.append(data)
+            logger.info(f"Subscribed to OHLCV for {symbol} with interval {interval}")
+        else:
+            logger.warning(f"WebSocket not ready for {symbol}, OHLCV subscription queued")
+            self._public_subs.append(data)
+        
+        return msg
+
     def ping(self, req_id: Optional[int] = None) -> dict:
         """Send a ping message to keep the websocket connection alive."""
         msg = {"method": "ping", "req_id": req_id}
@@ -1142,8 +1639,26 @@ class KrakenWSClient:
             for sub in self._private_subs:
                 self.private_ws.send(sub)
 
+    def start_health_monitoring(self, interval: int = 30):
+        """Start the health check monitoring loop."""
+        if self.health_check_task and not self.health_check_task.done():
+            logger.warning("Health check already running")
+            return
+
+        self.health_check_task = asyncio.create_task(self.health_check_loop(interval))
+        logger.info("Started WebSocket health monitoring")
+
+    def stop_health_monitoring(self):
+        """Stop the health check monitoring loop."""
+        if self.health_check_task and not self.health_check_task.done():
+            self.health_check_task.cancel()
+            logger.info("Stopped WebSocket health monitoring")
+
     def close(self) -> None:
         """Close active WebSocket connections and clear subscriptions."""
+
+        # Stop health monitoring
+        self.stop_health_monitoring()
 
         if self.public_ws:
             try:

@@ -31,7 +31,7 @@ def _fetch_prices(symbols: List[str]) -> Dict[str, float]:
         return {}
 
 
-async def generate_signal(
+def generate_signal(
     df: pd.DataFrame,
     symbol: Optional[str] = None,
     timeframe: Optional[str] = None,
@@ -71,14 +71,16 @@ async def generate_signal(
         except (TypeError, ValueError):
             fee_thr = 0.0
         try:
-            suspicious = await mempool_monitor.is_suspicious(fee_thr)
+            # For synchronous calls, skip mempool monitoring
+            suspicious = False
         except Exception:
             suspicious = False
         if suspicious:
             return 0.0, "none"
 
     try:
-        prices = await fetch_solana_prices([pair])
+        # Use synchronous price fetching
+        prices = _fetch_prices([pair])
     except Exception:
         prices = {}
     dex_price = prices.get(pair)

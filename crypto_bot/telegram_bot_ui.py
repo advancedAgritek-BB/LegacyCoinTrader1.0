@@ -5,6 +5,7 @@ import threading
 import time
 import json
 import yaml
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
@@ -108,6 +109,11 @@ class TelegramBotUI:
         self.command_cooldown = command_cooldown
         self._last_exec: Dict[Tuple[str, str], float] = {}
         self.logger = setup_logger(__name__, LOG_DIR / "telegram_ui.log")
+        
+        # Process lock to prevent multiple instances
+        self.lock_file = LOG_DIR / "telegram_bot.lock"
+        self.lock_fd = None
+        self._acquire_lock()
 
         self.app = ApplicationBuilder().token(self.token).build()
         if hasattr(self.app, "bot_data"):
@@ -167,6 +173,7 @@ class TelegramBotUI:
                 EDIT_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_config_value)]
             },
             fallbacks=[],
+            per_message=True,  # Explicitly set to fix PTBUserWarning
         )
         self.app.add_handler(conv)
         self.app.add_handler(
@@ -195,18 +202,27 @@ class TelegramBotUI:
             return
 
         try:
-            from crypto_bot.utils.telegram import clear_paper_trading_cache
+            # Import here to avoid circular imports
+            try:
+                from crypto_bot.utils.telegram import clear_paper_trading_cache
+            except ImportError:
+                await self._reply(
+                    update,
+                    "❌ Cache clearing functionality not available",
+                    reply_markup=_back_to_menu_markup()
+                )
+                return
 
             # Get the paper wallet from the controller or direct reference
             paper_wallet = getattr(self, 'paper_wallet', None)
 
             # Try to get context from the controller if available
-            context = None
+            ctx = None
             if hasattr(self.controller, 'get_context'):
-                context = self.controller.get_context()
+                ctx = self.controller.get_context()
 
             # Clear the cache
-            result = clear_paper_trading_cache(paper_wallet=paper_wallet, context=context)
+            result = clear_paper_trading_cache(paper_wallet=paper_wallet, context=ctx)
 
             await self._reply(
                 update,
@@ -221,6 +237,69 @@ class TelegramBotUI:
                 error_msg,
                 reply_markup=_back_to_menu_markup()
             )
+
+    def _acquire_lock(self) -> None:
+        """Acquire a file lock to prevent multiple instances."""
+        try:
+            # Remove stale lock file if it exists
+            if self.lock_file.exists():
+                try:
+                    # Try to read PID from lock file
+                    pid = int(self.lock_file.read_text().strip())
+                    # Check if process is still running
+                    os.kill(pid, 0)
+                    # If we get here, process is running
+                    self.logger.warning(f"Telegram bot already running with PID {pid}")
+                    # Instead of raising error, just log and continue - let user decide
+                    self.logger.warning("Multiple instances detected. Consider stopping other instances.")
+                    # Remove stale lock to allow this instance to take over
+                    self.lock_file.unlink()
+                except (ValueError, OSError, ProcessLookupError):
+                    # Process not running, remove stale lock
+                    self.lock_file.unlink()
+                    self.logger.info("Removed stale lock file from dead process")
+
+            # Create lock file with current PID
+            self.lock_fd = os.open(self.lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(self.lock_fd, str(os.getpid()).encode())
+            os.close(self.lock_fd)
+            self.logger.info(f"Telegram bot lock acquired by PID {os.getpid()}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to acquire lock: {e}")
+            raise
+
+    def _release_lock(self) -> None:
+        """Release the file lock."""
+        try:
+            if self.lock_file.exists():
+                self.lock_file.unlink()
+                self.logger.info("Telegram bot lock released")
+        except Exception as e:
+            self.logger.error(f"Failed to release lock: {e}")
+
+    def __del__(self) -> None:
+        """Cleanup when object is destroyed."""
+        try:
+            self._release_lock()
+        except Exception:
+            pass  # Ignore errors during cleanup
+
+    async def shutdown(self) -> None:
+        """Gracefully shutdown the Telegram bot."""
+        try:
+            self.logger.info("Shutting down Telegram bot...")
+            if self.task and not self.task.done():
+                self.task.cancel()
+                try:
+                    await self.task
+                except asyncio.CancelledError:
+                    pass
+            await self.app.stop()
+            self._release_lock()
+            self.logger.info("Telegram bot shutdown complete")
+        except Exception as e:
+            self.logger.error(f"Error during Telegram bot shutdown: {e}")
 
     def run_async(self) -> None:
         """Start polling within the current event loop."""
@@ -281,6 +360,7 @@ class TelegramBotUI:
         schedule.clear()
         if self.scheduler_thread and self.scheduler_thread.is_alive():
             self.scheduler_thread.join(timeout=2)
+        self._release_lock()
 
     async def _check_admin(self, update: Update) -> bool:
         """Verify the update came from an authorized chat."""

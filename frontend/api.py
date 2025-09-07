@@ -47,6 +47,61 @@ POS_PATTERN = re.compile(
 @app.get("/positions")
 def positions() -> List[dict]:
     """Return parsed position log entries."""
+    try:
+        # Try to get positions from TradeManager first (more accurate)
+        from crypto_bot.utils.trade_manager import TradeManager
+        tm = TradeManager()
+        positions = tm.get_all_positions()
+        
+        entries = []
+        for pos in positions:
+            if pos.is_open:  # Only return open positions
+                # Get current price for P&L calculation
+                try:
+                    import ccxt
+                    exchange = ccxt.kraken()
+                    ticker = exchange.fetch_ticker(pos.symbol)
+                    current_price = ticker['last']
+                    
+                    # Calculate P&L
+                    pnl, pnl_pct = pos.calculate_unrealized_pnl(current_price)
+                    
+                    # Calculate current value
+                    current_value = float(pos.total_amount) * current_price
+                    
+                    entries.append({
+                        "symbol": pos.symbol,
+                        "side": pos.side,
+                        "amount": float(pos.total_amount),
+                        "entry_price": float(pos.average_price),
+                        "current_price": current_price,
+                        "position_value": current_value,
+                        "pnl": float(pnl),
+                        "balance": 0.0,  # Will be calculated separately
+                    })
+                except Exception as e:
+                    # Fallback to position data without current price
+                    # Calculate current value
+                    current_value = float(pos.total_amount) * float(pos.average_price)
+                    
+                    entries.append({
+                        "symbol": pos.symbol,
+                        "side": pos.side,
+                        "amount": float(pos.total_amount),
+                        "entry_price": float(pos.average_price),
+                        "current_price": float(pos.average_price),  # Use entry price as fallback
+                        "position_value": current_value,
+                        "pnl": 0.0,
+                        "balance": 0.0,
+                    })
+        
+        if entries:
+            return entries
+            
+    except Exception as e:
+        print(f"Error getting positions from TradeManager: {e}")
+    
+    # Fallback to log file parsing
     if not POSITIONS_FILE.exists():
         return []
     entries: List[dict] = []
@@ -61,6 +116,7 @@ def positions() -> List[dict]:
                 "amount": float(match.group("amount")),
                 "entry_price": float(match.group("entry")),
                 "current_price": float(match.group("current")),
+                "position_value": float(match.group("amount")) * float(match.group("current")),
                 "pnl": float(match.group("pnl")),
                 "balance": float(match.group("balance")),
             }

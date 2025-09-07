@@ -5,19 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ title or 'LegacyCoinTrader' }}</title>
   
-  <!-- Bootstrap CSS -->
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Bootstrap CSS (local fallback to satisfy CSP) -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap.min.css') }}">
   
   <!-- Font Awesome for icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  
-  <!-- Chart.js for charts -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v={{ range(1000, 9999) | random }}">
 </head>
-<body class="dark-theme">
+<body class="dark-theme" data-mode="{{ mode or 'dry_run' }}">
   <!-- Sidebar Navigation -->
   <div class="sidebar">
     <div class="sidebar-header">
@@ -30,7 +32,7 @@
     <nav class="sidebar-nav">
       <ul class="nav-list">
         <li class="nav-item">
-          <a href="{{ url_for('index') }}" class="nav-link">
+          <a href="{{ url_for('dashboard') }}" class="nav-link">
             <i class="fas fa-home"></i>
             <span>Dashboard</span>
           </a>
@@ -108,8 +110,15 @@
       <div class="header-right">
         <div class="header-stats">
           <div class="stat-item">
-            <i class="fas fa-clock"></i>
-            <span>{{ uptime or 'N/A' }}</span>
+            <i class="fas fa-wallet"></i>
+            <span id="headerWalletBalance">
+              ${{ '%.2f' | format((paper_wallet_balance if mode == 'dry_run' else (available_balance or balance)) or 0.0) }}
+            </span>
+          </div>
+          <div class="stat-item">
+            <i class="fas fa-chart-line"></i>
+            {% set _unreal = (pnl_data.unrealized_pnl if pnl_data else unrealized_pnl) | default(0.0) %}
+            <span id="headerUnrealizedPnl">{{ '+' if _unreal >= 0 else '' }}${{ '%.2f' | format(_unreal) }}</span>
           </div>
           <div class="stat-item">
             <i class="fas fa-cog"></i>
@@ -127,7 +136,7 @@
 
   <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -4,11 +4,16 @@ regression."""
 from typing import Optional, Tuple
 
 import logging
+import warnings
 import numpy as np
 import pandas as pd
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel, WhiteKernel
 from sklearn.preprocessing import StandardScaler
+
+# Suppress scikit-learn convergence warnings since we handle them in custom optimizer
+warnings.filterwarnings('ignore', message='*close to the specified*', category=UserWarning)
+warnings.filterwarnings('ignore', message='*ConvergenceWarning*', category=UserWarning)
 
 
 from scipy import stats
@@ -53,9 +58,9 @@ def kernel_regression(df: pd.DataFrame, window: int) -> float:
     y_scaled = y_scaler.fit_transform(y_proc).ravel()
 
     kernel = (
-        ConstantKernel(1.0, constant_value_bounds=(1e-3, 1e3))
-        * RBF(1.0, length_scale_bounds=(1e-3, 1e3))
-        + WhiteKernel(noise_level=1e-6)
+        ConstantKernel(1.0, constant_value_bounds=(1e-5, 1e5))
+        * RBF(1.0, length_scale_bounds=(1e-5, 1e5))
+        + WhiteKernel(noise_level=1e-6, noise_level_bounds=(1e-10, 1e-2))
     )
 
     def _optimizer(obj_func, initial_theta, bounds):

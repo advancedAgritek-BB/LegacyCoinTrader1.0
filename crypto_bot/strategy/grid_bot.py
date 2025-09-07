@@ -290,7 +290,14 @@ def generate_signal(
     breakout_range = (high - low) / 2
     breakout_threshold = breakout_range * cfg.breakout_mult
     if price > centre + breakout_threshold or price < centre - breakout_threshold:
-        return breakout_bot.generate_signal(df, _as_dict(config))
+        result = breakout_bot.generate_signal(df, _as_dict(config), higher_df)
+        # breakout_bot returns (score, direction, atr) when higher_df is None
+        # or (score, direction) when higher_df is provided
+        if len(result) == 3:
+            score, direction, _ = result
+        else:
+            score, direction = result
+        return score, direction
 
     lower_bound = levels[1]
     upper_bound = levels[-2]

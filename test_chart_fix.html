@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chart Fix Test</title>
+</head>
+<body>
+    <h1>Testing 5m Chart Data Fix</h1>
+    <canvas id="test-chart" width="300" height="100" style="border: 1px solid #ccc;"></canvas>
+    <div id="debug-info"></div>
+
+    <script>
+        // Test the fixed fetchRealChartData function
+        async function fetchRealChartData(symbol, position) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+            console.log('Fetching chart data for ' + symbol + ' with 5m interval');
+            const response = await fetch('/api/candle-data?symbol=' + encodeURIComponent(symbol) + '&limit=50&interval=5m', {
+              signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+              throw new Error('HTTP ' + response.status);
+            }
+
+            const data = await response.json();
+            console.log('Received data for ' + symbol + ':', data);
+            
+            if (data.error) {
+              throw new Error(data.error);
+            }
+
+            // Convert candle data to price array
+            const prices = data.candles.map(candle => parseFloat(candle.close));
+            console.log('Converted to prices array for ' + symbol + ':', prices.length + ' points');
+            return prices;
+          } catch (error) {
+            if (error.name === 'AbortError') {
+              console.warn('Request timeout for ' + symbol);
+            } else {
+              console.warn('Failed to fetch real chart data for ' + symbol + ': ' + error);
+            }
+            return null;
+          }
+        }
+
+        // Test function
+        async function testChartData() {
+            const debugDiv = document.getElementById('debug-info');
+            const canvas = document.getElementById('test-chart');
+            const ctx = canvas.getContext('2d');
+            
+            debugDiv.innerHTML = 'Testing chart data fetch...';
+            
+            try {
+                const testPosition = {
+                    symbol: 'BTC/USD',
+                    entry_price: 50000,
+                    pnl: 1000
+                };
+                
+                const chartData = await fetchRealChartData('BTC/USD', testPosition);
+                
+                if (chartData && chartData.length > 0) {
+                    debugDiv.innerHTML = `✅ Success! Received ${chartData.length} data points<br>First few prices: ${chartData.slice(0, 5).join(', ')}`;
+                    
+                    // Draw a simple chart
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.strokeStyle = '#00ff88';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    
+                    const minPrice = Math.min(...chartData);
+                    const maxPrice = Math.max(...chartData);
+                    const priceRange = maxPrice - minPrice;
+                    
+                    for (let i = 0; i < chartData.length; i++) {
+                        const x = (i / (chartData.length - 1)) * canvas.width;
+                        const y = canvas.height - ((chartData[i] - minPrice) / priceRange) * canvas.height;
+                        
+                        if (i === 0) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    }
+                    ctx.stroke();
+                    
+                } else {
+                    debugDiv.innerHTML = '❌ No data received';
+                }
+                
+            } catch (error) {
+                debugDiv.innerHTML = `❌ Error: ${error.message}`;
+                console.error('Test error:', error);
+            }
+        }
+        
+        // Run test when page loads
+        window.addEventListener('load', testChartData);
+    </script>
+</body>
+</html>

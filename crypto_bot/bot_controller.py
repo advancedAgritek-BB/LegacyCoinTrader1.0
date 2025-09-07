@@ -150,8 +150,45 @@ class TradingBotController:
         return {"strategy": name, "enabled": self.enabled[name]}
 
     async def list_positions(self) -> List[Dict]:
-        """Return currently open positions parsed from the trade log."""
-        return get_open_trades(self.trades_file)
+        """Return currently open positions from TradeManager (source of truth)."""
+        try:
+            from crypto_bot.utils.trade_manager import get_trade_manager
+            trade_manager = get_trade_manager()
+
+            positions = trade_manager.get_all_positions()
+            result = []
+
+            for pos in positions:
+                if pos.is_open:
+                    # Get current price from TradeManager's cache
+                    current_price = float(trade_manager.price_cache.get(pos.symbol, pos.average_price))
+
+                    # Calculate unrealized P&L
+                    from decimal import Decimal
+                    pnl, pnl_pct = pos.calculate_unrealized_pnl(Decimal(str(current_price)))
+
+                    result.append({
+                        "symbol": pos.symbol,
+                        "side": pos.side,
+                        "amount": float(pos.total_amount),
+                        "price": float(pos.average_price),
+                        "current_price": current_price,
+                        "pnl": float(pnl),
+                        "pnl_percentage": float(pnl_pct),
+                        "entry_time": pos.entry_time.isoformat(),
+                        "source": "trade_manager"
+                    })
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"Failed to get positions from TradeManager: {e}")
+            # Fallback to CSV-based method (deprecated)
+            try:
+                return get_open_trades(self.trades_file)
+            except Exception as csv_e:
+                self.logger.error(f"Failed to get positions from CSV fallback: {csv_e}")
+                return []
 
     async def close_position(self, symbol: str, amount: float) -> Dict:
         """Submit a market order closing ``amount`` of ``symbol``."""

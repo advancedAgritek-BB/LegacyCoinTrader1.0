@@ -11,9 +11,9 @@ error_handling:
 # Rate limiting configuration
 rate_limiting:
   enabled: true
-  default_delay: 0.1  # seconds between requests
-  burst_limit: 10
-  burst_window: 1.0  # seconds
+  default_delay: 1.0  # seconds between requests (increased from 0.1)
+  burst_limit: 5       # reduced from 10
+  burst_window: 2.0    # seconds (increased from 1.0)
 
 # Exchange-specific error handling
 exchanges:
@@ -26,7 +26,7 @@ exchanges:
       - "EService:Unavailable"
       - "EService:Busy"
     max_retries: 5
-    retry_delay: 2.0
+    retry_delay: 5.0  # increased from 2.0
     
   coinbase:
     retry_on_errors:
@@ -60,8 +60,8 @@ notifications:
 # Circuit breaker settings
 circuit_breaker:
   enabled: true
-  failure_threshold: 5
-  recovery_timeout: 60  # seconds
+  failure_threshold: 15  # increased from 5 to be more forgiving
+  recovery_timeout: 120  # seconds (increased from 60)
   expected_exception: "requests.RequestException"
 
 # Fallback strategies

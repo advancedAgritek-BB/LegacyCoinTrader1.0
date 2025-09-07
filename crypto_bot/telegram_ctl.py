@@ -172,3 +172,43 @@ async def panic_sell_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(text)
 
 
+class TelegramController:
+    """Telegram bot controller for managing trading operations."""
+    
+    def __init__(self, bot_token: str, admin_id: str, controller: BotController = None):
+        self.bot_token = bot_token
+        self.admin_id = admin_id
+        self.controller = controller or BotController({})
+        self.running = False
+    
+    async def start(self) -> str:
+        """Start the Telegram bot."""
+        self.running = True
+        return "Telegram bot started"
+    
+    async def stop(self) -> str:
+        """Stop the Telegram bot."""
+        self.running = False
+        return "Telegram bot stopped"
+    
+    async def get_status(self) -> str:
+        """Get bot status."""
+        return await self.controller.get_status()
+    
+    async def list_positions(self) -> str:
+        """List current positions."""
+        return await self.controller.list_positions()
+    
+    async def close_all_positions(self) -> str:
+        """Close all positions."""
+        return await self.controller.close_all_positions()
+    
+    async def reload_config(self) -> str:
+        """Reload configuration."""
+        return await self.controller.reload_config()
+    
+    def is_admin(self, user_id: str) -> bool:
+        """Check if user is admin."""
+        return str(user_id) == str(self.admin_id)
+
+

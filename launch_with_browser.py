@@ -73,28 +73,70 @@ def open_browser_delayed(url, delay=3):
 def start_services():
     """Start all the required services."""
     print("🚀 Starting LegacyCoinTrader...")
-    
+
     # Start main application
     print("📊 Starting main trading bot...")
     main_proc = subprocess.Popen([sys.executable, "-m", "crypto_bot.main"])
-    
-    # Start web frontend
+
+    # Start web frontend and capture its port
     print("🌐 Starting web dashboard...")
-    frontend_proc = subprocess.Popen([sys.executable, "-m", "frontend.app"])
-    
+    import tempfile
+    import time
+
+    temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False)
+    temp_file.close()
+
+    frontend_proc = subprocess.Popen([sys.executable, "-m", "frontend.app"],
+                                   stdout=open(temp_file.name, 'w'),
+                                   stderr=subprocess.STDOUT)
+
+    # Wait for Flask to start and write port info
+    time.sleep(3)
+
+    # Extract the port from the Flask output
+    flask_port = 8000  # default fallback
+    try:
+        with open(temp_file.name, 'r') as f:
+            content = f.read()
+            # Look for FLASK_PORT= line
+            for line in content.split('\n'):
+                if line.startswith('FLASK_PORT='):
+                    port_str = line.strip().split('=')[1]
+                    flask_port = int(port_str)
+                    print(f"✅ Detected Flask port: {flask_port}")
+                    break
+            else:
+                # Try alternative pattern matching
+                import re
+                port_match = re.search(r'FLASK_PORT=(\d+)', content)
+                if port_match:
+                    flask_port = int(port_match.group(1))
+                    print(f"✅ Detected Flask port via regex: {flask_port}")
+                else:
+                    print("⚠️ Could not detect Flask port, using default 8000")
+    except (FileNotFoundError, ValueError, IndexError) as e:
+        print(f"⚠️ Error reading port from Flask output: {e}, using default 8000")
+        flask_port = 8000  # fallback
+
+    # Clean up temp file
+    try:
+        os.unlink(temp_file.name)
+    except OSError:
+        pass
+
     # Start Telegram bot
     print("📱 Starting Telegram bot...")
     telegram_proc = subprocess.Popen([sys.executable, "telegram_ctl.py"])
-    
+
     print("")
     print("🎉 LegacyCoinTrader is now running!")
     print("📊 Main bot PID:", main_proc.pid)
-    print("🌐 Web dashboard: http://localhost:8000")
+    print(f"🌐 Web dashboard: http://localhost:{flask_port}")
     print("📱 Telegram bot PID:", telegram_proc.pid)
     print("")
-    
+
     # Open browser after a delay
-    open_browser_delayed("http://localhost:8000", 3)
+    open_browser_delayed(f"http://localhost:{flask_port}", 2)
     
     print("Press Ctrl+C to stop all services")
     

@@ -487,7 +487,9 @@ STRATEGY_MAP, REGIME_STRATEGIES = _build_mappings_cached(id(DEFAULT_ROUTER_CFG))
 
 
 def strategy_for(
-    regime: str, config: Optional[Union[RouterConfig, Mapping[str, Any]]] = None
+    regime: str, 
+    df: Optional[pd.DataFrame] = None,
+    config: Optional[Union[RouterConfig, Mapping[str, Any]]] = None
 ) -> Callable[[pd.DataFrame], Tuple[float, str]]:
     """Return strategy callable for a given regime."""
     cfg = config or DEFAULT_ROUTER_CFG

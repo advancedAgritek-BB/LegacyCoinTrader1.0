@@ -1,0 +1,29 @@
+[Unit]
+Description=Trading Bot Pipeline Monitoring Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=brandonburnette
+WorkingDirectory=/Users/brandonburnette/Downloads/LegacyCoinTrader1.0
+ExecStart=/usr/local/bin/python3 enhanced_monitoring.py --daemon
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONPATH=/Users/brandonburnette/Downloads/LegacyCoinTrader1.0
+
+# Security settings
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/Users/brandonburnette/Downloads/LegacyCoinTrader1.0
+PrivateTmp=yes
+
+# Resource limits
+MemoryLimit=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

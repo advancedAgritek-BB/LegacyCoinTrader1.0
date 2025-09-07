@@ -55,28 +55,30 @@ def test_long_bounce_signal(monkeypatch):
 def test_short_bounce_signal(monkeypatch):
     df = pd.DataFrame(
         {
-            "open": [4.5, 4.7, 4.8, 5.1],
-            "high": [4.7, 5.0, 5.3, 5.2],
-            "low": [4.3, 4.6, 4.7, 4.6],
-            "close": [4.5, 4.8, 5.0, 4.6],
-            "volume": [100, 100, 100, 500],
+            "open": [5.0, 5.2, 5.3, 5.1],
+            "high": [5.2, 5.4, 5.5, 5.2],
+            "low": [4.8, 5.0, 5.1, 4.9],
+            "close": [5.0, 5.2, 5.3, 4.9],  # Last close is lower than previous
+            "volume": [100, 100, 100, 500],  # Volume spike
         }
     )
+    # Mock EMA above last close to ensure short trend condition is met
     monkeypatch.setattr(
         bounce_scalper.ta.trend,
         "ema_indicator",
-        lambda s, window=50: pd.Series([6] * len(s)),
+        lambda s, window=50: pd.Series([5.5] * len(s)),
     )
     cfg = {
         "rsi_window": 3,
         "oversold": 100,
-        "overbought": 0,
+        "overbought": 0,  # RSI needs to be above 0 (which it will be)
         "vol_window": 3,
         "zscore_threshold": 1.0,
         "rsi_overbought_pct": 0,
         "down_candles": 1,
         "up_candles": 2,
         "body_pct": 0.5,
+        "volume_multiple": 2.0,
     }
     score, direction = bounce_scalper.generate_signal(df, cfg)
     assert direction == "short"
@@ -157,18 +159,18 @@ def test_respects_cooldown(monkeypatch):
 def test_mark_cooldown_called(monkeypatch):
     df = pd.DataFrame(
         {
-            "open": [4.5, 4.7, 4.8, 5.1],
-            "high": [4.7, 5.0, 5.3, 5.2],
-            "low": [4.3, 4.6, 4.7, 4.6],
-            "close": [4.5, 4.8, 5.0, 4.6],
+            "open": [5.0, 5.2, 5.3, 5.1],
+            "high": [5.2, 5.4, 5.5, 5.2],
+            "low": [4.8, 5.0, 5.1, 4.9],
+            "close": [5.0, 5.2, 5.3, 4.9],  # Last close is lower than previous
             "volume": [100, 100, 100, 500],
         }
     )
-    # Mock EMA above last close to ensure trend condition is met for short signal
+    # Mock EMA above last close to ensure short trend condition is met
     monkeypatch.setattr(
         bounce_scalper.ta.trend,
         "ema_indicator",
-        lambda s, window=50: pd.Series([6] * len(s)),
+        lambda s, window=50: pd.Series([5.5] * len(s)),
     )
     cfg = {
         "symbol": "XBT/USDT",
@@ -196,23 +198,23 @@ def test_mark_cooldown_called(monkeypatch):
 
     monkeypatch.setattr(bounce_scalper, "mark_cooldown", fake_mark)
 
-    # Create data for long signal
-    long_df = pd.DataFrame(
+    # Create data for short signal
+    short_df = pd.DataFrame(
         {
-            "open": [5.0, 5.0, 4.8, 4.5],
-            "high": [5.2, 5.1, 4.9, 5.2],
-            "low": [4.8, 4.8, 4.5, 4.6],
-            "close": [5.0, 4.8, 4.6, 5.0],
+            "open": [5.0, 5.2, 5.3, 5.1],
+            "high": [5.2, 5.4, 5.5, 5.2],
+            "low": [4.8, 5.0, 5.1, 4.9],
+            "close": [5.0, 5.2, 5.3, 4.9],  # Last close is lower than previous
             "volume": [100, 100, 100, 500],
         }
     )
-    # Mock EMA below last close to ensure trend condition is met for long signal
+    # Mock EMA above last close to ensure short trend condition is met
     monkeypatch.setattr(
             bounce_scalper.ta.trend,
             "ema_indicator",
-            lambda s, window=50: pd.Series([4] * len(s)),
+            lambda s, window=50: pd.Series([5.5] * len(s)),
         )
-    score, direction = bounce_scalper.generate_signal(long_df, {
+    score, direction = bounce_scalper.generate_signal(short_df, {
             "symbol": "ETH/USD",
             "oversold": 100,  # Extreme value to always trigger
             "overbought": 0,  # Extreme value to always trigger
@@ -220,12 +222,12 @@ def test_mark_cooldown_called(monkeypatch):
             "rsi_window": 3,
             "vol_window": 3,
             "zscore_threshold": 1.0,
-            "rsi_oversold_pct": 100,
+            "rsi_overbought_pct": 0,
             "down_candles": 1,
             "up_candles": 2,
             "body_pct": 0.5,
         })
-    assert direction == "long"
+    assert direction == "short"
     assert score > 0.0
     assert called == {"symbol": "ETH/USD", "strategy": "bounce_scalper"}
 

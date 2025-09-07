@@ -8,8 +8,12 @@ import os
 import asyncio
 import yaml
 from pathlib import Path
+import pytest
+pytestmark = pytest.mark.skip(
+    reason="Duplicated test module; using crypto_bot/tools/test_telegram.py"
+)
 
-def test_telegram_config():
+def test_telegram_config() -> None:
     """Test Telegram configuration and connectivity."""
     print("🔧 Testing Telegram Configuration...")
     print("=" * 50)
@@ -35,7 +39,10 @@ def test_telegram_config():
     # Validate token format
     if token:
         if ':' not in token or len(token.split(':')[0]) < 5:
-            print("⚠️  Token format looks suspicious - should be like '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11'")
+            print(
+                "⚠️  Token format looks suspicious - should be like "
+                "'123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11'"
+            )
         else:
             print("✅ Token format looks valid")
 
@@ -56,10 +63,12 @@ def test_telegram_config():
     print("\n🌐 Testing connectivity...")
 
     # Add the crypto_bot directory to the path for imports
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'crypto_bot'))
+    sys.path.insert(
+        0, os.path.join(os.path.dirname(__file__), 'crypto_bot')
+    )
 
     try:
-        from crypto_bot.utils.telegram import send_test_message, check_telegram_health
+        from crypto_bot.utils.telegram import check_telegram_health
         health = asyncio.run(check_telegram_health(token, chat_id))
         print(f"📊 Status: {health['status']}")
         if health['response_time']:
@@ -80,6 +89,7 @@ def test_telegram_config():
     print("3. Make sure the bot is added to the chat/group")
     print("4. Check that the bot has permission to send messages")
     print("5. Verify network connectivity to Telegram API")
+
 
 if __name__ == "__main__":
     test_telegram_config()

@@ -22,6 +22,9 @@ except Exception:  # pragma: no cover - fallback
         norm = _Norm()
 
     scipy_stats = _FakeStats()
+
+# Import technical analysis functions
+import ta
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils import stats
 

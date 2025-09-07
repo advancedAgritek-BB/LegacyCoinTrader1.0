@@ -26,14 +26,63 @@ _LOOKBACK_DEFAULT = 20
 _CORRELATION_THRESHOLD = 0.8
 
 
+def _single_asset_signal(
+    df: pd.DataFrame,
+    symbol: Optional[str] = None,
+    timeframe: Optional[str] = None,
+    **kwargs,
+) -> Tuple[float, str]:
+    """Generate signal for single asset using mean reversion."""
+    if df is None or df.empty or len(df) < 20:
+        return 0.0, "none"
+
+    config = kwargs.get("config", {})
+    lookback = config.get("lookback", _LOOKBACK_DEFAULT)
+    z_threshold = config.get("zscore_threshold", _ZSCORE_THRESHOLD_DEFAULT)
+
+    # Calculate z-score of price relative to moving average
+    ma = df["close"].rolling(window=lookback).mean()
+    std = df["close"].rolling(window=lookback).std()
+    zscore = (df["close"] - ma) / std
+
+    if zscore.empty:
+        return 0.0, "none"
+
+    latest_z = zscore.iloc[-1]
+    if pd.isna(latest_z):
+        return 0.0, "none"
+
+    # Generate signals based on z-score
+    if latest_z < -z_threshold:
+        # Price is below mean, potential long
+        score = min(abs(latest_z) / z_threshold, 1.0)
+        return score, "long"
+    elif latest_z > z_threshold:
+        # Price is above mean, potential short
+        score = min(latest_z / z_threshold, 1.0)
+        return score, "short"
+
+    return 0.0, "none"
+
+
 def generate_signal(
     df_a,
-    df_b,
+    df_b=None,
     symbol: Optional[str] = None,
     timeframe: Optional[str] = None,
     **kwargs,
 ) -> Tuple[float, str]:
     """Return (score, direction) based on the price spread z-score."""
+    # Handle single dataframe case (for compatibility with strategy router)
+    if df_b is None:
+        # For single asset, use a simplified mean-reversion approach
+        if isinstance(df_a, dict):
+            try:
+                df_a = pd.DataFrame.from_dict(df_a)
+            except Exception:
+                return 0.0, "none"
+        return _single_asset_signal(df_a, symbol, timeframe, **kwargs)
+
     # Handle type conversion from dict to DataFrame
     if isinstance(df_a, dict):
         try:

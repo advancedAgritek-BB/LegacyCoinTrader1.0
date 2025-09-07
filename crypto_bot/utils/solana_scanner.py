@@ -165,7 +165,15 @@ async def get_solana_new_tokens(config: dict) -> List[str]:
     if not tasks:
         return []
 
-    results = await asyncio.gather(*tasks)
+    try:
+        # Add timeout to prevent hanging
+        results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=30.0)
+    except asyncio.TimeoutError:
+        logger.warning("Solana scanner timed out after 30 seconds")
+        return []
+    except Exception as exc:
+        logger.error("Solana scanner failed: %s", exc)
+        return []
     candidates: List[str] = []
     seen_raw: set[str] = set()
     for res in results:
@@ -181,9 +189,18 @@ async def get_solana_new_tokens(config: dict) -> List[str]:
     if not gecko_search:
         return [f"{m}/USDC" for m in candidates]
 
-    search_results = await asyncio.gather(
-        *[search_geckoterminal_token(m) for m in candidates]
-    )
+    try:
+        # Add timeout to prevent hanging on GeckoTerminal searches
+        search_results = await asyncio.wait_for(
+            asyncio.gather(*[search_geckoterminal_token(m) for m in candidates]),
+            timeout=20.0
+        )
+    except asyncio.TimeoutError:
+        logger.warning("GeckoTerminal search timed out after 20 seconds, skipping volume filtering")
+        return [f"{m}/USDC" for m in candidates]
+    except Exception as exc:
+        logger.error("GeckoTerminal search failed: %s", exc)
+        return [f"{m}/USDC" for m in candidates]
 
     final: list[Tuple[str, float]] = []
     seen: set[str] = set()

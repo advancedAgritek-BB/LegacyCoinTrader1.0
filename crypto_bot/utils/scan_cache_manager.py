@@ -165,8 +165,9 @@ class AdaptiveCacheManager:
         """
         # Check if we need to evict entries
         current_size = len(self.caches[cache_type])
-        max_size = self.get_cache_size(cache_type)
-        
+        # Use strict max_size limit, not adaptive size
+        max_size = self.max_size
+
         if current_size >= max_size:
             self._evict_entries(cache_type, current_size - max_size + 1)
         
@@ -353,6 +354,152 @@ class AdaptiveCacheManager:
                 del cache[key]
                 expired_count += 1
         
+        if expired_count > 0:
+            self.logger.info(f"Cleaned up {expired_count} expired cache entries")
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """
+        Get comprehensive cache statistics.
+
+        Returns:
+            Dictionary containing cache statistics
+        """
+        cache_stats = self.stats.copy()
+
+        # Add cache-specific statistics
+        cache_stats.update({
+            "cache_types": list(self.caches.keys()),
+            "total_caches": len(self.caches),
+            "hit_rates": dict(self.hit_rates),
+            "cache_sizes": dict(self.cache_sizes),
+            "eviction_counts": dict(self.eviction_counts),
+            "compression_ratios": dict(self.compression_ratios),
+            "total_accesses": dict(self.total_accesses),
+            "total_hits": dict(self.total_hits)
+        })
+
+        # Calculate overall hit rate
+        total_accesses = sum(self.total_accesses.values())
+        total_hits = sum(self.total_hits.values())
+        overall_hit_rate = (total_hits / total_accesses * 100) if total_accesses > 0 else 0.0
+        cache_stats["overall_hit_rate_pct"] = overall_hit_rate
+
+        return cache_stats
+
+    def get_execution_opportunities(self, min_confidence: float = 0.5) -> List[Dict[str, Any]]:
+        """
+        Get cached execution opportunities above confidence threshold.
+
+        Args:
+            min_confidence: Minimum confidence score for opportunities
+
+        Returns:
+            List of execution opportunity dictionaries
+        """
+        opportunities = []
+
+        # Scan through all cached results to find opportunities
+        for cache_type, cache in self.caches.items():
+            for key, entry in cache.items():
+                if hasattr(entry.data, 'get') and 'confidence' in entry.data:
+                    confidence = entry.data.get('confidence', 0)
+                    if confidence >= min_confidence:
+                        opportunity = {
+                            'symbol': entry.data.get('symbol', key),
+                            'strategy': entry.data.get('strategy', 'unknown'),
+                            'direction': entry.data.get('direction', 'unknown'),
+                            'confidence': confidence,
+                            'entry_price': entry.data.get('entry_price'),
+                            'stop_loss': entry.data.get('stop_loss'),
+                            'take_profit': entry.data.get('take_profit'),
+                            'risk_reward_ratio': entry.data.get('risk_reward_ratio'),
+                            'timestamp': entry.timestamp
+                        }
+                        opportunities.append(opportunity)
+
+        # Sort by confidence descending
+        opportunities.sort(key=lambda x: x['confidence'], reverse=True)
+        return opportunities
+
+    def add_scan_result(self, symbol: str, data: Dict[str, Any], score: float,
+                       regime: str, market_conditions: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Add a scan result to the cache.
+
+        Args:
+            symbol: Trading symbol
+            data: Scan result data
+            score: Quality/confidence score
+            regime: Market regime classification
+            market_conditions: Additional market condition data
+        """
+        # Prepare the data structure
+        scan_data = data.copy()
+        scan_data.update({
+            'symbol': symbol,
+            'score': score,
+            'regime': regime,
+            'confidence': score  # Map score to confidence for opportunities
+        })
+
+        if market_conditions:
+            scan_data.update(market_conditions)
+
+        # Cache with appropriate TTL (12 hours for scan results)
+        self.set("scan_results", symbol, scan_data, ttl=43200)
+
+    def get_scan_results(self, min_score: float = 0.0, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Get cached scan results above minimum score.
+
+        Args:
+            min_score: Minimum score threshold
+            limit: Maximum number of results to return
+
+        Returns:
+            List of scan result dictionaries
+        """
+        results = []
+
+        if "scan_results" in self.caches:
+            for key, entry in self.caches["scan_results"].items():
+                if hasattr(entry.data, 'get') and 'score' in entry.data:
+                    score = entry.data.get('score', 0)
+                    if score >= min_score:
+                        result = entry.data.copy()
+                        result['cache_timestamp'] = entry.timestamp
+                        results.append(result)
+
+        # Sort by score descending and apply limit
+        results.sort(key=lambda x: x.get('score', 0), reverse=True)
+        if limit:
+            results = results[:limit]
+
+        return results
+
+    async def clear_expired_entries(self, ttl: int = 3600) -> None:
+        """
+        Remove expired entries from all caches.
+
+        Args:
+            ttl: Time to live in seconds
+        """
+        current_time = time.time()
+        expired_count = 0
+
+        for cache_type, cache in self.caches.items():
+            expired_keys = []
+            for key, entry in cache.items():
+                if current_time - entry.timestamp > ttl:
+                    expired_keys.append(key)
+
+            for key in expired_keys:
+                entry = cache[key]
+                self.stats["total_memory_usage"] -= entry.size_bytes
+                self.stats["total_entries"] -= 1
+                del cache[key]
+                expired_count += 1
+
         if expired_count > 0:
             self.logger.info(f"Cleaned up {expired_count} expired cache entries")
 

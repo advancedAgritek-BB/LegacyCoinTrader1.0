@@ -13,7 +13,9 @@ logger = setup_logger(__name__, LOG_FILE)
 
 def log_balance(balance: float) -> None:
     """Write the current wallet balance to the log in USD."""
-    logger.info("Wallet balance $%.2f", balance)
+    # Ensure we never log negative balances - use 0.0 as minimum
+    safe_balance = max(0.0, balance)
+    logger.info("Wallet balance $%.2f", safe_balance)
 
 
 def log_position(
@@ -50,6 +52,8 @@ def log_position(
         else:  # sell/short
             pnl = (entry_price - current_price) * amount
     status = "positive" if pnl >= 0 else "negative"
+    # Ensure we never log negative balances - use 0.0 as minimum
+    safe_balance = max(0.0, balance)
     logger.info(
         "Active %s %s %.4f entry %.6f current %.6f pnl $%.2f (%s) balance $%.2f",
         symbol,
@@ -59,5 +63,5 @@ def log_position(
         current_price,
         pnl,
         status,
-        balance,
+        safe_balance,
     )

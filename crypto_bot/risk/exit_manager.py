@@ -477,33 +477,36 @@ def should_exit(
             # Get momentum continuation data
             momentum_continuation = detect_momentum_continuation(df, MomentumExitConfig(**exit_cfg.get('momentum_continuation', {})))
             
-            # More sophisticated momentum-based exit logic
+            # OPTIMIZED: Less aggressive momentum blocking for stop losses
             should_block_exit = False
             
-            # Block exit if momentum is very strong and continuing
-            if (momentum_strength > 0.8 and 
-                momentum_continuation.get('continuation_probability', 0) > 0.75):
+            # Only block exit if momentum is extremely strong (>0.95) and continuing with high probability
+            if (momentum_strength > 0.95 and 
+                momentum_continuation.get('continuation_probability', 0) > 0.95):
                 should_block_exit = True
-                logger.info("Blocking exit due to very strong continuing momentum")
+                logger.info("Blocking exit due to extremely strong continuing momentum (strength: %.2f, probability: %.2f)", 
+                          momentum_strength, momentum_continuation.get('continuation_probability', 0))
             
-            # Block exit if breakout detected with strong volume
+            # Only block exit if breakout detected with extremely strong volume spike
             if (momentum_continuation.get('breakout_detected', False) and 
-                momentum_continuation.get('volume_spike', False)):
+                momentum_continuation.get('volume_spike', False) and
+                momentum_strength > 0.9):
                 should_block_exit = True
-                logger.info("Blocking exit due to breakout with volume spike")
+                logger.info("Blocking exit due to strong breakout with volume spike (momentum: %.2f)", momentum_strength)
             
+            # Allow exit in most cases - only block in extreme circumstances
             if not should_block_exit:
                 exit_signal = True
                 logger.info(
-                    "Price %.4f hit trailing stop %.4f for %s position (momentum: %.2f)",
+                    "Price %.4f hit trailing stop %.4f for %s position (momentum: %.2f) - EXIT ALLOWED",
                     current_price,
                     trailing_stop,
                     "long" if position_side == "buy" else "short",
                     momentum_strength
                 )
         else:
-            # Legacy logic - only block exit if momentum is very strong
-            if momentum_strength < 0.7:  # Allow exit unless momentum is very strong
+            # Legacy logic - allow exit unless momentum is extremely strong
+            if momentum_strength < 0.95:  # Allow exit unless momentum is extremely strong
                 exit_signal = True
                 logger.info(
                     "Price %.4f hit trailing stop %.4f for %s position",
@@ -549,25 +552,20 @@ def should_exit(
                     MomentumExitConfig(**exit_cfg.get('momentum_continuation', {}))
                 )
                 
-                if 'trailing_stop_factor' in exit_cfg:
-                    if position_side == "buy":
-                        trailed = calculate_atr_trailing_stop(
-                            df,
-                            exit_cfg['trailing_stop_factor'],
-                        )
-                    else:  # Short position
-                        trailed = calculate_atr_trailing_stop_short(
-                            df,
-                            exit_cfg['trailing_stop_factor'],
-                        )
-                else:
-                    if position_side == "buy":
-                        trailed = calculate_trailing_stop(
+                # Update trailing stop based on position side
+                if position_side == "buy":  # Long position
+                    if exit_cfg.get('trailing_stop_factor', 0) > 0:
+                        new_stop = calculate_atr_trailing_stop(df, exit_cfg['trailing_stop_factor'])
+                    else:
+                        new_stop = calculate_trailing_stop(
                             df['close'],
                             adjusted_trail_pct,
                         )
-                    else:  # Short position
-                        trailed = calculate_trailing_stop_short(
+                else:  # Short position
+                    if exit_cfg.get('trailing_stop_factor', 0) > 0:
+                        new_stop = calculate_atr_trailing_stop_short(df, exit_cfg['trailing_stop_factor'])
+                    else:
+                        new_stop = calculate_trailing_stop_short(
                             df['close'],
                             adjusted_trail_pct,
                         )
@@ -575,34 +573,34 @@ def should_exit(
                 # Legacy trailing stop logic
                 if 'trailing_stop_factor' in exit_cfg:
                     if position_side == "buy":
-                        trailed = calculate_atr_trailing_stop(
+                        new_stop = calculate_atr_trailing_stop(
                             df,
                             exit_cfg['trailing_stop_factor'],
                         )
                     else:  # Short position
-                        trailed = calculate_atr_trailing_stop_short(
+                        new_stop = calculate_atr_trailing_stop_short(
                             df,
                             exit_cfg['trailing_stop_factor'],
                         )
                 else:
                     if position_side == "buy":
-                        trailed = calculate_trailing_stop(
+                        new_stop = calculate_trailing_stop(
                             df['close'],
                             exit_cfg['trailing_stop_pct'],
                         )
                     else:  # Short position
-                        trailed = calculate_trailing_stop_short(
+                        new_stop = calculate_trailing_stop_short(
                             df['close'],
                             exit_cfg['trailing_stop_pct'],
                         )
             
             # Update stop only if it's better (higher for long, lower for short)
-            if position_side == "buy" and trailed > trailing_stop:
-                new_stop = trailed
+            if position_side == "buy" and new_stop > trailing_stop:
                 logger.info("Trailing stop moved to %.4f", new_stop)
-            elif position_side == "sell" and trailed < trailing_stop:
-                new_stop = trailed
+            elif position_side == "sell" and new_stop < trailing_stop:
                 logger.info("Trailing stop moved to %.4f", new_stop)
+            else:
+                new_stop = trailing_stop  # Keep current stop if new one is worse
     
     return exit_signal, new_stop
 

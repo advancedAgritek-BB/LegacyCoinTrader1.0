@@ -1,0 +1,181 @@
+---
+# Microservice Architecture Design for LegacyCoinTrader
+# This document outlines the breakdown of the monolithic trading bot into microservices
+
+version: "1.0.0"
+architecture: microservices
+
+# Service Definitions
+services:
+
+  # API Gateway - Entry point for all external requests
+  api_gateway:
+    port: 8000
+    responsibilities:
+      - Route requests to appropriate services
+      - Authentication and authorization
+      - Rate limiting
+      - Request/response transformation
+      - API versioning
+    dependencies: []
+
+  # Trading Engine - Core trading logic and orchestration
+  trading_engine:
+    port: 8001
+    responsibilities:
+      - Main trading loop orchestration
+      - Symbol batch processing
+      - Trading cycle management
+      - Phase runner coordination
+    dependencies:
+      - market_data
+      - portfolio
+      - strategy_engine
+      - execution
+      - monitoring
+
+  # Market Data Service - Data acquisition and caching
+  market_data:
+    port: 8002
+    responsibilities:
+      - OHLCV data fetching
+      - WebSocket connections
+      - Data caching (Redis)
+      - Price feeds
+      - Market data validation
+    dependencies:
+      - redis_cache
+
+  # Portfolio Management Service - Position and risk management
+  portfolio:
+    port: 8003
+    responsibilities:
+      - Position tracking
+      - P&L calculation
+      - Risk management
+      - Balance synchronization
+      - Stop loss management
+    dependencies:
+      - redis_cache
+      - monitoring
+
+  # Strategy Engine - Strategy evaluation and routing
+  strategy_engine:
+    port: 8004
+    responsibilities:
+      - Strategy evaluation
+      - Regime classification
+      - Strategy routing
+      - Signal generation
+      - Strategy optimization
+    dependencies:
+      - market_data
+      - redis_cache
+
+  # Token Discovery Service - DEX and token scanning
+  token_discovery:
+    port: 8005
+    responsibilities:
+      - Solana DEX scanning
+      - New token discovery
+      - Pool analysis
+      - Liquidity monitoring
+      - Enhanced scanning pipeline
+    dependencies:
+      - market_data
+      - redis_cache
+
+  # Execution Service - Order execution and exchange integration
+  execution:
+    port: 8006
+    responsibilities:
+      - Order placement
+      - Exchange API integration (Kraken, etc.)
+      - Order status monitoring
+      - Trade execution
+      - WebSocket trading
+    dependencies:
+      - redis_cache
+      - monitoring
+
+  # Monitoring Service - System monitoring and alerting
+  monitoring:
+    port: 8007
+    responsibilities:
+      - Health checks
+      - Metrics collection
+      - Alerting
+      - Performance monitoring
+      - Log aggregation
+    dependencies:
+      - redis_cache
+
+  # Shared Infrastructure
+  redis_cache:
+    port: 6379
+    type: infrastructure
+    responsibilities:
+      - Distributed caching
+      - Session storage
+      - Pub/Sub messaging
+      - Rate limiting data
+
+# Inter-Service Communication
+communication:
+  protocol: HTTP/REST + gRPC for high-performance services
+  discovery: Consul or Kubernetes service discovery
+  messaging: Redis Pub/Sub for real-time events
+  authentication: JWT tokens between services
+
+# Data Flow Patterns
+data_flow:
+  trading_cycle:
+    - api_gateway receives request
+    - trading_engine orchestrates cycle
+    - market_data provides OHLCV data
+    - strategy_engine evaluates strategies
+    - portfolio checks risk limits
+    - execution places orders
+    - monitoring tracks performance
+
+  real_time_updates:
+    - WebSocket connections to market_data
+    - Redis Pub/Sub for cross-service events
+    - Portfolio updates via execution callbacks
+
+# Configuration Management
+configuration:
+  type: centralized
+  tool: Consul or etcd
+  format: YAML
+  hot_reload: true
+
+# Deployment Strategy
+deployment:
+  local: Docker Compose
+  production: Kubernetes
+  scaling: Horizontal Pod Autoscaler
+  health_checks: HTTP readiness/liveness probes
+
+# Migration Strategy
+migration:
+  phase_1: Extract independent services (monitoring, market_data)
+  phase_2: Extract core services (trading_engine, portfolio, strategy)
+  phase_3: Extract execution services (execution, token_discovery)
+  phase_4: Migrate frontend to use microservice APIs
+  phase_5: Full microservice deployment with API gateway
+
+# Monitoring & Observability
+observability:
+  logging: ELK stack or similar
+  metrics: Prometheus + Grafana
+  tracing: Jaeger or OpenTelemetry
+  alerting: AlertManager
+
+# Security Considerations
+security:
+  - Service-to-service authentication
+  - API key management
+  - Rate limiting per service
+  - Network segmentation
+  - Secret management (Vault)

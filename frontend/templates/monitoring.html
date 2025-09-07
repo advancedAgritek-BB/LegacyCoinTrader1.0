@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline Monitoring Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary-bg: #0f0f23;
+            --secondary-bg: #1a1a2e;
+            --card-bg: #16213e;
+            --text-primary: #ffffff;
+            --text-secondary: #b8c5d6;
+            --text-muted: #6c7b95;
+            --border-color: #2a2d3a;
+            --success-color: #00d4aa;
+            --warning-color: #ffb347;
+            --error-color: #ff6b6b;
+            --info-color: #4ecdc4;
+            --accent-color: #6c5ce7;
+            --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --gradient-success: linear-gradient(135deg, #00d4aa 0%, #007f73 100%);
+            --gradient-warning: linear-gradient(135deg, #ffb347 0%, #ff8c42 100%);
+            --gradient-error: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.1);
+            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.15);
+            --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.2);
+            --border-radius: 12px;
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--primary-bg);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        .monitoring-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        /* Header Section */
+        .dashboard-header {
+            background: var(--gradient-primary);
+            border-radius: var(--border-radius);
+            padding: 32px;
+            margin-bottom: 32px;
+            box-shadow: var(--shadow-lg);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .dashboard-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 200px;
+            height: 200px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            transform: translate(50%, -50%);
+        }
+
+        .dashboard-title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #ffffff 0%, #e0e7ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .dashboard-subtitle {
+            font-size: 1.1rem;
+            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 24px;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .refresh-btn {
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .refresh-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-1px);
+        }
+
+        .last-update {
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        /* Status Overview */
+        .status-overview {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-bottom: 40px;
+        }
+
+        .status-card {
+            background: var(--card-bg);
+            border-radius: var(--border-radius);
+            padding: 24px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--border-color);
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .status-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--gradient-success);
+        }
+
+        .status-card.warning::before {
+            background: var(--gradient-warning);
+        }
+
+        .status-card.critical::before {
+            background: var(--gradient-error);
+        }
+
+        .status-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .status-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+
+        .status-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .status-indicator.healthy {
+            background: var(--success-color);
+            box-shadow: 0 0 12px rgba(0, 212, 170, 0.4);
+        }
+
+        .status-indicator.warning {
+            background: var(--warning-color);
+            box-shadow: 0 0 12px rgba(255, 179, 71, 0.4);
+        }
+
+        .status-indicator.critical {
+            background: var(--error-color);
+            box-shadow: 0 0 12px rgba(255, 107, 107, 0.4);
+        }
+
+        .status-badge {
+            background: var(--gradient-success);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-card.warning .status-badge {
+            background: var(--gradient-warning);
+        }
+
+        .status-card.critical .status-badge {
+            background: var(--gradient-error);
+        }
+
+        .status-message {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
+        .status-details {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .status-details small {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        /* Metrics Grid */
+        .metrics-section {
+            margin-bottom: 40px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+        }
+
+        .metric-card {
+            background: var(--card-bg);
+            border-radius: var(--border-radius);
+            padding: 24px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--border-color);
+            transition: var(--transition);
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--gradient-primary);
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .metric-icon {
+            width: 48px;
+            height: 48px;
+            background: var(--gradient-primary);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 16px;
+            color: white;
+            font-size: 1.2rem;
+        }
+
+        .metric-value {
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .metric-label {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Alerts Section */
+        .alerts-section {
+            background: var(--card-bg);
+            border-radius: var(--border-radius);
+            padding: 24px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--border-color);
+            margin-bottom: 40px;
+        }
+
+        .alerts-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .alerts-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .alerts-list {
+            space-y: 12px;
+        }
+
+        .alert-item {
+            background: var(--secondary-bg);
+            border-radius: 8px;
+            padding: 16px;
+            border-left: 4px solid var(--error-color);
+            transition: var(--transition);
+        }
+
+        .alert-item:hover {
+            background: rgba(255, 107, 107, 0.1);
+        }
+
+        .alert-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .alert-text {
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .alert-time {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        /* Charts Section */
+        .charts-section {
+            margin-bottom: 40px;
+        }
+
+        .charts-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 24px;
+        }
+
+        .chart-card {
+            background: var(--card-bg);
+            border-radius: var(--border-radius);
+            padding: 24px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--border-color);
+        }
+
+        .chart-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 20px;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .monitoring-container {
+                padding: 16px;
+            }
+
+            .dashboard-title {
+                font-size: 2rem;
+            }
+
+            .status-overview {
+                grid-template-columns: 1fr;
+                gap: 16px;
+            }
+
+            .metrics-grid {
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 16px;
+            }
+
+            .charts-container {
+                grid-template-columns: 1fr;
+                gap: 16px;
+            }
+        }
+
+        /* Loading Animation */
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .loading {
+            animation: pulse 2s infinite;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--secondary-bg);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-color);
+        }
+
+        /* Enhanced Animations */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .fade-in-up {
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        /* Glassmorphism Effects */
+        .glass-card {
+            background: rgba(22, 33, 62, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Enhanced Status Indicators */
+        .status-indicator {
+            position: relative;
+        }
+
+        .status-indicator.healthy::after {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, var(--success-color), transparent);
+            animation: pulse 2s infinite;
+        }
+
+        /* Modern Button Styles */
+        .modern-btn {
+            background: linear-gradient(135deg, var(--accent-color), #8b5cf6);
+            border: none;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(108, 92, 231, 0.3);
+        }
+
+        .modern-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(108, 92, 231, 0.4);
+        }
+
+        /* Enhanced Metric Cards */
+        .metric-card {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-color), var(--success-color));
+        }
+
+        .metric-card:hover::before {
+            height: 5px;
+            transition: height 0.3s ease;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--secondary-bg);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--accent-color);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-color);
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="monitoring-container">
+        <!-- Header Section -->
+        <div class="dashboard-header fade-in-up">
+            <div class="dashboard-title">🚀 Pipeline Monitor</div>
+            <div class="dashboard-subtitle">Real-time system health and performance dashboard</div>
+            <div class="header-actions">
+                <button class="refresh-btn modern-btn" onclick="refreshData()">
+                    <i class="fas fa-sync-alt"></i>
+                    Refresh
+                </button>
+                <div class="last-update" id="lastUpdate">Last update: Never</div>
+            </div>
+        </div>
+
+        <!-- Status Overview -->
+        <section class="status-overview fade-in-up" id="statusOverview" style="animation-delay: 0.1s;">
+            <div class="status-card glass-card">
+                <div class="status-header">
+                    <div class="status-title">
+                        <span class="status-indicator healthy"></span>
+                        Overall System
+                    </div>
+                    <div class="status-badge" id="overallStatus">Loading...</div>
+                </div>
+                <div class="status-message" id="overallMessage">Initializing monitoring system...</div>
+            </div>
+        </section>
+
+        <!-- Key Metrics -->
+        <section class="metrics-section fade-in-up" style="animation-delay: 0.2s;">
+            <div class="section-header">
+                <i class="fas fa-chart-line" style="color: var(--accent-color);"></i>
+                <h2 class="section-title">📊 Key Metrics</h2>
+            </div>
+            <div class="metrics-grid" id="metricsGrid">
+                <div class="metric-card">
+                    <div class="metric-icon">
+                        <i class="fas fa-brain"></i>
+                    </div>
+                    <div class="metric-value" id="evalCount">0</div>
+                    <div class="metric-label">Strategy Evaluations</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">
+                        <i class="fas fa-exchange-alt"></i>
+                    </div>
+                    <div class="metric-value" id="execCount">0</div>
+                    <div class="metric-label">Order Executions</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">
+                        <i class="fas fa-memory"></i>
+                    </div>
+                    <div class="metric-value" id="memoryUsage">0MB</div>
+                    <div class="metric-label">Memory Usage</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">
+                        <i class="fas fa-microchip"></i>
+                    </div>
+                    <div class="metric-value" id="cpuUsage">0%</div>
+                    <div class="metric-label">CPU Usage</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">
+                        <i class="fas fa-search"></i>
+                    </div>
+                    <div class="metric-value" id="scanCount">0</div>
+                    <div class="metric-label">Tokens Scanned</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </div>
+                    <div class="metric-value" id="errorCount">0</div>
+                    <div class="metric-label">Errors</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">
+                        <i class="fas fa-wifi"></i>
+                    </div>
+                    <div class="metric-value" id="wsConnections">0</div>
+                    <div class="metric-label">WebSocket Connections</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">
+                        <i class="fas fa-robot"></i>
+                    </div>
+                    <div class="metric-value" id="apiCalls">0</div>
+                    <div class="metric-label">API Calls</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Component Status -->
+        <section class="metrics-section fade-in-up" style="animation-delay: 0.3s;">
+            <div class="section-header">
+                <i class="fas fa-cogs" style="color: var(--accent-color);"></i>
+                <h2 class="section-title">🔧 Component Status</h2>
+            </div>
+            <div class="status-overview" id="componentStatus">
+                <!-- Components will be populated by JavaScript -->
+            </div>
+        </section>
+
+        <!-- Enhanced Scanning Status -->
+        <section class="metrics-section fade-in-up" style="animation-delay: 0.4s;">
+            <div class="section-header">
+                <i class="fas fa-search" style="color: var(--accent-color);"></i>
+                <h2 class="section-title">🔍 Enhanced Scanning Status</h2>
+            </div>
+            <div class="status-overview" id="scanningStatus">
+                <!-- Scanning status will be populated by JavaScript -->
+            </div>
+        </section>
+
+        <!-- Active Alerts -->
+        <section class="alerts-section fade-in-up" style="animation-delay: 0.5s;">
+            <div class="alerts-header">
+                <i class="fas fa-exclamation-triangle" style="color: var(--warning-color);"></i>
+                <h3 class="alerts-title">🚨 Active Alerts</h3>
+            </div>
+            <div class="alerts-list" id="alertsList">
+                <div class="alert-item" style="border-left-color: var(--info-color); background: var(--secondary-bg);">
+                    <div class="alert-content">
+                        <div class="alert-text">No active alerts - System is healthy</div>
+                        <div class="alert-time">Real-time</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Performance Charts -->
+        <section class="charts-section fade-in-up" style="animation-delay: 0.6s;">
+            <div class="section-header">
+                <i class="fas fa-chart-bar" style="color: var(--accent-color);"></i>
+                <h2 class="section-title">📈 Performance Charts</h2>
+            </div>
+            <div class="charts-container">
+                <div class="chart-card glass-card">
+                    <h3 class="chart-title">System Resources</h3>
+                    <canvas id="resourcesChart" width="400" height="200"></canvas>
+                </div>
+                <div class="chart-card glass-card">
+                    <h3 class="chart-title">Pipeline Activity</h3>
+                    <canvas id="activityChart" width="400" height="200"></canvas>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        let healthData = {};
+        let metricsData = [];
+        let resourcesChart, activityChart;
+
+        // Initialize charts
+        function initCharts() {
+            const resourcesCtx = document.getElementById('resourcesChart').getContext('2d');
+            resourcesChart = new Chart(resourcesCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Memory Usage (MB)',
+                        data: [],
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        tension: 0.1,
+                        fill: true
+                    }, {
+                        label: 'CPU Usage (%)',
+                        data: [],
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: 'var(--text-primary)'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                color: 'var(--text-secondary)'
+                            },
+                            grid: {
+                                color: 'var(--border-color)'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: 'var(--text-secondary)'
+                            },
+                            grid: {
+                                color: 'var(--border-color)'
+                            }
+                        }
+                    }
+                }
+            });
+
+            const activityCtx = document.getElementById('activityChart').getContext('2d');
+            activityChart = new Chart(activityCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Strategy Evaluations',
+                        data: [],
+                        borderColor: 'rgb(54, 162, 235)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                        tension: 0.1,
+                        fill: true
+                    }, {
+                        label: 'Order Executions',
+                        data: [],
+                        borderColor: 'rgb(255, 159, 64)',
+                        backgroundColor: 'rgba(255, 159, 64, 0.1)',
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: 'var(--text-primary)'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                color: 'var(--text-secondary)'
+                            },
+                            grid: {
+                                color: 'var(--border-color)'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: 'var(--text-secondary)'
+                            },
+                            grid: {
+                                color: 'var(--border-color)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Update status overview
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // Update status overview
+        function updateStatusOverview(data) {
+            const overallStatus = data.overall_status || 'unknown';
+            const statusText = overallStatus.toUpperCase();
+            const statusColor = {
+                'healthy': 'var(--success-color)',
+                'warning': 'var(--warning-color)',
+                'critical': 'var(--error-color)',
+                'unknown': 'var(--text-muted)'
+            };
+
+            const statusBadge = document.getElementById('overallStatus');
+            statusBadge.textContent = statusText;
+            statusBadge.style.background = statusColor[overallStatus] || statusColor.unknown;
+
+            let statusMessage = 'System is operating normally';
+            if (overallStatus === 'warning') {
+                statusMessage = 'System has minor issues requiring attention';
+            } else if (overallStatus === 'critical') {
+                statusMessage = 'System has critical issues that need immediate attention';
+            } else if (overallStatus === 'unknown') {
+                statusMessage = 'System status is being determined';
+            }
+
+            document.getElementById('overallMessage').textContent = statusMessage;
+
+            // Update main status card class
+            const mainCard = document.querySelector('.status-card');
+            mainCard.className = `status-card ${overallStatus}`;
+        }
+
+        // Update component status
+        function updateComponentStatus(data) {
+            const container = document.getElementById('componentStatus');
+            container.innerHTML = '';
+
+            const components = data.components || {};
+
+            if (Object.keys(components).length === 0) {
+                container.innerHTML = `
+                    <div class="status-card">
+                        <div class="status-header">
+                            <div class="status-title">
+                                <span class="status-indicator healthy"></span>
+                                Components Status
+                            </div>
+                            <div class="status-badge" style="background: var(--info-color);">LOADING</div>
+                        </div>
+                        <div class="status-message">Loading component status...</div>
+                    </div>
+                `;
+                return;
+            }
+
+            for (const [component, status] of Object.entries(components)) {
+                const componentName = component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                const card = document.createElement('div');
+                card.className = `status-card ${status.status}`;
+
+                let metricsHtml = '';
+                if (status.metrics) {
+                    const metrics = Object.entries(status.metrics)
+                        .slice(0, 3) // Show only first 3 metrics
+                        .map(([key, value]) => `<span style="margin-right: 16px;"><strong>${key}:</strong> ${value}</span>`)
+                        .join('');
+                    if (metrics) {
+                        metricsHtml = `<div class="status-details"><small>${metrics}</small></div>`;
+                    }
+                }
+
+                card.innerHTML = `
+                    <div class="status-header">
+                        <div class="status-title">
+                            <span class="status-indicator ${status.status}"></span>
+                            ${componentName}
+                        </div>
+                        <div class="status-badge">${status.status.toUpperCase()}</div>
+                    </div>
+                    <div class="status-message">${status.message}</div>
+                    ${metricsHtml}
+                `;
+                container.appendChild(card);
+            }
+        }
+
+        // Update scanning status
+        function updateScanningStatus(data) {
+            const container = document.getElementById('scanningStatus');
+            container.innerHTML = '';
+
+            const scanMetrics = data.scan_metrics || {};
+            const evalMetrics = data.evaluation_metrics || {};
+
+            // Enhanced Scanner Status
+            const scanCard = document.createElement('div');
+            scanCard.className = 'status-card healthy';
+            scanCard.innerHTML = `
+                <div class="status-header">
+                    <div class="status-title">
+                        <span class="status-indicator healthy"></span>
+                        Enhanced Scanner
+                    </div>
+                    <div class="status-badge">ACTIVE</div>
+                </div>
+                <div class="status-message">Enhanced scanning system active</div>
+                <div class="status-details">
+                    <small>
+                        <span style="margin-right: 16px;"><strong>Tokens Scanned:</strong> ${scanMetrics.tokens_scanned || 0}</span>
+                        <span style="margin-right: 16px;"><strong>Execution Opportunities:</strong> ${scanMetrics.execution_opportunities || 0}</span>
+                        <span style="margin-right: 16px;"><strong>Cache Hits:</strong> ${scanMetrics.scan_cache_hits || 0}</span>
+                    </small>
+                </div>
+            `;
+            container.appendChild(scanCard);
+
+            // Evaluation Pipeline Status
+            const evalCard = document.createElement('div');
+            evalCard.className = 'status-card healthy';
+            evalCard.innerHTML = `
+                <div class="status-header">
+                    <div class="status-title">
+                        <span class="status-indicator healthy"></span>
+                        Evaluation Pipeline
+                    </div>
+                    <div class="status-badge">ACTIVE</div>
+                </div>
+                <div class="status-message">Strategy evaluation pipeline active</div>
+                <div class="status-details">
+                    <small>
+                        <span style="margin-right: 16px;"><strong>Total Evaluations:</strong> ${evalMetrics.strategy_evaluations || 0}</span>
+                        <span style="margin-right: 16px;"><strong>Successful:</strong> ${evalMetrics.successful_evaluations || 0}</span>
+                        <span style="margin-right: 16px;"><strong>Failed:</strong> ${evalMetrics.failed_evaluations || 0}</span>
+                    </small>
+                </div>
+            `;
+            container.appendChild(evalCard);
+        }
+
+        // Update metrics
+        function updateMetrics(data) {
+            const recent = data.recent_metrics || [];
+            if (recent.length > 0) {
+                const latest = recent[recent.length - 1];
+                document.getElementById('evalCount').textContent = latest.evaluation_count || 0;
+                document.getElementById('execCount').textContent = latest.execution_count || 0;
+                document.getElementById('memoryUsage').textContent = `${(latest.memory_mb || 0).toFixed(1)}MB`;
+                document.getElementById('cpuUsage').textContent = `${(latest.cpu_percent || 0).toFixed(1)}%`;
+                document.getElementById('errorCount').textContent = latest.errors || 0;
+                document.getElementById('wsConnections').textContent = latest.websocket_connections || 0;
+                document.getElementById('apiCalls').textContent = latest.api_calls || 0;
+            }
+            
+            // Update scan metrics
+            const scanMetrics = data.scan_metrics || {};
+            document.getElementById('scanCount').textContent = scanMetrics.tokens_scanned || 0;
+        }
+
+        // Update alerts
+        function updateAlerts(data) {
+            const alertsList = document.getElementById('alertsList');
+            const alerts = data.alerts_active || [];
+
+            if (alerts.length === 0) {
+                alertsList.innerHTML = `
+                    <div class="alert-item" style="border-left-color: var(--success-color); background: var(--secondary-bg);">
+                        <div class="alert-content">
+                            <div class="alert-text">✅ No active alerts - System is healthy</div>
+                            <div class="alert-time">Real-time</div>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            alertsList.innerHTML = '';
+            alerts.forEach(alert => {
+                const alertDiv = document.createElement('div');
+                alertDiv.className = 'alert-item';
+
+                // Determine alert severity based on content
+                let borderColor = 'var(--warning-color)';
+                if (alert.toLowerCase().includes('critical') || alert.toLowerCase().includes('error')) {
+                    borderColor = 'var(--error-color)';
+                } else if (alert.toLowerCase().includes('healthy') || alert.toLowerCase().includes('success')) {
+                    borderColor = 'var(--success-color)';
+                }
+
+                alertDiv.style.borderLeftColor = borderColor;
+                alertDiv.innerHTML = `
+                    <div class="alert-content">
+                        <div class="alert-text">${alert}</div>
+                        <div class="alert-time">${new Date().toLocaleTimeString()}</div>
+                    </div>
+                `;
+                alertsList.appendChild(alertDiv);
+            });
+        }
+
+        // Update charts
+        function updateCharts(data) {
+            const recent = data.recent_metrics || [];
+            if (recent.length === 0) return;
+
+            const labels = recent.map(m => new Date(m.timestamp).toLocaleTimeString());
+            const memoryData = recent.map(m => m.memory_mb || 0);
+            const cpuData = recent.map(m => m.cpu_percent || 0);
+            const evalData = recent.map(m => m.evaluation_count || 0);
+            const execData = recent.map(m => m.execution_count || 0);
+
+            resourcesChart.data.labels = labels;
+            resourcesChart.data.datasets[0].data = memoryData;
+            resourcesChart.data.datasets[1].data = cpuData;
+            resourcesChart.update();
+
+            activityChart.data.labels = labels;
+            activityChart.data.datasets[0].data = evalData;
+            activityChart.data.datasets[1].data = execData;
+            activityChart.update();
+        }
+
+        // Fetch monitoring data
+        async function fetchMonitoringData() {
+            try {
+                const response = await fetch('/api/monitoring/health');
+                const result = await response.json();
+
+                if (result.success) {
+                    healthData = result.data;
+                    updateStatusOverview(healthData);
+                    updateComponentStatus(healthData);
+                    updateMetrics(healthData);
+                    updateAlerts(healthData);
+                    updateCharts(healthData);
+
+                    document.getElementById('lastUpdate').textContent =
+                        `Last update: ${new Date().toLocaleString()}`;
+                } else {
+                    console.error('Failed to fetch monitoring data:', result.error);
+                }
+            } catch (error) {
+                console.error('Error fetching monitoring data:', error);
+            }
+        }
+
+        // Fetch metrics data
+        async function fetchMetricsData() {
+            try {
+                const response = await fetch('/api/monitoring/metrics');
+                const result = await response.json();
+
+                if (result.success) {
+                    metricsData = result.data;
+                    updateMetrics(metricsData);
+                    updateScanningStatus(metricsData);
+                    updateCharts(metricsData);
+                } else {
+                    console.error('Failed to fetch metrics data:', result.error);
+                }
+            } catch (error) {
+                console.error('Error fetching metrics data:', error);
+            }
+        }
+
+        // Refresh data
+        function refreshData() {
+            fetchMonitoringData();
+            fetchMetricsData();
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            initCharts();
+            fetchMonitoringData();
+            fetchMetricsData();
+
+            // Auto-refresh every 30 seconds
+            setInterval(fetchMonitoringData, 30000);
+            setInterval(fetchMetricsData, 30000);
+        });
+    </script>
+</body>
+</html>

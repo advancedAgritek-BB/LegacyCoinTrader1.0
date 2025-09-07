@@ -227,8 +227,19 @@ async def _refresh_tickers(
             if ws_failures:
                 await asyncio.sleep(min(2 ** (ws_failures - 1), 30))
             try:
-                data = await exchange.watch_tickers(to_fetch)
+                data = await asyncio.wait_for(exchange.watch_tickers(to_fetch), timeout=timeout)
                 exchange.options["ws_failures"] = 0
+            except asyncio.TimeoutError as exc:
+                logger.warning("watch_tickers timed out after %d seconds: %s", timeout, exc)
+                logger.info("watch_tickers timed out, falling back to HTTP fetch")
+                telemetry.inc("scan.api_errors")
+                failures = exchange.options.get("ws_failures", 0) + 1
+                exchange.options["ws_failures"] = failures
+                if failures >= ws_limit:
+                    exchange.options["ws_scan"] = False
+                telemetry.inc("scan.ws_errors")
+                try_ws = False
+                try_http = True
             except Exception as exc:  # pragma: no cover - network
                 logger.warning("watch_tickers failed: %s", exc, exc_info=log_exc)
                 logger.info("watch_tickers failed, falling back to HTTP fetch")
@@ -260,9 +271,9 @@ async def _refresh_tickers(
                     try:
                         fetcher = getattr(exchange, "fetch_tickers", None)
                         if asyncio.iscoroutinefunction(fetcher):
-                            fetched = await fetcher(chunk)
+                            fetched = await asyncio.wait_for(fetcher(chunk), timeout=timeout)
                         else:
-                            fetched = await asyncio.to_thread(fetcher, chunk)
+                            fetched = await asyncio.wait_for(asyncio.to_thread(fetcher, chunk), timeout=timeout)
                         chunk_data = {s: t.get("info", t) for s, t in fetched.items()}
                         break
                     except ccxt.BadSymbol as exc:  # pragma: no cover - network
@@ -273,6 +284,18 @@ async def _refresh_tickers(
                         )
                         telemetry.inc("scan.api_errors")
                         return {}
+                    except asyncio.TimeoutError as exc:
+                        logger.warning(
+                            "fetch_tickers timed out after %d seconds for %s (attempt %d): %s",
+                            timeout,
+                            ", ".join(chunk),
+                            attempt + 1,
+                            exc,
+                        )
+                        if attempt == 2:  # Last attempt
+                            telemetry.inc("scan.api_errors")
+                            break
+                        await asyncio.sleep(1)
                     except (ccxt.ExchangeError, ccxt.NetworkError) as exc:  # pragma: no cover - network
                         if getattr(exc, "http_status", None) in (520, 522) and attempt < 2:
                             await asyncio.sleep(2 ** attempt)
@@ -511,32 +534,12 @@ async def filter_symbols(
 
     try:
         data = await _refresh_tickers(exchange, symbols, cfg)
-    except Exception:
-        raise
+    except Exception as exc:
+        logger.error("Failed to refresh tickers: %s", exc)
+        logger.warning("Continuing with empty ticker data - symbols will be filtered based on cached data only")
+        data = {}
 
-    # Simple debug: log what we got back
-    logger.info(f"Ticker data received: {len(data)} tickers for {len(symbols)} symbols")
-    if len(data) == 0:
-        logger.error(f"No ticker data received - this is the root cause!")
-        logger.error(f"Exchange: {type(exchange).__name__}")
-        logger.error(f"Symbols requested: {len(symbols)}")
-        logger.error(f"Check exchange connection and API configuration")
-        
-        # Test basic exchange functionality
-        try:
-            if hasattr(exchange, 'fetch_ticker'):
-                test_symbol = "BTC/USD"
-                logger.info(f"Testing basic ticker fetch for {test_symbol}")
-                if asyncio.iscoroutinefunction(exchange.fetch_ticker):
-                    test_ticker = await exchange.fetch_ticker(test_symbol)
-                    logger.info(f"Basic ticker fetch successful: {test_ticker.get('last', 'N/A')}")
-                else:
-                    logger.info("fetch_ticker exists but is not async")
-            else:
-                logger.error("Exchange does not have fetch_ticker method")
-        except Exception as e:
-            logger.error(f"Basic ticker fetch failed: {e}")
-            logger.error(f"This confirms an exchange connection problem")
+    logger.info(f"Ticker data received: {len(data)} tickers for {len(list(symbols))} symbols")
 
     # map of ids returned by Kraken to human readable symbols
     id_map: Dict[str, str] = {}

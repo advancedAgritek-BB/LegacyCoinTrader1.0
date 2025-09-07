@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chart Rendering Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ccc; }
+        canvas { border: 1px solid #ddd; margin: 10px 0; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>Chart Rendering Test</h1>
+    
+    <div class="test-section">
+        <h2>Test 1: Basic Chart Rendering</h2>
+        <div id="status1" class="status">Testing...</div>
+        <canvas id="test-chart-1" width="400" height="120"></canvas>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 2: API Data Fetching</h2>
+        <div id="status2" class="status">Testing...</div>
+        <canvas id="test-chart-2" width="400" height="120"></canvas>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 3: Position Chart Rendering</h2>
+        <div id="status3" class="status">Testing...</div>
+        <canvas id="test-chart-3" width="400" height="120"></canvas>
+    </div>
+
+    <script>
+        // Test 1: Basic chart rendering
+        function testBasicChart() {
+            const canvas = document.getElementById('test-chart-1');
+            const ctx = canvas.getContext('2d');
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw a simple line chart
+            ctx.strokeStyle = '#007bff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            for (let i = 0; i < 50; i++) {
+                const x = (i / 49) * canvas.width;
+                const y = canvas.height - (Math.sin(i * 0.2) * 30 + 60);
+                
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+            
+            document.getElementById('status1').innerHTML = '<span class="success">✅ Basic chart rendering works</span>';
+        }
+        
+        // Test 2: API data fetching
+        async function testAPIFetching() {
+            try {
+                const response = await fetch('http://localhost:8000/api/trend-data?symbol=UNI/USD');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('API data received:', data);
+                
+                if (data.candles && data.candles.length > 0) {
+                    document.getElementById('status2').innerHTML = '<span class="success">✅ API data fetching works</span>';
+                    
+                    // Draw the actual data
+                    const canvas = document.getElementById('test-chart-2');
+                    const ctx = canvas.getContext('2d');
+                    
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    const prices = data.candles.map(c => c.close);
+                    const minPrice = Math.min(...prices);
+                    const maxPrice = Math.max(...prices);
+                    const range = maxPrice - minPrice;
+                    
+                    ctx.strokeStyle = '#28a745';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    
+                    prices.forEach((price, i) => {
+                        const x = (i / (prices.length - 1)) * canvas.width;
+                        const y = canvas.height - ((price - minPrice) / range) * canvas.height;
+                        
+                        if (i === 0) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    });
+                    ctx.stroke();
+                } else {
+                    throw new Error('No candle data received');
+                }
+            } catch (error) {
+                console.error('API test failed:', error);
+                document.getElementById('status2').innerHTML = `<span class="error">❌ API test failed: ${error.message}</span>`;
+            }
+        }
+        
+        // Test 3: Position chart rendering (simplified version)
+        async function testPositionChart() {
+            try {
+                // Get positions
+                const positionsResponse = await fetch('http://localhost:8000/api/open-positions');
+                if (!positionsResponse.ok) {
+                    throw new Error(`Positions API failed: ${positionsResponse.status}`);
+                }
+                
+                const positions = await positionsResponse.json();
+                console.log('Positions received:', positions);
+                
+                if (positions.length === 0) {
+                    document.getElementById('status3').innerHTML = '<span class="error">❌ No positions found</span>';
+                    return;
+                }
+                
+                // Get chart data for first position
+                const position = positions[0];
+                const chartResponse = await fetch(`http://localhost:8000/api/trend-data?symbol=${encodeURIComponent(position.symbol)}`);
+                
+                if (!chartResponse.ok) {
+                    throw new Error(`Chart API failed: ${chartResponse.status}`);
+                }
+                
+                const chartData = await chartResponse.json();
+                
+                // Render the chart
+                const canvas = document.getElementById('test-chart-3');
+                const ctx = canvas.getContext('2d');
+                
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                if (chartData.candles && chartData.candles.length > 0) {
+                    const prices = chartData.candles.map(c => c.close);
+                    const minPrice = Math.min(...prices);
+                    const maxPrice = Math.max(...prices);
+                    const range = maxPrice - minPrice;
+                    
+                    // Draw price line
+                    ctx.strokeStyle = '#007bff';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    
+                    prices.forEach((price, i) => {
+                        const x = (i / (prices.length - 1)) * canvas.width;
+                        const y = canvas.height - ((price - minPrice) / range) * canvas.height;
+                        
+                        if (i === 0) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    });
+                    ctx.stroke();
+                    
+                    // Draw entry price line
+                    if (position.entry_price) {
+                        const entryY = canvas.height - ((position.entry_price - minPrice) / range) * canvas.height;
+                        ctx.strokeStyle = '#ffc107';
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([5, 5]);
+                        ctx.beginPath();
+                        ctx.moveTo(0, entryY);
+                        ctx.lineTo(canvas.width, entryY);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
+                    
+                    document.getElementById('status3').innerHTML = `<span class="success">✅ Position chart rendering works for ${position.symbol}</span>`;
+                } else {
+                    throw new Error('No chart data available');
+                }
+            } catch (error) {
+                console.error('Position chart test failed:', error);
+                document.getElementById('status3').innerHTML = `<span class="error">❌ Position chart test failed: ${error.message}</span>`;
+            }
+        }
+        
+        // Run all tests
+        window.addEventListener('load', async () => {
+            console.log('Starting chart rendering tests...');
+            
+            // Test 1: Basic rendering
+            testBasicChart();
+            
+            // Test 2: API fetching
+            await testAPIFetching();
+            
+            // Test 3: Position chart
+            await testPositionChart();
+            
+            console.log('All tests completed');
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,249 @@
+# Production Configuration for LegacyCoinTrader 1.0
+# Enhanced with Memory Management and Production-Ready Settings
+
+# =============================================================================
+# MEMORY MANAGEMENT CONFIGURATION
+# =============================================================================
+memory_threshold: 0.8                    # 80% memory usage triggers pressure detection
+gc_threshold: 0.7                        # 70% triggers garbage collection
+cache_size_limit_mb: 500                # Maximum cache size in MB
+model_cleanup_interval: 300              # ML model cleanup interval (seconds)
+cache_cleanup_interval: 600              # Cache cleanup interval (seconds)
+max_cache_entries: 1000                  # Maximum number of cache entries
+cache_ttl_seconds: 3600                  # Cache entry TTL (1 hour)
+enable_background_cleanup: true          # Enable background cleanup thread
+aggressive_cleanup_threshold: 0.9        # 90% triggers aggressive cleanup
+
+# =============================================================================
+# ERROR HANDLING CONFIGURATION
+# =============================================================================
+error_handling:
+  # General retry settings
+  max_retries: 3
+  base_delay: 1.0
+  max_delay: 60.0
+  jitter: true
+  
+  # Circuit breaker settings
+  circuit_breaker:
+    failure_threshold: 5
+    recovery_timeout: 60.0
+    
+  # Recovery actions configuration
+  recovery_actions:
+    network_retry:
+      enabled: true
+      priority: 1
+      max_retries: 3
+    rate_limit_wait:
+      enabled: true
+      priority: 2
+      wait_time: 60
+    data_fallback:
+      enabled: true
+      priority: 3
+      cache_ttl: 3600
+    exchange_fallback:
+      enabled: true
+      priority: 4
+      paper_trading_enabled: true
+
+# =============================================================================
+# TRADING CONFIGURATION
+# =============================================================================
+execution_mode: "dry_run"                # "live", "dry_run", "paper"
+exchange: "kraken"                       # Primary exchange
+timeframe: "1h"                          # Default timeframe
+max_positions: 10                        # Maximum concurrent positions
+position_size: 0.02                      # Position size as fraction of balance
+max_daily_trades: 50                     # Maximum trades per day
+
+# =============================================================================
+# RISK MANAGEMENT
+# =============================================================================
+stop_loss_percentage: 0.05               # 5% stop loss
+take_profit_percentage: 0.15            # 15% take profit
+max_daily_loss: 0.10                    # 10% max daily loss
+max_portfolio_risk: 0.20                # 20% max portfolio risk
+volatility_adjustment: true             # Adjust position size based on volatility
+
+# =============================================================================
+# SYMBOL CONFIGURATION
+# =============================================================================
+symbols:
+  - "BTC/USD"
+  - "ETH/USD"
+  - "SOL/USD"
+  - "MATIC/USD"
+  - "ADA/USD"
+  - "DOT/USD"
+  - "LINK/USD"
+  - "UNI/USD"
+  - "AVAX/USD"
+  - "ATOM/USD"
+
+# =============================================================================
+# STRATEGY CONFIGURATION
+# =============================================================================
+strategies:
+  - name: "momentum"
+    enabled: true
+    weight: 0.4
+    parameters:
+      lookback_period: 20
+      momentum_threshold: 0.02
+      
+  - name: "mean_reversion"
+    enabled: true
+    weight: 0.3
+    parameters:
+      lookback_period: 50
+      reversion_threshold: 0.05
+      
+  - name: "volatility_breakout"
+    enabled: true
+    weight: 0.3
+    parameters:
+      volatility_period: 30
+      breakout_multiplier: 2.0
+
+# =============================================================================
+# TECHNICAL ANALYSIS
+# =============================================================================
+technical_indicators:
+  - "RSI"
+  - "MACD"
+  - "BB"
+  - "ATR"
+  - "EMA"
+  - "SMA"
+
+rsi_period: 14
+rsi_overbought: 70
+rsi_oversold: 30
+macd_fast: 12
+macd_slow: 26
+macd_signal: 9
+bb_period: 20
+bb_std: 2
+atr_period: 14
+ema_periods: [9, 21, 50, 200]
+
+# =============================================================================
+# MACHINE LEARNING
+# =============================================================================
+ml_enabled: true
+ml_model_type: "ensemble"               # "ensemble", "lstm", "transformer"
+ml_features:
+  - "price_momentum"
+  - "volume_momentum"
+  - "volatility"
+  - "technical_indicators"
+  - "market_regime"
+
+ml_training_interval: 86400             # Retrain every 24 hours
+ml_prediction_threshold: 0.6            # Minimum confidence for predictions
+ml_model_cleanup_interval: 3600         # Clean up old models every hour
+
+# =============================================================================
+# DATA MANAGEMENT
+# =============================================================================
+data_source: "kraken"                   # Data source for historical data
+data_update_interval: 60                # Update data every 60 seconds
+data_retention_days: 365                # Keep 1 year of historical data
+data_compression: true                   # Compress historical data
+data_backup_interval: 86400             # Backup data every 24 hours
+
+# =============================================================================
+# LOGGING AND MONITORING
+# =============================================================================
+log_level: "INFO"                       # "DEBUG", "INFO", "WARNING", "ERROR"
+log_file: "logs/bot.log"
+log_max_size: 100                       # MB
+log_backup_count: 5
+log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+monitoring_enabled: true
+metrics_collection_interval: 60          # Collect metrics every minute
+health_check_interval: 300              # Health check every 5 minutes
+alert_thresholds:
+  memory_usage: 0.85                    # Alert at 85% memory usage
+  cpu_usage: 0.80                       # Alert at 80% CPU usage
+  error_rate: 0.05                      # Alert at 5% error rate
+
+# =============================================================================
+# NOTIFICATIONS
+# =============================================================================
+notifications_enabled: true
+telegram_enabled: true
+telegram_bot_token: ""                  # Set in environment
+telegram_chat_id: ""                    # Set in environment
+email_enabled: false
+email_smtp_server: ""
+email_username: ""
+email_password: ""
+
+# =============================================================================
+# WEBSOCKET CONFIGURATION
+# =============================================================================
+websocket_enabled: true
+websocket_reconnect_interval: 5         # Reconnect every 5 seconds
+websocket_max_retries: 10               # Maximum reconnection attempts
+websocket_timeout: 30                   # Timeout in seconds
+websocket_heartbeat_interval: 30        # Heartbeat every 30 seconds
+
+# =============================================================================
+# API CONFIGURATION
+# =============================================================================
+api_rate_limit: 10                      # Requests per second
+api_timeout: 30                         # Timeout in seconds
+api_retry_attempts: 3                   # Number of retry attempts
+api_retry_delay: 1                      # Delay between retries in seconds
+
+# =============================================================================
+# PERFORMANCE OPTIMIZATION
+# =============================================================================
+parallel_processing: true               # Enable parallel processing
+max_workers: 4                          # Maximum number of worker threads
+batch_size: 10                          # Process symbols in batches
+cache_enabled: true                     # Enable caching
+cache_ttl: 3600                        # Cache TTL in seconds
+
+# =============================================================================
+# SECURITY
+# =============================================================================
+api_key_encryption: true                # Encrypt API keys
+api_key_file: "config/api_keys.enc"    # Encrypted API key file
+session_timeout: 3600                   # Session timeout in seconds
+max_login_attempts: 3                  # Maximum login attempts
+
+# =============================================================================
+# BACKTESTING
+# =============================================================================
+backtest_enabled: true
+backtest_start_date: "2023-01-01"
+backtest_end_date: "2024-01-01"
+backtest_initial_balance: 10000         # Initial balance for backtesting
+backtest_commission: 0.001              # Commission rate (0.1%)
+
+# =============================================================================
+# DEVELOPMENT AND TESTING
+# =============================================================================
+debug_mode: false                       # Enable debug mode
+test_mode: false                        # Enable test mode
+profiling_enabled: false                # Enable performance profiling
+coverage_enabled: false                 # Enable code coverage
+
+# =============================================================================
+# ENVIRONMENT-SPECIFIC OVERRIDES
+# =============================================================================
+# These settings can be overridden by environment variables
+# Example: export BOT_EXECUTION_MODE=live
+# Example: export BOT_LOG_LEVEL=DEBUG
+
+environment_overrides:
+  execution_mode: "BOT_EXECUTION_MODE"
+  log_level: "BOT_LOG_LEVEL"
+  telegram_bot_token: "TELEGRAM_BOT_TOKEN"
+  telegram_chat_id: "TELEGRAM_CHAT_ID"
+  api_key_file: "API_KEY_FILE"

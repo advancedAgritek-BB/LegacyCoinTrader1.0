@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entry Price Chart Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ccc; }
+        canvas { border: 1px solid #ddd; margin: 10px 0; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>Entry Price Chart Test</h1>
+    
+    <div class="test-section">
+        <h2>Test: Entry Price Display</h2>
+        <div id="status" class="status">Testing...</div>
+        <canvas id="test-chart" width="400" height="120"></canvas>
+    </div>
+
+    <script>
+        async function testEntryPriceDisplay() {
+            try {
+                // Get positions
+                const response = await fetch('http://localhost:8000/api/open-positions');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const positions = await response.json();
+                console.log('Positions:', positions);
+                
+                if (positions.length === 0) {
+                    document.getElementById('status').innerHTML = '<span class="error">❌ No positions found</span>';
+                    return;
+                }
+                
+                // Use first position
+                const position = positions[0];
+                console.log('Testing position:', position);
+                
+                // Get chart data
+                const chartResponse = await fetch(`http://localhost:8000/api/trend-data?symbol=${encodeURIComponent(position.symbol)}`);
+                if (!chartResponse.ok) {
+                    throw new Error(`Chart API failed: ${chartResponse.status}`);
+                }
+                
+                const chartData = await chartResponse.json();
+                console.log('Chart data:', chartData);
+                
+                // Render chart with entry price
+                const canvas = document.getElementById('test-chart');
+                const ctx = canvas.getContext('2d');
+                
+                // Clear canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                if (chartData.candles && chartData.candles.length > 0) {
+                    const prices = chartData.candles.map(c => c.close);
+                    const minPrice = Math.min(...prices, position.entry_price);
+                    const maxPrice = Math.max(...prices, position.entry_price);
+                    const priceRange = maxPrice - minPrice;
+                    
+                    console.log(`Price range: ${minPrice} to ${maxPrice}, Entry: ${position.entry_price}`);
+                    
+                    // Draw price line
+                    ctx.strokeStyle = '#007bff';
+                    ctx.lineWidth = 3;
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    ctx.beginPath();
+                    
+                    prices.forEach((price, i) => {
+                        const x = (i / (prices.length - 1)) * canvas.width;
+                        const y = canvas.height - ((price - minPrice) / priceRange) * canvas.height;
+                        
+                        if (i === 0) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    });
+                    ctx.stroke();
+                    
+                    // Draw entry price line
+                    const entryY = canvas.height - ((position.entry_price - minPrice) / priceRange) * canvas.height;
+                    console.log(`Entry Y position: ${entryY}`);
+                    
+                    ctx.strokeStyle = '#6f42c1'; // Purple
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 5]);
+                    ctx.beginPath();
+                    ctx.moveTo(0, entryY);
+                    ctx.lineTo(canvas.width, entryY);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    
+                    // Add entry price label
+                    ctx.fillStyle = '#6f42c1';
+                    ctx.font = '12px Arial';
+                    ctx.textAlign = 'right';
+                    ctx.fillText(`Entry: $${position.entry_price.toFixed(6)}`, canvas.width - 10, entryY - 5);
+                    
+                    // Add current price label
+                    const currentY = canvas.height - ((position.current_price - minPrice) / priceRange) * canvas.height;
+                    ctx.fillStyle = '#28a745';
+                    ctx.fillText(`Current: $${position.current_price.toFixed(6)}`, canvas.width - 10, currentY + 15);
+                    
+                    document.getElementById('status').innerHTML = `<span class="success">✅ Entry price displayed for ${position.symbol}</span>`;
+                } else {
+                    throw new Error('No chart data available');
+                }
+            } catch (error) {
+                console.error('Test failed:', error);
+                document.getElementById('status').innerHTML = `<span class="error">❌ Test failed: ${error.message}</span>`;
+            }
+        }
+        
+        // Run test
+        window.addEventListener('load', testEntryPriceDisplay);
+    </script>
+</body>
+</html>

@@ -2,249 +2,53 @@
 # This file configures the enhanced scanning system with integrated caching
 # and continuous strategy review for trade execution opportunities.
 
-# Scan Cache Manager Configuration
-scan_cache:
-  # Maximum number of scan results to keep in cache
-  max_cache_size: 1000
-  
-  # How often to review cached results (in minutes)
-  review_interval_minutes: 15
-  
-  # Maximum age of cache entries (in hours)
-  max_age_hours: 24
-  
-  # Minimum score threshold for caching results
-  min_score_threshold: 0.3
-  
-  # Cache persistence settings
-  persist_to_disk: true
-  auto_cleanup: true
-
-# Enhanced Solana Scanner Configuration
-solana_scanner:
-  # Enable enhanced scanning
+# Enhanced Scanning Configuration
+enhanced_scanning:
   enabled: true
-  
-  # Scan interval in minutes
-  scan_interval_minutes: 30
-  
-  # Maximum tokens to process per scan cycle
+  scan_interval: 30
   max_tokens_per_scan: 100
-  
-  # Minimum score threshold for token analysis
-  min_score_threshold: 0.3
-  
-  # Enable sentiment analysis integration
-  enable_sentiment: true
-  
-  # Enable Pyth price feeds
+  min_score_threshold: 0.4
+  enable_sentiment: false
   enable_pyth_prices: true
-  
-  # Market condition thresholds
-  min_volume_usd: 10000
-  max_spread_pct: 2.0
-  min_liquidity_score: 0.5
-  
-  # Strategy fit thresholds
+  min_volume_usd: 5000
+  max_spread_pct: 1.5
+  min_liquidity_score: 0.6
   min_strategy_fit: 0.6
   min_confidence: 0.5
-  
-  # Token discovery sources
   discovery_sources:
     - "basic_scanner"
-    - "sentiment_enhanced"
     - "dex_aggregators"
-    - "social_monitoring"
-  
-  # Sentiment analysis settings
-  sentiment:
-    min_galaxy_score: 60.0
-    min_sentiment: 0.6
-    enable_social_volume: true
-    enable_social_mentions: true
-  
-  # Market data sources
   data_sources:
     price:
       - "pyth"
       - "jupiter"
-      - "birdeye"
     volume:
       - "birdeye"
-      - "dexscreener"
     orderbook:
       - "jupiter"
-      - "raydium"
 
-# Strategy Fit Analysis Configuration
-strategy_fit:
-  # Enable continuous strategy fit analysis
-  enabled: true
-  
-  # Analysis interval in minutes
-  analysis_interval_minutes: 30
-  
-  # Minimum fit score for execution consideration
-  min_fit_score: 0.7
-  
-  # Minimum confidence for execution
-  min_confidence: 0.6
-  
-  # Strategy-specific thresholds
-  strategies:
-    trend_bot:
-      min_volatility: 0.02
-      max_volatility: 0.12
-      min_momentum: 0.3
-      regime_preference: ["trending", "volatile"]
-    
-    grid_bot:
-      min_volatility: 0.01
-      max_volatility: 0.08
-      regime_preference: ["ranging", "neutral"]
-    
-    mean_bot:
-      min_volatility: 0.01
-      max_volatility: 0.10
-      regime_preference: ["ranging", "neutral"]
-    
-    breakout_bot:
-      min_volatility: 0.03
-      max_volatility: 0.15
-      min_momentum: 0.4
-      regime_preference: ["trending", "volatile"]
-    
-    sniper_bot:
-      min_volatility: 0.02
-      max_volatility: 0.12
-      min_liquidity: 0.6
-      regime_preference: ["trending", "volatile"]
-    
-    dex_scalper:
-      min_volatility: 0.02
-      max_volatility: 0.15
-      min_liquidity: 0.7
-      regime_preference: ["volatile", "trending"]
+# Scan Cache Configuration
+scan_cache:
+  max_cache_size: 500
+  review_interval_minutes: 20
+  max_age_hours: 12
+  min_score_threshold: 0.4
+  persist_to_disk: true
+  auto_cleanup: true
 
-# Execution Opportunity Detection
-execution_opportunities:
-  # Enable execution opportunity detection
-  enabled: true
-  
-  # Minimum confidence for opportunity creation
-  min_confidence: 0.7
-  
-  # Risk management settings
-  risk:
-    risk_per_trade: 0.02  # 2% risk per trade
-    stop_loss_atr_mult: 2.0
-    take_profit_atr_mult: 4.0
-    max_position_size: 0.1  # 10% of account
-    min_risk_reward_ratio: 2.0
-  
-  # Execution cooldown settings
-  cooldown:
-    min_hours_between_attempts: 1
-    max_execution_attempts: 3
-  
-  # Market condition filters
-  market_filters:
-    max_spread_pct: 0.5
-    min_volume_ratio: 0.5
-    min_liquidity_score: 0.6
-    min_volatility_score: 0.4
-
-# Cache Integration Settings
-cache_integration:
-  # Enable integration with existing caches
-  enable_df_cache_integration: true
-  enable_regime_cache_integration: true
-  
-  # Cache refresh settings
-  refresh:
-    auto_refresh_stale_data: true
-    refresh_threshold_hours: 6
-    max_concurrent_refreshes: 5
-  
-  # Performance optimization
-  performance:
-    enable_ttl_cache: true
-    ttl_cache_size: 1000
-    ttl_seconds: 300  # 5 minutes
-    
-    enable_lru_cache: true
-    lru_cache_size: 500
-
-# Monitoring and Logging
-monitoring:
-  # Enable detailed logging
-  enable_debug_logging: false
-  
-  # Performance metrics
-  track_performance: true
-  log_cache_stats: true
-  log_scan_stats: true
-  
-  # Alert thresholds
-  alerts:
-    cache_size_warning: 800
-    scan_failure_threshold: 3
-    execution_opportunity_threshold: 10
-  
-  # Statistics reporting
-  stats:
-    report_interval_minutes: 60
-    enable_telegram_notifications: true
-    enable_csv_export: true
-
-# Integration Settings
+# Integration Configuration
 integration:
-  # Enable integration with main bot
   enable_bot_integration: true
-  
-  # Enable integration with strategy router
   enable_strategy_router_integration: true
-  
-  # Enable integration with risk manager
   enable_risk_manager_integration: true
-  
-  # Enable integration with execution engine
-  enable_execution_integration: true
-  
-  # Webhook notifications
-  webhooks:
-    enable_scan_completion: false
-    enable_opportunity_detection: false
-    enable_execution_completion: false
+  scan_interval: 30
+  max_concurrent_scans: 3
 
-# Advanced Settings
-advanced:
-  # Machine learning integration
-  ml:
-    enable_ml_scoring: false
-    model_path: "models/scan_scoring_model.pkl"
-    retrain_interval_days: 7
-  
-  # Custom filters
-  custom_filters:
-    enable_custom_filters: false
-    filter_file: "config/custom_scan_filters.py"
-  
-  # Backtesting integration
-  backtesting:
-    enable_backtesting: false
-    backtest_data_path: "data/scan_backtest/"
-    backtest_results_path: "results/scan_backtest/"
-
-# Development and Testing
-development:
-  # Enable development mode
-  dev_mode: false
-  
-  # Mock data for testing
-  use_mock_data: false
-  mock_data_path: "tests/mock_data/"
-  
-  # Performance profiling
-  enable_profiling: false
-  profile_output_path: "profiles/scan_profiles/"
+# Monitoring Configuration
+monitoring:
+  enable_scan_metrics: true
+  log_scan_results: true
+  track_scan_performance: true
+  alert_on_scan_failures: true
+  scan_metrics_interval: 60
+  max_scan_logs: 1000

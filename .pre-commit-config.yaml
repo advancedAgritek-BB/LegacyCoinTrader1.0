@@ -1,0 +1,159 @@
+repos:
+  # Pre-commit hooks for general code quality
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+        name: Remove trailing whitespace
+        description: Remove trailing whitespace from all files
+      - id: end-of-file-fixer
+        name: Fix end of files
+        description: Ensure files end with a newline
+      - id: check-yaml
+        name: Check YAML syntax
+        description: Validate YAML file syntax
+      - id: check-added-large-files
+        name: Check for large files
+        description: Prevent large files from being committed
+      - id: check-merge-conflict
+        name: Check merge conflicts
+        description: Check for merge conflict markers
+      - id: debug-statements
+        name: Debug statements
+        description: Check for debug statements (pdb, print, etc.)
+      - id: check-docstring-first
+        name: Check docstring first
+        description: Check that docstrings are first in function/class
+      - id: mixed-line-ending
+        name: Mixed line endings
+        description: Check for mixed line endings
+        args: [--fix=lf]
+
+  # Black - Python code formatter
+  - repo: https://github.com/psf/black
+    rev: 23.7.0
+    hooks:
+      - id: black
+        name: Format Python code with Black
+        description: Format Python code using Black
+        language_version: python3.9
+
+  # isort - Import sorter
+  - repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+        name: Sort Python imports
+        description: Sort Python imports using isort
+        args: ["--profile", "black", "--check-only", "--diff"]
+
+  # flake8 - Python linter
+  - repo: https://github.com/pycqa/flake8
+    rev: 6.0.0
+    hooks:
+      - id: flake8
+        name: Lint Python code with flake8
+        description: Lint Python code using flake8
+        args: ["--max-line-length=100", "--extend-ignore=E203,W503"]
+        exclude: ^(venv|env|\.venv|\.env)/
+
+  # mypy - Static type checker
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.5.1
+    hooks:
+      - id: mypy
+        name: Type check Python code
+        description: Type check Python code using mypy
+        additional_dependencies: [types-all]
+        args: ["--ignore-missing-imports", "--strict-optional", "--no-strict-optional"]
+
+  # bandit - Security linter
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        name: Security check Python code
+        description: Check Python code for security issues
+        args: ["-r", "modern/src/", "-c", "pyproject.toml"]
+        exclude: ^(tests|docs|scripts)/
+
+  # Safety - Dependency vulnerability checker
+  - repo: https://github.com/Lucas-C/pre-commit-hooks-safety
+    rev: v1.3.2
+    hooks:
+      - id: python-safety-dependencies-check
+        name: Check Python dependencies for vulnerabilities
+        description: Check Python dependencies for known security vulnerabilities
+
+  # Commitizen - Commit message linter
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: 3.12.0
+    hooks:
+      - id: commitizen
+        name: Check commit message format
+        description: Check that commit messages follow conventional commit format
+        stages: [commit-msg]
+
+  # License header checker
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.1
+    hooks:
+      - id: insert-license
+        name: Insert license header
+        description: Insert license header in source files
+        args:
+          - --license-filepath
+          - LICENSE
+          - --comment-style
+          - "#"
+        files: \.py$
+        exclude: ^(tests|docs|scripts|venv|env|\.venv|\.env)/
+
+  # Custom hooks for this project
+  - repo: local
+    hooks:
+      # Test runner
+      - id: run-tests
+        name: Run test suite
+        description: Run the test suite to ensure code quality
+        entry: python -m pytest
+        language: system
+        pass_filenames: false
+        args: ["modern/tests/unit/", "--tb=short", "--disable-warnings", "-x"]
+        files: ^modern/src/
+        stages: [push]
+
+      # Coverage check
+      - id: check-coverage
+        name: Check test coverage
+        description: Ensure test coverage meets minimum requirements
+        entry: python -m pytest
+        language: system
+        pass_filenames: false
+        args: ["modern/tests/", "--cov=modern", "--cov-fail-under=90", "--cov-report=term-missing"]
+        files: ^modern/src/
+        stages: [push]
+
+      # Documentation check
+      - id: check-docs
+        name: Check documentation
+        description: Ensure documentation is up to date
+        entry: python
+        language: system
+        pass_filenames: false
+        args: ["-c", "import modern; help(modern)"]
+        files: ^modern/src/
+        stages: [push]
+
+# Configuration for CI/CD integration
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false

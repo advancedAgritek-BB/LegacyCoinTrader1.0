@@ -1,6 +1,6 @@
-try:
-    from .app import app  # re-export Flask app for tests
-except Exception:  # pragma: no cover - allow tests to import package without Flask
-    app = None
+"""Frontend package initialization.
 
-
+Intentionally empty to avoid shadowing the `frontend.app` module with a
+variable named `app`, which breaks test patching like
+`frontend.app.subprocess.Popen`.
+"""

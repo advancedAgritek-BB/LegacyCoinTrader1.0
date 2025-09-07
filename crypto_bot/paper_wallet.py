@@ -5,6 +5,7 @@ from uuid import uuid4
 import logging
 import yaml
 from pathlib import Path
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class PaperWallet:
         self, balance: float, max_open_trades: int = 10, allow_short: bool = True
     ) -> None:
         self.initial_balance = balance
-        self.balance = balance
+        self._balance = balance
         # mapping of identifier (symbol or trade id) -> position details
         # each position: {"symbol": Optional[str], "side": str, "amount": float, "entry_price": float, "reserved": float}
         self.positions: Dict[str, Dict[str, Any]] = {}
@@ -34,6 +35,55 @@ class PaperWallet:
         self.total_trades = 0
         self.winning_trades = 0
         self.state_file = Path("crypto_bot/logs/paper_wallet_state.yaml")
+
+    # ------------------------------------------------------------------
+    # TradeManager Synchronization
+    # ------------------------------------------------------------------
+
+    def sync_from_trade_manager(self, trade_manager_positions: List[dict], current_prices: Dict[str, float] = None) -> None:
+        """
+        Synchronize paper wallet positions with TradeManager positions.
+
+        Args:
+            trade_manager_positions: List of position dicts from TradeManager
+            current_prices: Dict of symbol -> current_price for PnL calculation
+        """
+        try:
+            # Allow sync even if we have positions - TradeManager is source of truth
+            if len(self.positions) > 0:
+                logger.info(f"🔄 Syncing with TradeManager - updating {len(self.positions)} existing positions")
+                logger.info(f"📊 Current paper wallet balance: ${self.balance:.2f}")
+            
+            # Clear existing positions and rebuild from TradeManager
+            self.positions.clear()
+
+            for tm_pos in trade_manager_positions:
+                symbol = tm_pos['symbol']
+
+                # Get current price for PnL calculation
+                current_price = current_prices.get(symbol, tm_pos['entry_price']) if current_prices else tm_pos['entry_price']
+
+                # Calculate PnL
+                pnl_pct = ((current_price - tm_pos['entry_price']) / tm_pos['entry_price']) * (
+                    1 if tm_pos['side'] == 'long' else -1
+                )
+
+                # Create paper wallet position
+                self.positions[symbol] = {
+                    'symbol': symbol,
+                    'side': tm_pos['side'],
+                    'amount': tm_pos['total_amount'],
+                    'entry_price': tm_pos['entry_price'],
+                    'current_price': current_price,
+                    'pnl': pnl_pct,
+                    'fees_paid': tm_pos.get('fees_paid', 0.0),
+                    'timestamp': tm_pos.get('entry_time', datetime.now().isoformat())
+                }
+
+            logger.info(f"Synchronized {len(trade_manager_positions)} positions from TradeManager to paper wallet")
+
+        except Exception as e:
+            logger.error(f"Error syncing paper wallet from TradeManager: {e}")
 
     # ------------------------------------------------------------------
     # Properties
@@ -72,6 +122,83 @@ class PaperWallet:
         return "mixed"
 
     @property
+    def balance(self) -> float:
+        """Current wallet balance, never negative."""
+        return max(0.0, self._balance)
+
+    @balance.setter
+    def balance(self, value: float) -> None:
+        """Set balance with validation."""
+        self._balance = max(0.0, value)
+
+    def buy(self, symbol: str, amount: float, price: float) -> bool:
+        """Simulate a buy order (paper trading only - no real trades)."""
+        cost = amount * price
+        if cost > self._balance:
+            logger.warning(f"Insufficient balance for buy: ${cost:.2f} > ${self._balance:.2f}")
+            return False
+        
+        # Deduct cost from balance
+        self._balance -= cost
+        
+        # Create or update position
+        if symbol in self.positions:
+            # Add to existing position
+            pos = self.positions[symbol]
+            total_amount = pos['amount'] + amount
+            # Weighted average entry price
+            total_cost = (pos['amount'] * pos['entry_price']) + cost
+            pos['entry_price'] = total_cost / total_amount
+            pos['amount'] = total_amount
+        else:
+            # Create new position
+            self.positions[symbol] = {
+                'symbol': symbol,
+                'side': 'long',
+                'amount': amount,
+                'entry_price': price,
+                'reserved': 0.0,
+                'timestamp': datetime.now().isoformat()
+            }
+        
+        self.total_trades += 1
+        logger.info(f"Paper buy order executed: {amount} {symbol} at ${price:.2f}")
+        return True
+
+    def sell(self, symbol: str, amount: float, price: float) -> bool:
+        """Simulate a sell order (paper trading only - no real trades)."""
+        if symbol not in self.positions:
+            logger.warning(f"No position found for {symbol}")
+            return False
+        
+        position = self.positions[symbol]
+        if position['amount'] < amount:
+            logger.warning(f"Insufficient amount to sell: {amount} > {position['amount']}")
+            return False
+        
+        # Calculate PnL
+        pnl = (price - position['entry_price']) * amount
+        self.realized_pnl += pnl
+        
+        # Add proceeds to balance
+        self._balance += amount * price
+        
+        # Update position
+        if position['amount'] == amount:
+            # Full position closed
+            del self.positions[symbol]
+        else:
+            # Partial position closed
+            position['amount'] -= amount
+        
+        self.total_trades += 1
+        if pnl > 0:
+            self.winning_trades += 1
+        
+        logger.info(f"Paper sell order executed: {amount} {symbol} at ${price:.2f}, PnL: ${pnl:.2f}")
+        return True
+
+    @property
     def total_value(self) -> float:
         """Total portfolio value including unrealized PnL."""
         return self.balance + self.unrealized_total()
@@ -100,6 +227,67 @@ class PaperWallet:
                 # assuming current price is lower (profitable short)
                 pass
         return total
+
+    def validate_wallet_state(self) -> bool:
+        """Validate that the wallet state is consistent and healthy."""
+        try:
+            # Calculate total position value at entry
+            total_position_value = 0
+            for pos in self.positions.values():
+                key = "size" if "size" in pos else "amount"
+                position_value = pos[key] * pos["entry_price"]
+                total_position_value += position_value
+            
+            # Calculate total portfolio value (cash + positions)
+            total_portfolio_value = self.balance + total_position_value
+            
+            # Check if total portfolio value is reasonable
+            if total_portfolio_value < 0:
+                logger.error(f"Total portfolio value is negative: ${total_portfolio_value:.2f} (balance: ${self.balance:.2f}, positions: ${total_position_value:.2f})")
+                return False
+            
+            # Check if total position value exceeds initial balance (this might be OK for leverage)
+            if total_position_value > self.initial_balance * 2:  # Allow up to 2x leverage
+                logger.warning(f"High leverage detected: positions=${total_position_value:.2f}, initial_balance=${self.initial_balance:.2f}")
+            
+            # Check for reasonable position sizes
+            for trade_id, pos in self.positions.items():
+                key = "size" if "size" in pos else "amount"
+                position_value = pos[key] * pos["entry_price"]
+                if position_value > self.initial_balance * 0.5:  # No single position > 50% of initial balance
+                    logger.warning(f"Large position detected: {pos.get('symbol', trade_id)} = ${position_value:.2f} ({position_value/self.initial_balance*100:.1f}% of initial balance)")
+            
+            # Negative cash balance is OK if you have open positions
+            if self.balance < 0 and len(self.positions) > 0:
+                logger.info(f"Negative cash balance (${self.balance:.2f}) is normal with {len(self.positions)} open positions")
+                logger.info(f"Total portfolio value: ${total_portfolio_value:.2f}")
+            
+            logger.debug(f"Wallet state validation passed: balance=${self.balance:.2f}, positions={len(self.positions)}, total_value=${total_portfolio_value:.2f}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating wallet state: {e}")
+            return False
+
+    def get_wallet_summary(self) -> dict:
+        """Get a summary of the current wallet state."""
+        total_position_value = 0
+        for pos in self.positions.values():
+            key = "size" if "size" in pos else "amount"
+            position_value = pos[key] * pos["entry_price"]
+            total_position_value += position_value
+        
+        return {
+            'balance': self.balance,
+            'initial_balance': self.initial_balance,
+            'total_position_value': total_position_value,
+            'available_balance': self.balance - total_position_value,
+            'position_count': len(self.positions),
+            'total_trades': self.total_trades,
+            'winning_trades': self.winning_trades,
+            'win_rate': self.win_rate,
+            'is_healthy': self.balance >= 0 and total_position_value <= self.initial_balance
+        }
 
     # ------------------------------------------------------------------
     # Trade management
@@ -158,15 +346,22 @@ class PaperWallet:
         cost = amount * price
         reserved = 0.0
 
-        # Validate sufficient balance
+        # Enhanced balance validation with safety margin
+        safety_margin = 0.05  # 5% safety margin
+        available_balance = self.balance * (1 - safety_margin)
+        
         if side == "buy":
-            if cost > self.balance:
-                raise RuntimeError(f"Insufficient balance: need ${cost:.2f}, have ${self.balance:.2f}")
+            if cost > available_balance:
+                raise RuntimeError(f"Insufficient balance: need ${cost:.2f}, available ${available_balance:.2f} (with {safety_margin*100}% safety margin)")
+            if self.balance < 0:
+                raise RuntimeError(f"Cannot open position with negative balance: ${self.balance:.2f}")
             self.balance -= cost
             logger.info(f"Opened BUY position: {amount} @ ${price:.6f} = ${cost:.2f}, balance: ${self.balance:.2f}")
         else:  # sell/short
-            if cost > self.balance:
-                raise RuntimeError(f"Insufficient balance for short: need ${cost:.2f}, have ${self.balance:.2f}")
+            if cost > available_balance:
+                raise RuntimeError(f"Insufficient balance for short: need ${cost:.2f}, available ${available_balance:.2f} (with {safety_margin*100}% safety margin)")
+            if self.balance < 0:
+                raise RuntimeError(f"Cannot open short position with negative balance: ${self.balance:.2f}")
             self.balance -= cost
             reserved = cost  # Reserve the funds for the short position
             logger.info(f"Opened SELL position: {amount} @ ${price:.6f} = ${cost:.2f}, reserved: ${reserved:.2f}, balance: ${self.balance:.2f}")
@@ -257,8 +452,8 @@ class PaperWallet:
 
         if pos["side"] == "buy":
             pnl = (price - entry_price) * amount
-            # Add the sale proceeds to balance
-            self.balance += amount * price
+            # Add only the profit/loss to balance (not the full sale proceeds)
+            self.balance += pnl
             logger.info(f"Closed BUY position: {amount} @ ${price:.6f} (entry: ${entry_price:.6f}), PnL: ${pnl:.2f}, balance: ${self.balance:.2f}")
         else:  # sell/short
             pnl = (entry_price - price) * amount
@@ -373,9 +568,9 @@ class PaperWallet:
         """Reset the wallet to initial state or new balance."""
         if new_balance is not None:
             self.initial_balance = new_balance
-            self.balance = new_balance
+            self._balance = new_balance
         else:
-            self.balance = self.initial_balance
+            self._balance = self.initial_balance
         
         self.positions.clear()
         self.realized_pnl = 0.0
@@ -402,6 +597,13 @@ class PaperWallet:
                 yaml.dump(state, f, default_flow_style=False)
             
             logger.info(f"Saved paper wallet state: balance=${self.balance:.2f}, realized_pnl=${self.realized_pnl:.2f}")
+
+            # Ensure single source of truth is synchronized
+            try:
+                from .utils.balance_manager import set_single_balance
+                set_single_balance(self.balance)
+            except Exception as e:
+                logger.warning(f"Failed to sync single balance source: {e}")
             
         except Exception as e:
             logger.error(f"Failed to save paper wallet state: {e}")
@@ -416,8 +618,15 @@ class PaperWallet:
             with open(self.state_file, 'r') as f:
                 state = yaml.safe_load(f) or {}
             
-            self.balance = state.get('balance', self.balance)
+            # Sanitize balance to prevent negative values
+            loaded_balance = state.get('balance', self._balance)
+            self._balance = max(0.0, loaded_balance)
             self.initial_balance = state.get('initial_balance', self.initial_balance)
+
+            # If we corrected a negative balance, log it and save the corrected state
+            if loaded_balance < 0 and self._balance != loaded_balance:
+                logger.warning(f"Corrected negative balance from ${loaded_balance:.2f} to ${self._balance:.2f} in loaded state")
+                self.save_state()  # Save the corrected state immediately
             self.realized_pnl = state.get('realized_pnl', 0.0)
             self.total_trades = state.get('total_trades', 0)
             self.winning_trades = state.get('winning_trades', 0)

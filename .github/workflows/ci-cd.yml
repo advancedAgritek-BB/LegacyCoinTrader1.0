@@ -1,0 +1,345 @@
+---
+name: LegacyCoinTrader CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  DOCKER_BUILDKIT: 1
+  COMPOSE_DOCKER_CLI_BUILD: 1
+
+jobs:
+  # Lint and Test
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black pytest pytest-cov
+
+      - name: Lint with flake8
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
+
+      - name: Format with black
+        run: black --check --diff --line-length 100 .
+
+      - name: Run unit tests
+        run: |
+          pytest tests/ -v --cov=services --cov-report=xml --cov-report=html
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+  # Build and Test Docker Images
+  build-test:
+    runs-on: ubuntu-latest
+    needs: lint-test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API Gateway
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/api_gateway
+          push: false
+          tags: legacy-coin-trader/api-gateway:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Trading Engine
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/trading_engine
+          push: false
+          tags: legacy-coin-trader/trading-engine:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build E2E Test Runner
+        uses: docker/build-push-action@v5
+        with:
+          context: ./tests/e2e
+          push: false
+          tags: legacy-coin-trader/e2e-tests:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Integration Tests
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Start services
+        run: |
+          docker-compose -f docker-compose.yml -f docker-compose.test.yml up -d
+          docker-compose -f docker-compose.yml -f docker-compose.test.yml ps
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for services to be healthy..."
+          timeout 300 bash -c 'until docker-compose -f docker-compose.yml -f docker-compose.test.yml ps | grep -q "healthy"; do sleep 10; done' || true
+
+      - name: Check service health
+        run: |
+          docker-compose -f docker-compose.yml -f docker-compose.test.yml exec -T api-gateway curl -f http://localhost:8000/health || exit 1
+          docker-compose -f docker-compose.yml -f docker-compose.test.yml exec -T trading-engine curl -f http://localhost:8001/health || exit 1
+
+      - name: Run E2E tests
+        run: |
+          docker-compose -f docker-compose.yml -f docker-compose.test.yml up --abort-on-container-exit e2e-tests
+
+      - name: Collect test results
+        run: |
+          docker cp $(docker-compose -f docker-compose.yml -f docker-compose.test.yml ps -q e2e-tests | head -1):/app/e2e_test_results.json ./e2e_test_results.json || true
+          ls -la e2e_test_results.json || echo "No test results found"
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: e2e-test-results
+          path: |
+            e2e_test_results.json
+            test_results/
+
+      - name: Stop services
+        if: always()
+        run: docker-compose -f docker-compose.yml -f docker-compose.test.yml down -v
+
+  # Security Scan
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # Deploy to Staging
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [integration-test, security-scan]
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Get AWS Account ID
+        id: aws-account
+        run: echo "account-id=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_OUTPUT
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push images to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: legacy-coin-trader
+        run: |
+          # Build and tag images
+          docker-compose -f docker-compose.yml -f docker-compose.dev.yml build
+
+          # Tag and push images
+          docker tag legacy-coin-trader_api-gateway:latest $ECR_REGISTRY/$ECR_REPOSITORY/api-gateway:staging
+          docker tag legacy-coin-trader_trading-engine:latest $ECR_REGISTRY/$ECR_REPOSITORY/trading-engine:staging
+
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY/api-gateway:staging
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY/trading-engine:staging
+
+      - name: Deploy to ECS
+        run: |
+          aws ecs update-service \
+            --cluster legacy-coin-trader-staging \
+            --service legacy-coin-trader-service \
+            --force-new-deployment \
+            --region us-east-1
+
+      - name: Wait for deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster legacy-coin-trader-staging \
+            --services legacy-coin-trader-service \
+            --region us-east-1
+
+      - name: Run smoke tests on staging
+        run: |
+          # Run basic health checks on staging environment
+          curl -f https://staging.api.legacy-coin-trader.com/health || exit 1
+
+  # Deploy to Production
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [integration-test, security-scan]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Get AWS Account ID
+        id: aws-account
+        run: echo "account-id=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_OUTPUT
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push production images
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: legacy-coin-trader
+        run: |
+          # Build production images
+          docker-compose -f docker-compose.yml -f docker-compose.prod.yml build
+
+          # Tag and push images
+          docker tag legacy-coin-trader_api-gateway:latest $ECR_REGISTRY/$ECR_REPOSITORY/api-gateway:${{ github.sha }}
+          docker tag legacy-coin-trader_api-gateway:latest $ECR_REGISTRY/$ECR_REPOSITORY/api-gateway:latest
+          docker tag legacy-coin-trader_trading-engine:latest $ECR_REGISTRY/$ECR_REPOSITORY/trading-engine:${{ github.sha }}
+          docker tag legacy-coin-trader_trading-engine:latest $ECR_REGISTRY/$ECR_REPOSITORY/trading-engine:latest
+
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY/api-gateway:${{ github.sha }}
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY/api-gateway:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY/trading-engine:${{ github.sha }}
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY/trading-engine:latest
+
+      - name: Deploy to production ECS
+        run: |
+          # Update task definition with new image
+          aws ecs register-task-definition \
+            --cli-input-json file://.github/task-definition.json \
+            --region us-east-1
+
+          # Deploy new version
+          aws ecs update-service \
+            --cluster legacy-coin-trader-prod \
+            --service legacy-coin-trader-service \
+            --task-definition legacy-coin-trader-task:${{ github.sha }} \
+            --force-new-deployment \
+            --region us-east-1
+
+      - name: Wait for production deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster legacy-coin-trader-prod \
+            --services legacy-coin-trader-service \
+            --region us-east-1
+
+      - name: Run production smoke tests
+        run: |
+          # Run comprehensive tests on production
+          curl -f https://api.legacy-coin-trader.com/health || exit 1
+          curl -f https://api.legacy-coin-trader.com/api/trading/status || exit 1
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{"text":"🚀 LegacyCoinTrader deployed to production successfully!"}' \
+            ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify deployment failure
+        if: failure()
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{"text":"❌ LegacyCoinTrader production deployment failed!"}' \
+            ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Rollback on failure
+  rollback:
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: failure() && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Rollback production deployment
+        run: |
+          # Get previous stable task definition
+          aws ecs describe-task-definition \
+            --task-definition legacy-coin-trader-task \
+            --region us-east-1 > previous_task.json
+
+          # Update service to use previous version
+          aws ecs update-service \
+            --cluster legacy-coin-trader-prod \
+            --service legacy-coin-trader-service \
+            --task-definition legacy-coin-trader-task \
+            --region us-east-1
+
+      - name: Notify rollback
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{"text":"🔄 LegacyCoinTrader production rollback initiated"}' \
+            ${{ secrets.SLACK_WEBHOOK_URL }}

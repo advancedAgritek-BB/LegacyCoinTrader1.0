@@ -14,13 +14,20 @@ import json
 def check_bot_process():
     """Check if bot process is running."""
     result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
-    bot_running = 'crypto_bot' in result.stdout or 'python.*main' in result.stdout
+    bot_running = (
+        'crypto_bot' in result.stdout or 
+        'python.*main' in result.stdout or
+        'start_bot' in result.stdout or
+        'start_bot_final' in result.stdout or
+        'start_bot_auto' in result.stdout or
+        'start_bot_clean' in result.stdout
+    )
     
     if bot_running:
         # Extract process info
         lines = result.stdout.splitlines()
         for line in lines:
-            if 'crypto_bot' in line or 'python.*main' in line:
+            if any(keyword in line for keyword in ['crypto_bot', 'python.*main', 'start_bot']):
                 parts = line.split()
                 if len(parts) >= 2:
                     return True, parts[1]  # Return PID

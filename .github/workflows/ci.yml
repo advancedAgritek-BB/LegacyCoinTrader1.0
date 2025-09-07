@@ -1,0 +1,690 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.9"
+  POETRY_VERSION: "1.5.1"
+  AWS_REGION: "us-east-1"
+  ECR_REPOSITORY: "legacy-coin-trader"
+
+jobs:
+  # Quality Assurance
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements-modern.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-modern.txt
+        pip install pre-commit black isort flake8 mypy bandit safety
+
+    - name: Run pre-commit hooks
+      run: pre-commit run --all-files
+
+    - name: Check code formatting with Black
+      run: black --check --diff modern/ tests/
+
+    - name: Check import sorting with isort
+      run: isort --check-only --diff modern/ tests/
+
+    - name: Lint with flake8
+      run: flake8 modern/ tests/
+
+    - name: Type check with mypy
+      run: mypy modern/
+
+    - name: Security check with bandit
+      run: bandit -r modern/ -f json -o bandit-report.json || true
+
+    - name: Safety check for dependencies
+      run: safety check --full-report
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+
+  # Unit Tests
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements-modern.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-modern.txt
+        pip install pytest pytest-cov pytest-xdist pytest-asyncio pytest-mock
+
+    - name: Run unit tests
+      run: |
+        pytest modern/tests/unit/ \
+          --cov=modern \
+          --cov-report=xml \
+          --cov-report=term-missing \
+          --junitxml=junit-unit.xml \
+          -v \
+          --tb=short \
+          --strict-markers \
+          --disable-warnings \
+          --maxfail=5
+
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: unit-test-results
+        path: |
+          coverage.xml
+          junit-unit.xml
+          htmlcov/
+
+  # Integration Tests
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      postgres:
+        image: postgres:15-alpine
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements-modern.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-modern.txt
+        pip install pytest pytest-cov pytest-xdist pytest-asyncio pytest-mock
+
+    - name: Run integration tests
+      run: |
+        pytest modern/tests/integration/ \
+          --cov=modern \
+          --cov-report=xml \
+          --cov-report=term-missing \
+          --junitxml=junit-integration.xml \
+          -v \
+          --tb=short \
+          --strict-markers \
+          --disable-warnings \
+          --maxfail=3 \
+          -m "integration"
+      env:
+        DATABASE_URL: postgresql://postgres:test_password@localhost:5432/test_db
+        REDIS_URL: redis://localhost:6379/0
+
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-test-results
+        path: |
+          coverage.xml
+          junit-integration.xml
+
+  # Performance Tests
+  test-performance:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-modern.txt
+        pip install pytest pytest-benchmark pytest-cov
+
+    - name: Run performance tests
+      run: |
+        pytest modern/tests/unit/test_performance.py \
+          --benchmark-only \
+          --benchmark-json=benchmark.json \
+          --benchmark-compare \
+          --junitxml=junit-performance.xml \
+          -v
+
+    - name: Upload performance reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: performance-test-results
+        path: |
+          benchmark.json
+          junit-performance.xml
+
+  # Security Tests
+  test-security:
+    name: Security Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-modern.txt
+        pip install pytest pytest-cov bandit safety
+
+    - name: Run security-focused tests
+      run: |
+        pytest modern/tests/unit/ \
+          --cov=modern \
+          --cov-report=xml \
+          --junitxml=junit-security.xml \
+          -v \
+          -k "security" \
+          -m "security"
+
+    - name: Security scan with bandit
+      run: bandit -r modern/src/ -f json -o bandit-results.json --severity-level high
+
+    - name: Dependency vulnerability scan
+      run: safety check --json | tee safety-results.json
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-test-results
+        path: |
+          bandit-results.json
+          safety-results.json
+          junit-security.xml
+
+  # Coverage Report
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    needs: [test-unit, test-integration]
+    if: always()
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download coverage reports
+      uses: actions/download-artifact@v3
+      with:
+        name: unit-test-results
+        path: unit-coverage/
+
+    - name: Download integration coverage reports
+      uses: actions/download-artifact@v3
+      with:
+        name: integration-test-results
+        path: integration-coverage/
+
+    - name: Generate combined coverage report
+      run: |
+        pip install coverage
+        coverage combine unit-coverage/coverage.xml integration-coverage/coverage.xml
+        coverage report --show-missing
+        coverage html --directory=htmlcov
+
+    - name: Upload combined coverage report
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+    - name: Upload HTML coverage report
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-report
+        path: htmlcov/
+
+  # Build and Package
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    needs: [quality, test-unit]
+    if: success()
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+
+    - name: Build package
+      run: python -m build
+
+    - name: Check package
+      run: twine check dist/*
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-package
+        path: dist/
+
+  # Docker Build
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [quality, test-unit]
+    if: success()
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Configure AWS credentials for ECR
+      if: github.event_name != 'pull_request'
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Login to Amazon ECR
+      if: github.event_name != 'pull_request'
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          legacycointrader/trading-bot
+          ${{ steps.login-ecr.outputs.registry }}/legacy-coin-trader/trading-bot
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  # Deploy to Staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [quality, test-unit, test-integration, docker]
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    environment: staging
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build and push images to ECR
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: legacy-coin-trader
+        IMAGE_TAG: staging-${{ github.sha }}
+      run: |
+        # Build and tag images
+        docker-compose -f docker-compose.yml -f docker-compose.dev.yml build
+
+        # Tag and push images
+        docker tag legacy-coin-trader_api-gateway:latest $ECR_REGISTRY/$ECR_REPOSITORY/api-gateway:$IMAGE_TAG
+        docker tag legacy-coin-trader_trading-engine:latest $ECR_REGISTRY/$ECR_REPOSITORY/trading-engine:$IMAGE_TAG
+
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY/api-gateway:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY/trading-engine:$IMAGE_TAG
+
+    - name: Deploy to ECS
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: legacy-coin-trader
+        IMAGE_TAG: staging-${{ github.sha }}
+      run: |
+        # Update task definition with new image
+        sed -i "s|\${IMAGE_TAG}|$IMAGE_TAG|g" .github/task-definition.json
+        sed -i "s|\${ECR_REGISTRY}|$ECR_REGISTRY|g" .github/task-definition.json
+        sed -i "s|\${ECR_REPOSITORY}|$ECR_REPOSITORY|g" .github/task-definition.json
+
+        aws ecs register-task-definition \
+          --cli-input-json file://.github/task-definition.json \
+          --region us-east-1
+
+        # Deploy to staging
+        aws ecs update-service \
+          --cluster legacy-coin-trader-staging \
+          --service legacy-coin-trader-service \
+          --task-definition legacy-coin-trader-task \
+          --force-new-deployment \
+          --region us-east-1
+
+    - name: Wait for deployment
+      run: |
+        aws ecs wait services-stable \
+          --cluster legacy-coin-trader-staging \
+          --services legacy-coin-trader-service \
+          --region us-east-1
+
+    - name: Run smoke tests on staging
+      run: |
+        # Run basic health checks on staging environment
+        curl -f https://staging.api.legacy-coin-trader.com/health || exit 1
+
+    - name: Notify staging deployment success
+      if: success()
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"🚀 LegacyCoinTrader deployed to staging successfully!"}' \
+          ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    - name: Notify staging deployment failure
+      if: failure()
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"❌ LegacyCoinTrader staging deployment failed!"}' \
+          ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Deploy to Production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [quality, test-unit, test-integration, docker, deploy-staging]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build and push production images
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: legacy-coin-trader
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Build production images
+        docker-compose -f docker-compose.yml -f docker-compose.prod.yml build
+
+        # Tag and push images
+        docker tag legacy-coin-trader_api-gateway:latest $ECR_REGISTRY/$ECR_REPOSITORY/api-gateway:$IMAGE_TAG
+        docker tag legacy-coin-trader_api-gateway:latest $ECR_REGISTRY/$ECR_REPOSITORY/api-gateway:latest
+        docker tag legacy-coin-trader_trading-engine:latest $ECR_REGISTRY/$ECR_REPOSITORY/trading-engine:$IMAGE_TAG
+        docker tag legacy-coin-trader_trading-engine:latest $ECR_REGISTRY/$ECR_REPOSITORY/trading-engine:latest
+
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY/api-gateway:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY/api-gateway:latest
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY/trading-engine:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY/trading-engine:latest
+
+    - name: Deploy to production ECS
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: legacy-coin-trader
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Update task definition with new image
+        sed -i "s|\${IMAGE_TAG}|$IMAGE_TAG|g" .github/task-definition.json
+        sed -i "s|\${ECR_REGISTRY}|$ECR_REGISTRY|g" .github/task-definition.json
+        sed -i "s|\${ECR_REPOSITORY}|$ECR_REPOSITORY|g" .github/task-definition.json
+
+        # Update task definition
+        aws ecs register-task-definition \
+          --cli-input-json file://.github/task-definition.json \
+          --region us-east-1
+
+        # Deploy to production
+        aws ecs update-service \
+          --cluster legacy-coin-trader-prod \
+          --service legacy-coin-trader-service \
+          --task-definition legacy-coin-trader-task \
+          --force-new-deployment \
+          --region us-east-1
+
+    - name: Wait for production deployment
+      run: |
+        aws ecs wait services-stable \
+          --cluster legacy-coin-trader-prod \
+          --services legacy-coin-trader-service \
+          --region us-east-1
+
+    - name: Run production smoke tests
+      run: |
+        # Run comprehensive tests on production
+        curl -f https://api.legacy-coin-trader.com/health || exit 1
+        curl -f https://api.legacy-coin-trader.com/api/trading/status || exit 1
+
+    - name: Notify production deployment success
+      if: success()
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"🚀 LegacyCoinTrader deployed to production successfully!"}' \
+          ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    - name: Notify production deployment failure
+      if: failure()
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"❌ LegacyCoinTrader production deployment failed!"}' \
+          ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Final Status Check
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    needs: [quality, test-unit, test-integration, test-performance, coverage, build]
+    if: always()
+
+    steps:
+    - name: Check all jobs
+      run: |
+        FAILED_JOBS=""
+
+        if [[ "${{ needs.quality.result }}" != "success" ]]; then
+          FAILED_JOBS="${FAILED_JOBS} Quality Check,"
+        fi
+
+        if [[ "${{ needs.test-unit.result }}" != "success" ]]; then
+          FAILED_JOBS="${FAILED_JOBS} Unit Tests,"
+        fi
+
+        if [[ "${{ needs.test-integration.result }}" != "success" ]]; then
+          FAILED_JOBS="${FAILED_JOBS} Integration Tests,"
+        fi
+
+        if [[ "${{ needs.coverage.result }}" != "success" ]]; then
+          FAILED_JOBS="${FAILED_JOBS} Coverage Check,"
+        fi
+
+        if [[ "${{ needs.build.result }}" != "success" ]]; then
+          FAILED_JOBS="${FAILED_JOBS} Build,"
+        fi
+
+        if [[ -n "$FAILED_JOBS" ]]; then
+          FAILED_JOBS=${FAILED_JOBS%,}
+          echo "❌ CI Pipeline failed. Failed jobs: $FAILED_JOBS"
+          echo "FAILED_JOBS=$FAILED_JOBS" >> $GITHUB_ENV
+          exit 1
+        else
+          echo "✅ All CI checks passed!"
+        fi
+
+    - name: Notify CI success
+      if: success()
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"✅ LegacyCoinTrader CI Pipeline completed successfully! All tests passed."}' \
+          ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    - name: Notify CI failure
+      if: failure()
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"❌ LegacyCoinTrader CI Pipeline failed. Failed jobs: ${{ env.FAILED_JOBS }}\"}" \
+          ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    - name: Create CI status badge
+      run: |
+        if [[ "${{ job.status }}" == "success" ]]; then
+          echo "✅ CI Pipeline Completed Successfully" > ci-status.txt
+        else
+          echo "❌ CI Pipeline Failed" > ci-status.txt
+        fi
+
+    - name: Upload CI status
+      uses: actions/upload-artifact@v3
+      with:
+        name: ci-status
+        path: ci-status.txt

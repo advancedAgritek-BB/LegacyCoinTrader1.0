@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Bot Logs</title>
+</head>
+<body>
+    <h1>Debug Bot Logs</h1>
+    <div id="debug-output"></div>
+
+    <script>
+        const output = document.getElementById('debug-output');
+
+        function log(message) {
+            output.innerHTML += '<div>' + new Date().toISOString() + ': ' + message + '</div>';
+            console.log(message);
+        }
+
+        log('Starting debug...');
+
+        // Test fetch to API
+        log('Testing fetch to /api/bot/logs...');
+
+        fetch('/api/bot/logs')
+            .then(response => {
+                log('Fetch response status: ' + response.status);
+                if (response.ok) {
+                    return response.json();
+                } else {
+                    throw new Error('HTTP ' + response.status);
+                }
+            })
+            .then(data => {
+                log('API response received');
+                log('Success: ' + data.success);
+                log('Data keys: ' + Object.keys(data.data || {}));
+
+                // Test container lookup
+                const containerIds = ['bot-main-logs', 'bot-execution-logs', 'bot-trading-logs', 'bot-performance-logs'];
+                containerIds.forEach(id => {
+                    const element = document.getElementById(id);
+                    log('Container ' + id + ' exists: ' + (element !== null));
+                });
+
+                // Test data processing
+                Object.keys(data.data || {}).forEach(key => {
+                    const entries = data.data[key];
+                    log('Processing ' + key + ': ' + entries.length + ' entries');
+                });
+            })
+            .catch(error => {
+                log('Fetch error: ' + error.message);
+                log('Full error: ' + error);
+            });
+
+        // Test DOM ready
+        document.addEventListener('DOMContentLoaded', function() {
+            log('DOMContentLoaded fired');
+        });
+    </script>
+</body>
+</html>

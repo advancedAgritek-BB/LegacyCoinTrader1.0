@@ -9,6 +9,7 @@ except Exception:  # pragma: no cover - make Google Sheets optional
     gspread = None
     ServiceAccountCredentials = None
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from crypto_bot.utils.trade_manager import get_trade_manager, create_trade
 import fcntl
 import os
 import shutil
@@ -26,20 +27,39 @@ def log_trade(order: Dict, is_stop: bool = False) -> None:
     try:
         # Validate order object
         if not order or not isinstance(order, dict):
-            logger.error(f"Invalid order object: {order}")
+            logger.debug(f"Invalid order object (skipping): {order}")
             return
-        
-        # Check for required fields
-        required_fields = ['symbol', 'side', 'amount']
-        missing_fields = [field for field in required_fields if not order.get(field)]
-        if missing_fields:
-            logger.error(f"Order missing required fields {missing_fields}: {order}")
+
+        # Sanitize and validate required fields
+        symbol = order.get('symbol')
+        side = order.get('side')
+        amount = order.get('amount', 0)
+
+        # Handle missing or invalid symbol
+        if not symbol or symbol is None or not isinstance(symbol, str):
+            logger.debug(f"Order missing or invalid symbol (skipping): {order}")
             return
-        
-        # Skip orders with zero amounts
-        if order.get('amount', 0) <= 0:
-            logger.warning(f"Skipping order with zero amount: {order}")
+
+        # Handle missing or invalid side
+        if not side or side not in ['buy', 'sell']:
+            logger.debug(f"Order missing or invalid side (skipping): {order}")
             return
+
+        # Handle zero or negative amounts
+        if amount is None or amount <= 0:
+            logger.debug(f"Order with zero/negative amount (skipping): {order}")
+            return
+
+        # Reconstruct clean order object
+        clean_order = {
+            'symbol': symbol,
+            'side': side,
+            'amount': float(amount),
+            'price': order.get('price', 0),
+            'timestamp': order.get('timestamp', ''),
+            'dry_run': order.get('dry_run', False)
+        }
+        order = clean_order
         
         order = dict(order)
         ts = order.get("timestamp") or datetime.utcnow().isoformat()
@@ -103,6 +123,30 @@ def log_trade(order: Dict, is_stop: bool = False) -> None:
                 logger.error(f"Fallback write also failed: {fallback_error}")
                 return
         
+        # Also record to TradeManager (single source of truth)
+        if not is_stop:  # Only record actual trades, not stop orders
+            try:
+                trade_manager = get_trade_manager()
+
+                # Create Trade object for TradeManager
+                tm_trade = create_trade(
+                    symbol=record["symbol"],
+                    side=record["side"],
+                    amount=record["amount"],
+                    price=record["price"],
+                    strategy="imported",  # Default strategy for logged trades
+                    exchange="kraken",  # Default exchange
+                    timestamp=datetime.fromisoformat(record["timestamp"]) if isinstance(record["timestamp"], str) else record["timestamp"]
+                )
+
+                # Record to TradeManager
+                trade_id = trade_manager.record_trade(tm_trade)
+                logger.debug(f"Trade recorded to TradeManager: {trade_id}")
+
+            except Exception as tm_error:
+                logger.warning(f"Failed to record trade to TradeManager: {tm_error}")
+                # Continue with CSV logging even if TradeManager fails
+
         # Verify the write was successful
         if log_file.exists():
             file_size = log_file.stat().st_size
@@ -110,7 +154,7 @@ def log_trade(order: Dict, is_stop: bool = False) -> None:
         else:
             logger.error(f"Failed to create trades.csv file")
             return
-        
+
         msg = "Stop order placed: %s" if is_stop else "Logged trade: %s"
         logger.info(msg, record)
         

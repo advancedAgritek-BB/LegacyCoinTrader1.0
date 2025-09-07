@@ -125,6 +125,31 @@ class RiskManager:
         )
         return drawdown < self.config.max_drawdown
 
+    def calculate_position_size(
+        self,
+        confidence: float,
+        balance: float,
+        price: float,
+        stop_loss_price: Optional[float] = None,
+        risk_per_trade: Optional[float] = None
+    ) -> float:
+        """Calculate position size based on risk management rules."""
+        if risk_per_trade is None:
+            risk_per_trade = self.config.risk_pct
+        
+        # Calculate risk amount
+        risk_amount = balance * risk_per_trade
+        
+        # If stop loss is provided, calculate position size based on risk
+        if stop_loss_price is not None:
+            risk_per_share = abs(price - stop_loss_price)
+            if risk_per_share > 0:
+                return risk_amount / risk_per_share
+        
+        # Otherwise, use fixed percentage of balance
+        position_value = balance * self.config.trade_size_pct * confidence
+        return position_value / price
+
     def position_size(
         self,
         confidence: float,
@@ -187,6 +212,17 @@ class RiskManager:
             volatility_factor,
             capital_risk_factor,
         )
+        
+        # Apply minimum position size check
+        min_position_size = getattr(self.config, 'min_position_size_usd', 10.0)
+        if size < min_position_size:
+            logger.info(
+                "Position size %.4f below minimum %.4f - using minimum",
+                size,
+                min_position_size
+            )
+            size = min_position_size
+            
         return size
 
     def allow_trade(self, df: Any, strategy: Optional[str] = None) -> Tuple[bool, str]:

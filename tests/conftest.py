@@ -190,12 +190,10 @@ def sample_market_data():
 @pytest.fixture(autouse=True)
 def fix_imports():
     """Fix common import path issues."""
-    # Mock problematic modules
+    # Mock problematic modules that may not exist
     with patch.dict('sys.modules', {
-        'crypto_bot.utils.telegram': Mock(),
         'crypto_bot.volatility_filter': Mock(),
         'crypto_bot.volatility_filter.requests': Mock(),
-        'crypto_bot.main': Mock(),
         'crypto_bot.fund_manager': Mock(),
         'crypto_bot.portfolio_rotator': Mock(),
         'crypto_bot.regime': Mock(),
@@ -203,9 +201,16 @@ def fix_imports():
         'crypto_bot.utils.market_analyzer': Mock(),
         'crypto_bot.strategy.grid_bot': Mock(),
         'crypto_bot.execution': Mock(),
+        'crypto_bot.execution.cex_executor': Mock(),
+        'crypto_bot.execution.solana_mempool': Mock(),
+        'crypto_bot.execution.solana_executor': Mock(),
     }):
-        # Mock specific functions that tests expect
-        with patch('crypto_bot.utils.telegram.send_message', Mock()) as mock_send:
+        # Mock specific functions that tests expect, but only if the module exists
+        try:
+            with patch('crypto_bot.utils.telegram.send_message', Mock()) as mock_send:
+                yield
+        except (ImportError, AttributeError):
+            # If telegram module doesn't exist or doesn't have send_message, just continue
             yield
 
 # Async test support

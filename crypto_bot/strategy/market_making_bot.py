@@ -350,11 +350,24 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
         return 0.0, "none"
 
     # Calculate indicators for regime detection
-    sma_20 = ta.trend.sma_indicator(df["close"], window=20)
-    sma_50 = ta.trend.sma_indicator(df["close"], window=50)
+    sma_20 = df["close"].rolling(window=20).mean()
+    sma_50 = df["close"].rolling(window=50).mean()
 
-    # Calculate ADX for trend strength
-    adx = ta.trend.adx(df["high"], df["low"], df["close"], window=14)
+    # Calculate ADX for trend strength (simplified)
+    high_diff = df["high"].diff()
+    low_diff = df["low"].diff()
+    dm_plus = ((high_diff > low_diff) & (high_diff > 0)) * high_diff
+    dm_minus = ((low_diff > high_diff) & (low_diff > 0)) * (-low_diff)
+    tr = pd.concat([
+        df["high"] - df["low"],
+        (df["high"] - df["close"].shift(1)).abs(),
+        (df["low"] - df["close"].shift(1)).abs()
+    ], axis=1).max(axis=1)
+    atr = tr.rolling(window=14).mean()
+    di_plus = 100 * (dm_plus.rolling(window=14).mean() / atr)
+    di_minus = 100 * (dm_minus.rolling(window=14).mean() / atr)
+    dx = 100 * ((di_plus - di_minus).abs() / (di_plus + di_minus))
+    adx = dx.rolling(window=14).mean().fillna(0.0)
 
     # Market making works best when:
     # 1. Low trend strength (ADX < 25)

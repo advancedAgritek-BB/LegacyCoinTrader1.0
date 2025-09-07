@@ -168,14 +168,44 @@ async def positions_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def main(token: str) -> None:
-    app = ApplicationBuilder().token(token).build()
-    app.add_handler(CommandHandler("logs", logs_cmd))
-    app.add_handler(CommandHandler("strategies", strategies_cmd))
-    app.add_handler(CommandHandler("positions", positions_cmd))
-    app.add_handler(CallbackQueryHandler(logs_cmd, pattern="^(next|prev)$"))
-    app.add_handler(CallbackQueryHandler(strategies_cmd, pattern="^(next|prev)$"))
-    app.add_handler(CallbackQueryHandler(positions_cmd, pattern="^(next|prev)$"))
-    app.run_polling()
+    import os
+    import sys
+    import warnings
+    from pathlib import Path
+
+    # Suppress urllib3 OpenSSL warning
+    warnings.filterwarnings('ignore', message="urllib3 v2 only supports OpenSSL 1.1.1+", category=UserWarning)
+
+    # Prevent multiple instances
+    lock_file = Path("telegram_bot.lock")
+    if lock_file.exists():
+        try:
+            with open(lock_file, 'r') as f:
+                existing_pid = int(f.read().strip())
+            # Check if process is still running
+            os.kill(existing_pid, 0)
+            print(f"Telegram bot already running (PID: {existing_pid})", file=sys.stderr)
+            sys.exit(1)
+        except (OSError, ValueError):
+            # Process doesn't exist, remove stale lock file
+            lock_file.unlink(missing_ok=True)
+
+    # Create lock file with current PID
+    with open(lock_file, 'w') as f:
+        f.write(str(os.getpid()))
+
+    try:
+        app = ApplicationBuilder().token(token).build()
+        app.add_handler(CommandHandler("logs", logs_cmd))
+        app.add_handler(CommandHandler("strategies", strategies_cmd))
+        app.add_handler(CommandHandler("positions", positions_cmd))
+        app.add_handler(CallbackQueryHandler(logs_cmd, pattern="^(next|prev)$"))
+        app.add_handler(CallbackQueryHandler(strategies_cmd, pattern="^(next|prev)$"))
+        app.add_handler(CallbackQueryHandler(positions_cmd, pattern="^(next|prev)$"))
+        app.run_polling()
+    finally:
+        # Clean up lock file on exit
+        lock_file.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

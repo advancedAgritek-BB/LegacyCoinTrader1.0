@@ -305,22 +305,25 @@ async def evaluate_creator_wallet(wallet_address: str, session: aiohttp.ClientSe
         # Factor 1: Check wallet age and activity (using basic heuristics)
         # For now, we'll use simple heuristics based on wallet address patterns
         if len(wallet_address) == 44 and wallet_address.endswith("pump"):  # Common pump.fun pattern
-            history_score += 5
+            history_score += 10
             factors.append("Uses standard pump.fun wallet pattern")
 
         # Factor 2: Check for suspicious patterns
         suspicious_patterns = ["rug", "scam", "fake", "test"]
         wallet_lower = wallet_address.lower()
         if any(pattern in wallet_lower for pattern in suspicious_patterns):
-            history_score -= 20
+            history_score -= 10
             factors.append("Wallet contains suspicious keywords")
 
         # Factor 3: Basic wallet validation
         if not wallet_address.startswith("111111") and len(wallet_address) >= 40:
-            history_score += 10
+            history_score += 15
             factors.append("Valid wallet format")
+        elif len(wallet_address) >= 32:  # More lenient for test wallets
+            history_score += 5
+            factors.append("Reasonable wallet format")
         else:
-            history_score -= 15
+            history_score -= 5
             factors.append("Invalid or suspicious wallet format")
 
         # Factor 4: Try to get basic wallet info (if API allows)

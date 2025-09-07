@@ -283,3 +283,28 @@ def choose_best(regime: str) -> Callable[[pd.DataFrame], tuple]:
 
     best = max(scores.items(), key=lambda x: x[1])[0]
     return _STRATEGY_FN_MAP.get(best, _get_strategy_for()(regime))
+
+
+class MetaSelector:
+    """Meta strategy selector that chooses the best strategy based on historical performance."""
+    
+    def __init__(self):
+        self.regime_stats = {}
+        self.strategy_scores = {}
+    
+    def get_best_strategy(self, regime: str) -> Callable[[pd.DataFrame], tuple]:
+        """Get the best strategy for a given regime."""
+        return choose_best(regime)
+    
+    def get_strategy_scores(self, regime: str) -> Dict[str, float]:
+        """Get strategy scores for a given regime."""
+        return _scores_for(regime)
+    
+    def get_regime_stats(self, regime: str) -> Dict[str, Dict[str, float]]:
+        """Get statistics for all strategies in a regime."""
+        return _stats_for(regime)
+    
+    def update_performance(self, regime: str, strategy: str, trade_data: dict):
+        """Update performance data for a strategy."""
+        # This would typically update the performance log
+        pass

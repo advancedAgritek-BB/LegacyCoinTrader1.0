@@ -116,7 +116,16 @@ def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
 
     supported_exchanges = ("coinbase", "kraken")
 
-    exchange_cfg = config.get("exchange", "coinbase")
+    # Get exchange from config, with fallback to environment variable if config doesn't specify
+    exchange_cfg = config.get("exchange")
+    if exchange_cfg is None:
+        # If not in config, check environment variable
+        env_exchange = os.getenv("EXCHANGE", "").lower()
+        if env_exchange in supported_exchanges:
+            exchange_cfg = env_exchange
+        else:
+            # Last resort default to kraken (safer than coinbase for this bot)
+            exchange_cfg = "kraken"
     if isinstance(exchange_cfg, dict):
         exchange_name = exchange_cfg.get("name") or exchange_cfg.get("id") or ""
     else:
@@ -238,7 +247,7 @@ def execute_trade(
                     return exchange.create_limit_order(symbol, side, size, price, params)
 
             if ws_client is not None:
-                return ws_client.add_order(symbol, side, size)
+                return ws_client.add_order(symbol, side, size, order_type="market")
             return exchange.create_market_order(symbol, side, size)
         except Exception as exc:
             err_msg = notifier.notify(f"Order failed: {exc}")
@@ -440,7 +449,7 @@ async def execute_trade_async(
                         )
                 else:
                     if use_websocket and ws_client is not None and not ccxtpro:
-                        order = ws_client.add_order(symbol, side, amount)
+                        order = ws_client.add_order(symbol, side, amount, order_type="market")
                     elif asyncio.iscoroutinefunction(
                         getattr(exchange, "create_market_order", None)
                     ):
@@ -451,7 +460,7 @@ async def execute_trade_async(
                         )
             else:
                 if use_websocket and ws_client is not None and not ccxtpro:
-                    order = ws_client.add_order(symbol, side, amount)
+                    order = ws_client.add_order(symbol, side, amount, order_type="market")
                 elif asyncio.iscoroutinefunction(
                     getattr(exchange, "create_market_order", None)
                 ):

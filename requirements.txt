@@ -24,13 +24,13 @@ psutil
 aiohttp>=3.9.4
 cryptography
 schedule
-fastapi==0.97.0
-starlette==0.27.*       # required by fastapi
+fastapi>=0.115.0
+starlette>=0.37.0       # required by fastapi
 httpx<0.28
 uvicorn
 rich
 scikit-optimize
-pydantic<2
+pydantic>=2.4,<2.7
 numba
 cachetools
 prometheus-client
@@ -38,4 +38,13 @@ solders
 pythclient
 redis
 base58
+gunicorn
+gevent
+urllib3<2.0  # Downgrade to v1.x for LibreSSL compatibility
 # statsmodels  # Duplicate entry removed
+
+dependency-injector>=4.41.0
+
+SQLAlchemy>=2.0.0
+
+PyJWT>=2.8.0

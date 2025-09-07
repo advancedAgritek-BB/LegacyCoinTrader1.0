@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Bot Logs - Simplified</title>
+    <style>
+        .log-content { border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: auto; background: #f9f9f9; }
+        .log-entry { margin: 2px 0; padding: 2px; }
+        .error { color: red; }
+        .warning { color: orange; }
+        .success { color: green; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h1>Debug Bot Logs - Simplified</h1>
+
+    <div id="debug-info"></div>
+
+    <h2>Bot Main Log</h2>
+    <div class="log-content" id="bot-main-logs">
+        <div class="log-entry">Loading bot logs...</div>
+    </div>
+
+    <h2>Bot Execution Log</h2>
+    <div class="log-content" id="bot-execution-logs">
+        <div class="log-entry">Loading execution logs...</div>
+    </div>
+
+    <script>
+        const debugInfo = document.getElementById('debug-info');
+
+        function debug(message) {
+            debugInfo.innerHTML += '<div>' + new Date().toLocaleString() + ': ' + message + '</div>';
+            console.log(message);
+        }
+
+        // Format log entry with color coding
+        function formatLogEntry(line) {
+            if (!line || typeof line !== 'string') {
+                return '<div class="log-entry">Invalid log entry</div>';
+            }
+
+            const classes = [];
+
+            if (line.includes('ERROR') || line.includes('❌') || line.includes('error') || line.includes('Error')) {
+                classes.push('error');
+            } else if (line.includes('WARNING') || line.includes('⚠️') || line.includes('warning') || line.includes('Warning')) {
+                classes.push('warning');
+            } else if (line.includes('INFO') || line.includes('✅') || line.includes('success') || line.includes('Success')) {
+                classes.push('success');
+            } else if (line.includes('DEBUG') || line.includes('ℹ️') || line.includes('debug') || line.includes('Debug')) {
+                classes.push('info');
+            }
+
+            return `<div class="log-entry ${classes.join(' ')}">${line}</div>`;
+        }
+
+        // Update log content
+        function updateLogContent(logType, lines) {
+            debug('Updating log content for: ' + logType);
+
+            const container = document.getElementById(logType + '-logs');
+            if (!container) {
+                debug('Container not found: ' + logType + '-logs');
+                return;
+            }
+
+            debug('Container found, processing ' + (lines ? lines.length : 0) + ' lines');
+
+            if (lines && Array.isArray(lines) && lines.length > 0) {
+                try {
+                    const formattedLines = lines.map(formatLogEntry);
+                    container.innerHTML = formattedLines.join('');
+                    debug('Successfully updated container with ' + formattedLines.length + ' formatted lines');
+                } catch (error) {
+                    debug('Error formatting lines: ' + error.message);
+                    container.innerHTML = '<div class="log-entry error">Error formatting log entries</div>';
+                }
+            } else {
+                container.innerHTML = '<div class="log-entry">No log entries found</div>';
+                debug('No lines to display');
+            }
+
+            // Auto-scroll to bottom
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // Refresh all logs
+        function refreshLogs() {
+            debug('Starting refreshLogs...');
+
+            fetch('/api/bot/logs')
+                .then(response => {
+                    debug('Fetch response status: ' + response.status);
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(result => {
+                    debug('API response received, success: ' + result.success);
+
+                    if (result.success && result.data) {
+                        debug('Processing data keys: ' + Object.keys(result.data));
+
+                        Object.keys(result.data).forEach(logType => {
+                            debug('Processing log type: ' + logType);
+                            updateLogContent(logType.replace('_', '-'), result.data[logType]);
+                        });
+                    } else {
+                        debug('API returned success=false or no data');
+                    }
+                })
+                .catch(error => {
+                    debug('Fetch error: ' + error.message);
+                    console.error('Full error:', error);
+                });
+        }
+
+        // Initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            debug('DOMContentLoaded - starting initialization');
+
+            // Test containers exist
+            const containers = ['bot-main-logs', 'bot-execution-logs'];
+            containers.forEach(id => {
+                const el = document.getElementById(id);
+                debug('Container ' + id + ' exists: ' + (el !== null));
+            });
+
+            // Initial load
+            refreshLogs();
+
+            // Auto refresh every 10 seconds for debugging
+            setInterval(refreshLogs, 10000);
+        });
+    </script>
+</body>
+</html>

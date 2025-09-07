@@ -13,6 +13,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Suppress urllib3 SSL warnings
+export PYTHONWARNINGS="ignore:urllib3 v2 only supports OpenSSL 1.1.1+"
+
 # Function to print colored output
 print_status() {
     echo -e "${BLUE}[INFO]${NC} $1"
@@ -264,42 +267,147 @@ run_tests() {
 # Function to start the application
 start_application() {
     print_status "Starting LegacyCoinTrader..."
-    
+
     # Check if we're in dry run mode
-    if grep -q "EXECUTION_MODE=dry_run" .env; then
+    if grep -q "EXECUTION_MODE=dry_run" .env 2>/dev/null; then
         print_warning "Running in DRY RUN mode - no real trades will be executed"
     else
         print_warning "Running in LIVE mode - real trades will be executed!"
     fi
-    
-    print_status "Starting main application..."
+
+    # Start OHLCV cache initialization first (background task)
+    print_status "Initializing OHLCV data cache..."
+    python -c "
+import asyncio
+import sys
+import os
+from pathlib import Path
+
+# Add project root to path
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+
+from crypto_bot.utils.market_loader import update_multi_tf_ohlcv_cache
+from crypto_bot.utils.market_loader import load_kraken_symbols
+from dotenv import dotenv_values
+
+async def init_cache():
+    try:
+        print('Loading environment...')
+        secrets = dotenv_values('.env')
+        os.environ.update(secrets)
+
+        print('Setting up exchange connection...')
+        import ccxt
+        exchange = ccxt.kraken({
+            'apiKey': secrets.get('API_KEY'),
+            'secret': secrets.get('API_SECRET'),
+        })
+
+        print('Loading symbols...')
+        symbols = await load_kraken_symbols(exchange, [], {})
+        if symbols:
+            print(f'Found {len(symbols)} symbols')
+
+        print('Initializing OHLCV cache...')
+        # Create a proper config dict for the cache function
+        cache_config = {
+            "timeframes": ['5m', '1h'],
+            "ohlcv_timeout": 120,
+            "max_ohlcv_failures": 3
+        }
+        await update_multi_tf_ohlcv_cache(exchange, symbols[:20] if symbols else [], cache_config)  # Cache first 20 symbols
+        print('OHLCV cache initialization complete')
+
+    except Exception as e:
+        print(f'Cache initialization error (continuing): {e}')
+
+asyncio.run(init_cache())
+" &
+    CACHE_INIT_PID=$!
+    print_status "OHLCV cache initialization started (PID: $CACHE_INIT_PID)"
+
+    # Wait a bit for cache to initialize
+    sleep 2
+
+    print_status "Starting main trading bot with integrated OHLCV fetching..."
     python -m crypto_bot.main &
     MAIN_PID=$!
-    
-    print_status "Starting web frontend..."
-    python -m frontend.app &
-    FRONTEND_PID=$!
-    
-    print_status "Starting Telegram bot..."
+
+    print_status "Starting web frontend dashboard..."
+    # Start frontend with Gunicorn for production
+    TEMP_FILE=$(mktemp)
+
+    # Check if we're in production mode (can be set via environment variable)
+    if [[ "$FLASK_ENV" == "production" ]] || [[ "$PRODUCTION" == "true" ]]; then
+        print_status "Using Gunicorn for production deployment..."
+        gunicorn --config gunicorn.conf.py frontend.app:app > "$TEMP_FILE" 2>&1 &
+        FRONTEND_PID=$!
+    else
+        print_status "Using Flask development server..."
+        python -m frontend.app > "$TEMP_FILE" 2>&1 &
+        FRONTEND_PID=$!
+    fi
+
+    # Wait longer for web server to start and initialize
+    print_status "Waiting for web server to initialize..."
+    sleep 5
+
+    # Extract the port from the server output
+    if [[ "$FLASK_ENV" == "production" ]] || [[ "$PRODUCTION" == "true" ]]; then
+        # Gunicorn is bound to port 8000 explicitly
+        FLASK_PORT=8000
+        print_status "Gunicorn server configured for port $FLASK_PORT"
+    else
+        # Extract port from Flask development server output
+        FLASK_PORT=$(grep "FLASK_PORT=" "$TEMP_FILE" | cut -d'=' -f2)
+        if [[ -z "$FLASK_PORT" ]]; then
+            # Try to find port from Flask output
+            FLASK_PORT=$(grep -o "Running on http://[^:]*:\([0-9]*\)" "$TEMP_FILE" | grep -o "[0-9]*" | head -1)
+            if [[ -z "$FLASK_PORT" ]]; then
+                FLASK_PORT=8000  # fallback to default
+            fi
+        fi
+    fi
+
+    # Clean up temp file
+    rm -f "$TEMP_FILE"
+
+    print_status "Starting Telegram notification bot..."
     python telegram_ctl.py &
     TELEGRAM_PID=$!
-    
+
     print_success "LegacyCoinTrader started successfully!"
     print_status "Main application PID: $MAIN_PID"
     print_status "Frontend PID: $FRONTEND_PID"
     print_status "Telegram bot PID: $TELEGRAM_PID"
-    print_status "Web dashboard available at: http://localhost:8000"
+    if [[ -n "$CACHE_INIT_PID" ]]; then
+        print_status "OHLCV cache init PID: $CACHE_INIT_PID"
+    fi
+    print_status "Web dashboard available at: http://localhost:$FLASK_PORT"
     print_status "Use 'ps aux | grep python' to see running processes"
     print_status "Use 'kill $MAIN_PID $FRONTEND_PID $TELEGRAM_PID' to stop all services"
-    
+
     # Function to open browser (cross-platform)
     open_browser() {
         local url="$1"
         local delay="$2"
-        
-        print_status "Waiting $delay seconds for server to start..."
+
+        print_status "Waiting $delay seconds for services to fully start..."
         sleep "$delay"
-        
+
+        # Verify services are running by checking if ports are open
+        print_status "Verifying services are running..."
+
+        # Check if Flask is responding
+        if command -v curl >/dev/null 2>&1; then
+            if curl -s --max-time 5 "$url" > /dev/null 2>&1; then
+                print_success "Web dashboard is responding at $url"
+            else
+                print_warning "Web dashboard may not be fully ready yet"
+            fi
+        fi
+
         # Detect OS and open appropriate browser
         if [[ "$OSTYPE" == "darwin"* ]]; then
             # macOS
@@ -327,16 +435,27 @@ start_application() {
             fi
         fi
     }
-    
+
     # Open browser in background after a delay
-    open_browser "http://localhost:8000" 3 &
-    
+    open_browser "http://localhost:$FLASK_PORT" 2 &
+
+    print_success "All services are running!"
+    print_status "📊 Trading bot: Active (with OHLCV fetching)"
+    print_status "🌐 Web dashboard: http://localhost:$FLASK_PORT"
+    print_status "🤖 Telegram notifications: Active"
+    if [[ -n "$CACHE_INIT_PID" ]]; then
+        print_status "📈 OHLCV cache: Initialized"
+    fi
+
     # Wait for user input to stop
     echo
     read -p "Press Enter to stop all services..."
-    
+
     print_status "Stopping all services..."
     kill $MAIN_PID $FRONTEND_PID $TELEGRAM_PID 2>/dev/null || true
+    if [[ -n "$CACHE_INIT_PID" ]]; then
+        kill $CACHE_INIT_PID 2>/dev/null || true
+    fi
     print_success "All services stopped"
 }
 

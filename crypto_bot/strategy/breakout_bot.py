@@ -79,18 +79,17 @@ def generate_signal(
     df: pd.DataFrame,
     config: Optional[dict] = None,
     higher_df: Optional[pd.DataFrame] = None,
-) -> Union[Tuple[float, str], Tuple[float, str, float]]:
+) -> Tuple[float, str]:
     """Breakout strategy using Bollinger/Keltner squeeze confirmation.
 
     Returns
     -------
-    Tuple[float, str] or Tuple[float, str, float]
-        If ``higher_df`` is provided the function returns ``(score, direction)``.
-        Otherwise it returns ``(score, direction, atr)`` where ``atr`` is the
-        most recent Average True Range value.
+    Tuple[float, str]
+        Returns ``(score, direction)`` where score is the signal strength
+        and direction is the trade direction.
     """
     if df is None or df.empty:
-        return (0.0, "none") if higher_df is not None else (0.0, "none", 0.0)
+        return 0.0, "none"
 
     cfg_all = config or {}
     cfg = cfg_all.get("breakout", {})
@@ -111,7 +110,7 @@ def generate_signal(
 
     lookback = max(bb_len, kc_len, donchian_window, vol_window, 14)
     if len(df) < lookback:
-        return (0.0, "none") if higher_df is not None else (0.0, "none", 0.0)
+        return 0.0, "none"
 
     recent = df.iloc[-(lookback + 1) :]
 
@@ -126,7 +125,7 @@ def generate_signal(
         squeeze_pct,
     )
     if pd.isna(squeeze.iloc[-1]) or not squeeze.iloc[-1]:
-        return (0.0, "none") if higher_df is not None else (0.0, "none", 0.0)
+        return 0.0, "none"
 
     if higher_df is not None and not higher_df.empty:
         h_sq, _ = _squeeze(
@@ -206,9 +205,7 @@ def generate_signal(
     if score > 0 and (config is None or config.get("atr_normalization", True)):
         score = normalize_score_by_volatility(recent, score)
 
-    if higher_df is not None:
-        return score, direction
-    return score, direction, atr_last
+    return score, direction
 
 
 class regime_filter:

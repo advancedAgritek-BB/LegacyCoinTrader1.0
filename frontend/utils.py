@@ -258,6 +258,33 @@ def get_last_trade(trade_file: Path) -> dict:
     return {}
 
 
+def get_recent_regimes(regime_file: Path) -> list[str]:
+    """Get recent regime history from the regime file."""
+    try:
+        if not regime_file.exists():
+            return []
+        
+        with open(regime_file, 'r') as f:
+            lines = f.readlines()
+        
+        # Get the last 10 regime entries, reverse to show most recent first
+        recent_regimes = []
+        for line in reversed(lines[-10:]):
+            line = line.strip()
+            if line and not line.startswith('#'):
+                # Extract regime name from timestamp format
+                if ' - ' in line:
+                    regime = line.split(' - ')[-1]
+                    recent_regimes.append(regime)
+                else:
+                    recent_regimes.append(line)
+        
+        return recent_regimes[:10]  # Return max 10 entries
+    except Exception as e:
+        print(f"Error reading regime file: {e}")
+        return []
+
+
 def get_current_regime(log_file: Path) -> str:
     """Return most recent regime classification from bot log."""
     if log_file.exists():
