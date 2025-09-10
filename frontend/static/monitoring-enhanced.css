@@ -133,3 +133,9 @@ button.btn-secondary:hover {
     font-size: 12px;
     margin-right: 12px;
 }
+
+.status-filters {
+    display: inline-flex;
+    gap: 6px;
+    margin-left: 8px;
+}

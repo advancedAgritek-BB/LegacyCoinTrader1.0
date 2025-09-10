@@ -128,17 +128,24 @@
                         <i class="fas fa-download"></i>
                         Export
                     </button>
+                    <div class="status-filters" role="group" aria-label="Filter by status">
+                        <button class="filter-btn" data-status="all" aria-pressed="true">All</button>
+                        <button class="filter-btn" data-status="healthy">Healthy</button>
+                        <button class="filter-btn" data-status="warning">Warning</button>
+                        <button class="filter-btn" data-status="critical">Critical</button>
+                        <button class="filter-btn" data-status="unknown">Unknown</button>
+                    </div>
                 </div>
             </div>
             <div class="table-wrapper">
             <table class="component-table">
                 <thead>
                     <tr>
-                        <th>Component</th>
-                        <th>Status</th>
-                        <th>Last Check</th>
-                        <th>Message</th>
-                        <th>Metrics</th>
+                        <th data-sort="component">Component</th>
+                        <th data-sort="status">Status</th>
+                        <th data-sort="check">Last Check</th>
+                        <th data-sort="message">Message</th>
+                        <th data-sort="metrics">Metrics</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -259,119 +266,9 @@
             
             // Initialize chart filters
             setupChartFilters();
-            
-            // Force apply new styling
-            applyEnhancedStyling();
         });
 
-        // Force apply enhanced styling with aggressive overrides
-        function applyEnhancedStyling() {
-            console.log('🎨 Applying enhanced styling...');
-            
-            // Wait for DOM to be fully loaded
-            setTimeout(() => {
-                // Apply gradient backgrounds to status badges with more aggressive selection
-                const statusBadges = document.querySelectorAll('span[class*="status-badge"], .status-badge, [class*="badge"]');
-                console.log(`Found ${statusBadges.length} status badges`);
-                
-                statusBadges.forEach((badge, index) => {
-                    console.log(`Styling badge ${index}:`, badge.className);
-                    
-                    // Force remove any existing styling
-                    badge.style.cssText = '';
-                    
-                    // Apply base styling
-                    badge.style.setProperty('padding', '6px 12px', 'important');
-                    badge.style.setProperty('border-radius', '20px', 'important');
-                    badge.style.setProperty('font-size', '11px', 'important');
-                    badge.style.setProperty('font-weight', '700', 'important');
-                    badge.style.setProperty('text-transform', 'uppercase', 'important');
-                    badge.style.setProperty('letter-spacing', '0.5px', 'important');
-                    badge.style.setProperty('border', 'none', 'important');
-                    badge.style.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.3)', 'important');
-                    badge.style.setProperty('display', 'inline-block', 'important');
-                    
-                    // Apply color-specific styling
-                    if (badge.classList.contains('healthy') || badge.textContent.toLowerCase().includes('healthy')) {
-                        badge.style.setProperty('background', 'linear-gradient(135deg, #10b981, #059669)', 'important');
-                        badge.style.setProperty('color', 'white', 'important');
-                        console.log('Applied healthy styling');
-                    } else if (badge.classList.contains('warning') || badge.textContent.toLowerCase().includes('warning')) {
-                        badge.style.setProperty('background', 'linear-gradient(135deg, #f59e0b, #d97706)', 'important');
-                        badge.style.setProperty('color', 'white', 'important');
-                        console.log('Applied warning styling');
-                    } else if (badge.classList.contains('unknown') || badge.textContent.toLowerCase().includes('unknown')) {
-                        badge.style.setProperty('background', 'linear-gradient(135deg, #8b5cf6, #7c3aed)', 'important');
-                        badge.style.setProperty('color', 'white', 'important');
-                        console.log('Applied unknown styling');
-                    } else if (badge.classList.contains('critical') || badge.textContent.toLowerCase().includes('critical')) {
-                        badge.style.setProperty('background', 'linear-gradient(135deg, #ef4444, #dc2626)', 'important');
-                        badge.style.setProperty('color', 'white', 'important');
-                        console.log('Applied critical styling');
-                    }
-                });
-
-                // Apply modern button styling with aggressive selection
-                const buttons = document.querySelectorAll('button, .btn, [class*="btn"]');
-                console.log(`Found ${buttons.length} buttons`);
-                
-                buttons.forEach((button, index) => {
-                    if (button.classList.contains('btn-secondary') || button.textContent.includes('Refresh') || button.textContent.includes('Export')) {
-                        console.log(`Styling button ${index}:`, button.textContent);
-                        
-                        // Force remove any existing styling
-                        button.style.cssText = '';
-                        
-                        // Apply base styling
-                        button.style.setProperty('background', 'transparent', 'important');
-                        button.style.setProperty('border', '2px solid #8b5cf6', 'important');
-                        button.style.setProperty('color', '#8b5cf6', 'important');
-                        button.style.setProperty('padding', '8px 16px', 'important');
-                        button.style.setProperty('border-radius', '8px', 'important');
-                        button.style.setProperty('font-weight', '600', 'important');
-                        button.style.setProperty('cursor', 'pointer', 'important');
-                        button.style.setProperty('transition', 'all 0.2s ease', 'important');
-                        
-                        // Remove any existing event listeners and add new ones
-                        button.onmouseenter = function() {
-                            this.style.setProperty('background', 'linear-gradient(135deg, #8b5cf6, #7c3aed)', 'important');
-                            this.style.setProperty('color', 'white', 'important');
-                            this.style.setProperty('transform', 'translateY(-2px)', 'important');
-                            this.style.setProperty('box-shadow', '0 8px 16px rgba(139, 92, 246, 0.4)', 'important');
-                        };
-                        
-                        button.onmouseleave = function() {
-                            this.style.setProperty('background', 'transparent', 'important');
-                            this.style.setProperty('color', '#8b5cf6', 'important');
-                            this.style.setProperty('transform', 'translateY(0)', 'important');
-                            this.style.setProperty('box-shadow', 'none', 'important');
-                        };
-                        
-                        console.log('Applied button styling');
-                    }
-                });
-                
-                console.log('✅ Enhanced styling applied successfully!');
-                
-                // Add a visual indicator that styling was applied
-                const title = document.querySelector('.page-title');
-                if (title) {
-                    title.style.setProperty('border-left', '4px solid #8b5cf6', 'important');
-                    title.style.setProperty('padding-left', '16px', 'important');
-                    console.log('Added visual indicator to title');
-                }
-                
-                // Apply CSP-compliant styling
-                applyCspCompliantStyling();
-                
-            }, 1000); // Wait 1 second to ensure all elements are loaded
-        }
-
-        // CSP-compliant styling approach - no dynamic CSS injection
-        function applyCspCompliantStyling() {
-            console.log('🎨 Applying CSP-compliant styling...');
-            // Just use direct element styling which is CSP-compliant
-        }
+        // Removed JS styling overrides in favor of CSS classes
 
         // Initialize monitoring
         function initializeMonitoring() {
@@ -506,8 +403,16 @@
             });
             document.getElementById('errorsCount').textContent = errorCount;
 
-            // Update API calls (placeholder)
-            document.getElementById('apiCalls').textContent = Math.floor(Math.random() * 1000);
+            // Update API calls if provided in health metrics; otherwise hide
+            const apiCallsEl = document.getElementById('apiCalls');
+            const apiMetrics = components.api_gateway || components.api || {};
+            const apiCount = apiMetrics?.metrics?.api_calls;
+            if (typeof apiCount === 'number') {
+                apiCallsEl.textContent = apiCount;
+                apiCallsEl.parentElement?.classList.remove('d-none');
+            } else if (apiCallsEl?.parentElement) {
+                apiCallsEl.parentElement.classList.add('d-none');
+            }
         }
 
         // Update component table
@@ -521,7 +426,21 @@
 
             tableBody.innerHTML = '';
 
-            for (const [component, status] of Object.entries(components)) {
+            // Convert to array for sorting/filtering
+            const rows = Object.entries(components).map(([component, status]) => ({ key: component, value: status }));
+
+            // Apply active filter
+            const activeFilter = document.querySelector('.status-filters .filter-btn.active')?.dataset.status || 'all';
+            const filtered = rows.filter(({ value }) => {
+                const s = value.status || 'unknown';
+                return activeFilter === 'all' ? true : (s === activeFilter || (activeFilter === 'critical' && (s === 'critical' || s === 'error')));
+            });
+
+            // Optional: basic sort by status severity then name
+            const severity = { healthy: 1, warning: 2, critical: 3, error: 3, unknown: 4 };
+            filtered.sort((a, b) => (severity[(a.value.status||'unknown')] - severity[(b.value.status||'unknown')]) || a.key.localeCompare(b.key));
+
+            for (const { key: component, value: status } of filtered) {
                 const componentName = component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                 const row = document.createElement('tr');
 
@@ -771,7 +690,14 @@
                 btn.addEventListener('click', function() {
                     filterButtons.forEach(b => b.classList.remove('active'));
                     this.classList.add('active');
-                    updatePerformanceChart(); // Refresh chart with new time range
+                    // If this is one of the status filters, refresh table
+                    if (this.closest('.status-filters')) {
+                        if (monitoringData.health && Object.keys(monitoringData.health).length) {
+                            updateComponentTable(monitoringData.health);
+                        }
+                        return;
+                    }
+                    updatePerformanceChart();
                 });
             });
         }

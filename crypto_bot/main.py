@@ -1899,6 +1899,52 @@ async def execute_cex_trade(
                 direction=side,
                 take_profit=take_profit,
             )
+            # Place native exchange stop-loss order immediately after entry if enabled
+            try:
+                place_native = ctx.config.get("exit_strategy", {}).get("place_native_stop", True)
+                is_dry_run = ctx.config.get("execution_mode") == "dry_run"
+                if place_native:
+                    # Use TradeManager-calculated stop price for precision
+                    tm_position = ctx.trade_manager.get_position(sym) if hasattr(ctx, "trade_manager") and ctx.trade_manager else None
+                    stop_price = float(tm_position.stop_loss_price) if tm_position and tm_position.stop_loss_price else None
+                    stop_amount = float(tm_position.total_amount) if tm_position else amount
+                    if stop_price and stop_amount > 0:
+                        stop_side = "sell" if side == "buy" else "buy"
+                        if is_dry_run:
+                            logger.info(
+                                f"[DRY_RUN] Would place native stop {stop_side} {stop_amount} {sym} at {stop_price:.6f}"
+                            )
+                        else:
+                            # Avoid blocking the event loop with a sync ccxt call
+                            from crypto_bot.execution import cex_executor
+                            stop_order = await asyncio.to_thread(
+                                cex_executor.place_stop_order,
+                                ctx.exchange,
+                                sym,
+                                stop_side,
+                                stop_amount,
+                                stop_price,
+                                None,
+                                None,
+                                ctx.notifier,
+                                False,
+                            )
+                            if stop_order:
+                                # Record the protective stop in risk manager for tracking/cancellation
+                                ctx.risk_manager.register_stop_order(
+                                    stop_order,
+                                    strategy=strategy,
+                                    symbol=sym,
+                                    entry_price=price,
+                                    confidence=candidate.get("score", 0.0),
+                                    direction=side,
+                                )
+                    else:
+                        logger.warning(
+                            f"Native stop not placed for {sym}: missing computed stop price or amount"
+                        )
+            except Exception as e:
+                logger.warning(f"Native stop placement failed for {sym}: {e}")
             # Update context for successful trade
             ctx.risk_manager.allocate_capital(strategy, size)
             # Record trade through centralized TradeManager
