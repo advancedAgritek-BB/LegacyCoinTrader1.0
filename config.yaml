@@ -1,0 +1,241 @@
+bounce_scalper:
+  enabled: true
+  max_concurrent_signals: 5
+  min_score: 0.01
+breakout:
+  enabled: true
+  min_score: 0.01
+circuit_breaker:
+  enabled: true
+  expected_exception: Exception
+  failure_threshold: 10
+  half_open_max_calls: 3
+  recovery_timeout: 300
+data_validation:
+  allow_empty_volume: true
+  max_data_age_minutes: 60
+  min_data_points: 50
+  require_volume: false
+  validate_ohlcv: true
+enhanced_backtesting:
+  enabled: false
+enhanced_scanning:
+  data_sources:
+    orderbook:
+    - jupiter
+    price:
+    - pyth
+    - jupiter
+    volume:
+    - birdeye
+  discovery_sources:
+  - basic_scanner
+  - dex_aggregators
+  enable_pyth_prices: true
+  enable_sentiment: false
+  enabled: true
+  max_spread_pct: 1.5
+  max_tokens_per_scan: 20
+  min_confidence: 0.5
+  min_liquidity_score: 0.6
+  min_score_threshold: 0.4
+  min_strategy_fit: 0.6
+  min_volume_usd: 5000
+  scan_interval: 30
+error_handling:
+  continue_on_error: true
+  exponential_backoff: true
+  fallback_data_sources: true
+  graceful_degradation: true
+  log_errors: true
+  max_backoff: 30.0
+  max_retries: 2
+  retry_delay: 2.0
+  scan_error_cooldown: 300
+  scan_error_threshold: 5
+exchange: kraken
+execution_mode: dry_run
+exit_strategy:
+  min_gain_to_trail: 0.005
+  momentum_aware_exits: true
+  momentum_tp_scaling: true
+  momentum_trail_adjustment: true
+  take_profit_pct: 0.04
+  trailing_stop_pct: 0.01
+  real_time_monitoring:
+    enabled: true
+    check_interval_seconds: 5
+exits:
+  default_sl_pct: 0.008
+  default_tp_pct: 0.045
+  trailing_stop_pct: 0.008
+kraken:
+  enabled: true
+  max_retries: 3
+  rate_limit: true
+  retry_on_failure: true
+  sandbox: false
+  timeout: 30
+max_concurrent_ohlcv: 10  # Increased for comprehensive symbol processing
+min_confidence_score: 0.001  # Lowered further to catch ETH/USD pump signals
+allow_short: true  # Enable short selling to catch ETH/USD pump
+mode: auto
+pipeline_stability:
+  circuit_breaker_enabled: true
+  circuit_breaker_threshold: 3
+  continue_on_error: true
+  disable_complex_filters: false
+  enable_rate_limiting: true
+  fallback_to_simple_mode: true
+  max_concurrent_requests: 10  # Increased for comprehensive symbol processing
+  max_failures_per_cycle: 5
+  rate_limit_delay: 1.0
+  request_timeout: 20
+  retry_attempts: 2
+rate_limiting:
+  burst_limit: 3
+  burst_window: 5.0
+  enabled: true
+  max_retries: 3
+  requests_per_minute: 30
+  retry_delay: 2.0
+regime_timeframes:
+- 4h
+- 1d
+- 1w
+risk:
+  enable_partial_exits: true
+  enable_trailing_stop: true
+  max_drawdown: 0.25
+  max_positions: 10
+  max_risk_per_trade: 0.05  # Increased from 0.02
+  max_total_risk: 0.2       # Increased from 0.1
+  partial_exit_pct: 0.5
+  position_size_pct: 0.2     # Increased from 0.1 to 20%
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.04
+  trailing_stop_pct: 0.01
+  min_position_size_usd: 50  # Increased minimum to allow for better position sizing
+  # Account balance configuration
+  starting_balance: 10000.0  # Set your actual account balance here
+  min_confidence_threshold: 0.3  # Only trade signals above 30% confidence
+scan_cache:
+  auto_cleanup: true
+  max_age_hours: 12
+  max_cache_size: 500
+  min_score_threshold: 0.4
+  persist_to_disk: true
+  review_interval_minutes: 20
+scan_monitoring:
+  alert_on_scan_failures: true
+  enable_scan_metrics: true
+  log_scan_results: true
+  max_scan_logs: 1000
+  scan_metrics_interval: 60
+  track_scan_performance: true
+skip_symbol_filters: true
+solana_scanner:
+  api_keys:
+    bitquery: YOUR_KEY
+    moralis: YOUR_KEY
+  enabled: true
+  gecko_search: true
+  interval_minutes: 30
+  max_tokens_per_scan: 100
+  min_volume_usd: 1000
+  min_score_threshold: 0.1
+  min_liquidity_score: 0.2
+symbol_batch_size: 100  # Increased for comprehensive symbol processing
+symbol_validation:
+  allowed_quotes:
+  - USD
+  - EUR
+  - USDC
+  - USDT
+  enabled: true
+  max_price_deviation: 0.1
+  max_symbol_length: 25
+  min_liquidity_score: 0.6
+  min_volume_usd: 5000
+  require_kraken_support: true  # Require Kraken support for CEX mode
+  skip_unknown_addresses: true
+  strict_mode: false
+  timeout_seconds: 10
+  validate_liquidity: true
+  validate_price: true
+  validate_volume: true
+symbols:
+- BTC/USD
+- ETH/USD
+- SOL/USD
+- ADA/USD
+- DOT/USD
+- LINK/USD
+- UNI/USD
+- AAVE/USD
+- AVAX/USD
+- MATIC/USD
+- ATOM/USD
+- NEAR/USD
+telegram:
+  balance_updates: false
+  enabled: false
+  status_updates: false
+  trade_updates: false
+# Symbol Processing Mode
+# Set to true (default) to process ALL available symbols on the exchange
+# Set to false to use filtered evaluation pipeline
+process_all_symbols: true
+
+# Performance Tuning for Comprehensive Symbol Processing
+comprehensive_mode_optimization:
+  enable_memory_optimization: true
+  batch_chunk_size: 25  # Process symbols in chunks to manage memory
+  enable_progress_tracking: true
+  adaptive_rate_limiting: true
+  memory_cleanup_interval: 50  # Clean memory every 50 symbols processed
+
+testing_mode: true
+timeframe: 1h
+cycle_delay_seconds: 120  # 120 seconds between trading cycles for comprehensive processing
+use_enhanced_ohlcv_fetcher: true
+use_websocket: true
+websocket:
+  enabled: true
+  max_connections: 10
+  connection_timeout: 30
+  ping_interval: 20
+  ping_timeout: 10
+  max_message_size: 1048576  # 1MB
+  reconnect:
+    max_attempts: 10
+    base_delay: 1.0
+    max_delay: 60.0
+    backoff_factor: 2.0
+  health_check:
+    enabled: true
+    interval: 30
+    failure_threshold: 3
+  monitoring:
+    metrics_interval: 60
+    alert_on_failures: true
+    log_level: "INFO"
+  kraken:
+    health_monitoring: true
+    message_validation: true
+    enhanced_error_handling: true
+  solana:
+    enhanced_monitor: true
+    exponential_backoff: true
+    message_validation: true
+    health_checks: true
+use_trade_manager_as_source: true
+position_sync_enabled: true
+strategy_evaluation_mode: mapped
+strategy_router:
+  regimes:
+    trending: ["momentum_bot", "lstm_bot", "trend_bot"]
+    mean-reverting: ["mean_bot", "range_arb_bot", "stat_arb_bot"]
+    sideways: ["market_making_bot", "grid_bot", "maker_spread"]
+    breakout: ["breakout_bot", "sniper_bot", "ultra_scalp_bot"]
+    volatile: ["arbitrage_engine", "volatility_harvester", "flash_crash_bot"]

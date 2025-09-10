@@ -1,0 +1,398 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<!-- Modern Elegant Dashboard -->
+<div class="dashboard-container fade-in">
+  <!-- Metrics Grid -->
+  <div class="metrics-grid">
+    <div class="metric-card ai-card">
+      <div class="metric-icon">
+        <i class="fas fa-dollar-sign"></i>
+      </div>
+      <div class="metric-content">
+        <h3>Total P&L</h3>
+        <div class="metric-value ai-gradient {{ 'positive' if (pnl if pnl is not none else 0) >= 0 else 'negative' }}" id="totalPnl">
+          ${{ "%.2f"|format(pnl if pnl is not none else 0) }}
+        </div>
+        <div class="metric-change {{ 'positive' if (pnl if pnl is not none else 0) >= 0 else 'negative' }}">
+          <i class="fas fa-arrow-{{ 'up' if (pnl if pnl is not none else 0) >= 0 else 'down' }}"></i>
+          {{ "%.2f"|format(pnl if pnl is not none else 0) }}%
+      </div>
+    </div>
+  </div>
+  
+    <div class="metric-card ai-card">
+      <div class="metric-icon">
+        <i class="fas fa-chart-line"></i>
+      </div>
+      <div class="metric-content">
+        <h3>Active Positions</h3>
+        <div class="metric-value ai-gradient">{{ open_positions|length if open_positions else 0 }}</div>
+        <div class="metric-change">
+        <i class="fas fa-sync-alt"></i>
+          {{ last_update.strftime('%I:%M:%S %p') if last_update else 'Now' }}
+      </div>
+    </div>
+  </div>
+  
+    <div class="metric-card ai-card">
+      <div class="metric-icon">
+        <i class="fas fa-trophy"></i>
+      </div>
+      <div class="metric-content">
+        <h3>Win Rate</h3>
+        <div class="metric-value ai-gradient">{{ "%.1f"|format((win_rate * 100) if win_rate else 0) }}%</div>
+        <div class="metric-change">
+        <i class="fas fa-chart-bar"></i>
+          {{ total_trades if total_trades else 0 }} trades
+      </div>
+    </div>
+  </div>
+  
+    <div class="metric-card ai-card">
+      <div class="metric-icon">
+        <i class="fas fa-coins"></i>
+      </div>
+      <div class="metric-content">
+        <h3>Total Trades</h3>
+        <div class="metric-value ai-gradient">{{ total_trades if total_trades else 0 }}</div>
+        <div class="metric-change">
+        <i class="fas fa-clock"></i>
+        This session
+      </div>
+    </div>
+  </div>
+</div>
+
+  <!-- Position Cards Section -->
+  <div class="positions-section">
+    <div class="section-header">
+      <h2><i class="fas fa-chart-line"></i> Open Positions</h2>
+      <div class="section-actions">
+        <span class="position-count">{{ open_positions|length if open_positions else 0 }} positions</span>
+        <button class="btn btn-primary" onclick="refreshPrices()">
+          <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+      </div>
+    </div>
+    
+    <div class="positions-grid">
+      {% if open_positions %}
+        {% for position in open_positions %}
+          <div class="position-card {{ 'positive' if position.pnl >= 0 else 'negative' }}" data-symbol="{{ position.symbol }}">
+            <!-- Position Header -->
+            <div class="position-header">
+              <div class="position-info">
+                <div class="position-symbol {{ 'positive' if position.pnl >= 0 else 'negative' }}">
+                  {{ position.symbol }}
+                </div>
+                <div class="position-type {{ position.side }}">
+                  {{ position.side.upper() }}
+                </div>
+              </div>
+              <div class="position-pnl">
+                <div class="pnl-percentage {{ 'positive' if position.pnl >= 0 else 'negative' }}">
+                  {{ '+' if position.pnl >= 0 else '' }}{{ "%.2f"|format(position.pnl) }}%
+                </div>
+                <div class="pnl-value {{ 'positive' if position.pnl >= 0 else 'negative' }}">
+                  {{ '+' if position.pnl >= 0 else '' }}${{ "%.2f"|format(position.pnl_value) }}
+                </div>
+              </div>
+            </div>
+
+            <!-- Position Metrics Grid -->
+            <div class="position-metrics">
+              <div class="metrics-row">
+                <div class="metric-column">
+                  <div class="metric-item">
+                    <div class="metric-label">ENTRY PRICE</div>
+                    <div class="metric-value {{ 'positive' if position.entry_price > 0 else 'negative' }}">${{ "%.2f"|format(position.entry_price) }}</div>
+                  </div>
+                  <div class="metric-item">
+                    <div class="metric-label">POSITION SIZE</div>
+                    <div class="metric-value {{ 'positive' if position.size > 0 else 'negative' }}">{{ "%.2f"|format(position.size) }}</div>
+                  </div>
+                </div>
+                <div class="metric-column">
+                  <div class="metric-item">
+                    <div class="metric-label">CURRENT PRICE</div>
+                    <div class="metric-value {{ 'positive' if position.current_price > 0 else 'negative' }}">${{ "%.2f"|format(position.current_price) }}</div>
+                  </div>
+                  <div class="metric-item">
+                    <div class="metric-label">CURRENT VALUE</div>
+                    <div class="metric-value {{ 'positive' if position.current_value > 0 else 'negative' }}">${{ "%.2f"|format(position.current_value) }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Chart Section -->
+            <div class="position-chart">
+              <div class="chart-container">
+                <div class="chart-loading" id="loading-{{ position.symbol.replace('/', '-') }}">
+                  <div class="loading-spinner"></div>
+                  <span>Loading chart...</span>
+                </div>
+                <canvas id="chart-{{ position.symbol.replace('/', '-') }}" width="300" height="80" style="display: none;"></canvas>
+              </div>
+              <div class="chart-info">
+                <div class="trend-indicator {{ 'positive' if position.pnl >= 0 else 'negative' }}">
+                  {{ 'UPWARD' if position.pnl >= 0 else 'DOWNWARD' }}
+                </div>
+                <div class="r-squared">R²: {{ "%.1f"|format(position.r_squared) }}%</div>
+              </div>
+            </div>
+
+            <!-- Position Actions -->
+            <div class="position-actions">
+              <button class="btn btn-danger" data-symbol="{{ position.symbol }}" data-amount="{{ position.size }}" onclick="sellPosition('{{ position.symbol }}', {{ position.size }})">
+                Market Sell
+              </button>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="no-positions">
+          <i class="fas fa-chart-line"></i>
+          <p>No open positions</p>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Top Performers -->
+  <div class="performers-section">
+    <div class="section-header">
+      <h2><i class="fas fa-star"></i> Top Performers</h2>
+      </div>
+    <div class="performers-list">
+          {% if performance and performance.per_symbol %}
+            {% for symbol, pnl in performance.per_symbol.items() %}
+              {% if loop.index <= 5 %}
+                <div class="performer-item">
+            <div class="performer-rank">{{ loop.index }}</div>
+            <div class="performer-info">
+              <span class="performer-symbol">{{ symbol }}</span>
+              <span class="performer-change">{{ "%.2f"|format(pnl) }}%</span>
+            </div>
+            <span class="pnl-value {{ 'positive' if pnl >= 0 else 'negative' }}">
+                    ${{ "%.2f"|format(pnl) }}
+                  </span>
+                </div>
+              {% endif %}
+            {% endfor %}
+          {% else %}
+            <div class="no-data">
+          <i class="fas fa-chart-line"></i>
+              <p>No performance data available</p>
+            </div>
+          {% endif %}
+  </div>
+</div>
+
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Helper function to parse numbers with commas
+function parseNumberWithCommas(str) {
+  if (!str) return 0;
+  return parseFloat(str.toString().replace(/,/g, '')) || 0;
+}
+
+// Pass position data from backend to frontend (safe JSON)
+(function(){
+  try {
+    const positionsList = {{ (open_positions or []) | tojson }};
+    const map = {};
+    if (Array.isArray(positionsList)) {
+      positionsList.forEach(p => { if (p && p.symbol) map[p.symbol] = p; });
+    }
+    window.positionData = map;
+  } catch (e) {
+    console.error('Failed to parse position data:', e);
+    window.positionData = {};
+  }
+})();
+
+console.log('Position data loaded:', window.positionData);
+
+// Function to refresh position prices and P&L
+function refreshPrices() {
+  console.log('Refreshing position prices...');
+  
+  // Show loading state on refresh button
+  const refreshBtn = document.querySelector('button[onclick="refreshPrices()"]');
+  const originalText = refreshBtn ? refreshBtn.innerHTML : '';
+  if (refreshBtn) {
+    refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+    refreshBtn.disabled = true;
+  }
+  
+  // Fetch updated position data
+  fetch('/api/open-positions')
+    .then(response => response.json())
+    .then(positions => {
+      console.log('Received updated positions:', positions);
+      
+      // Update each position card with new data
+      positions.forEach(position => {
+        updatePositionCard(position);
+      });
+      
+      // Show success message
+      if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+        window.LegacyCoinTrader.showToast('Prices refreshed successfully', 'success');
+      }
+    })
+    .catch(error => {
+      console.error('Error refreshing prices:', error);
+      if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+        window.LegacyCoinTrader.showToast('Error refreshing prices', 'error');
+      }
+    })
+    .finally(() => {
+      // Reset refresh button
+      if (refreshBtn) {
+        refreshBtn.innerHTML = originalText;
+        refreshBtn.disabled = false;
+      }
+    });
+}
+
+// Function to update a position card with new data
+function updatePositionCard(position) {
+  const card = document.querySelector(`[data-symbol="${position.symbol}"]`);
+  if (!card) {
+    console.warn(`Position card not found for symbol: ${position.symbol}`);
+    return;
+  }
+  
+  // Update P&L percentage
+  const pnlPercentageEl = card.querySelector('.pnl-percentage');
+  if (pnlPercentageEl) {
+    const sign = position.pnl >= 0 ? '+' : '';
+    pnlPercentageEl.textContent = `${sign}${position.pnl.toFixed(2)}%`;
+    pnlPercentageEl.className = `pnl-percentage ${position.pnl >= 0 ? 'positive' : 'negative'}`;
+  }
+  
+  // Update P&L value
+  const pnlValueEl = card.querySelector('.pnl-value');
+  if (pnlValueEl) {
+    const sign = position.pnl_value >= 0 ? '+' : '';
+    pnlValueEl.textContent = `${sign}$${position.pnl_value.toFixed(2)}`;
+    pnlValueEl.className = `pnl-value ${position.pnl_value >= 0 ? 'positive' : 'negative'}`;
+  }
+  
+  // Update current price (reliable label matching)
+  const metricItemsForPrice = card.querySelectorAll('.metric-item');
+  metricItemsForPrice.forEach(item => {
+    const label = item.querySelector('.metric-label');
+    if (label && label.textContent.trim().toUpperCase() === 'CURRENT PRICE') {
+      const valueEl = item.querySelector('.metric-value');
+      if (valueEl) {
+        valueEl.textContent = `$${position.current_price.toFixed(2)}`;
+        valueEl.className = `metric-value ${position.current_price > 0 ? 'positive' : 'negative'}`;
+      }
+    }
+  });
+  
+  // Update current value
+  const metricItems = card.querySelectorAll('.metric-item');
+  metricItems.forEach(item => {
+    const label = item.querySelector('.metric-label');
+    if (label && label.textContent.includes('CURRENT VALUE')) {
+      const valueEl = item.querySelector('.metric-value');
+      if (valueEl) {
+        valueEl.textContent = `$${position.current_value.toFixed(2)}`;
+        valueEl.className = `metric-value ${position.current_value > 0 ? 'positive' : 'negative'}`;
+      }
+    }
+  });
+  
+  // Update card overall styling
+  card.className = `position-card ${position.pnl >= 0 ? 'positive' : 'negative'}`;
+  
+  // Update trend indicator
+  const trendEl = card.querySelector('.trend-indicator');
+  if (trendEl) {
+    trendEl.textContent = position.pnl >= 0 ? 'UPWARD' : 'DOWNWARD';
+    trendEl.className = `trend-indicator ${position.pnl >= 0 ? 'positive' : 'negative'}`;
+  }
+  
+  console.log(`Updated position card for ${position.symbol}`);
+}
+
+// Function to sell a position (referenced in template)
+function sellPosition(symbol, amount) {
+  if (!confirm(`Are you sure you want to market sell ${amount} ${symbol}?`)) {
+    return;
+  }
+  
+  const sellBtn = document.querySelector(`button[onclick="sellPosition('${symbol}', ${amount})"]`);
+  const originalText = sellBtn ? sellBtn.innerHTML : '';
+  if (sellBtn) {
+    sellBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Selling...';
+    sellBtn.disabled = true;
+  }
+  
+  fetch('/api/sell-position', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      symbol: symbol,
+      amount: amount
+    })
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.success) {
+      if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+        window.LegacyCoinTrader.showToast(`Market sell order submitted for ${amount} ${symbol}`, 'success');
+      }
+      // Refresh positions after a short delay
+      setTimeout(() => {
+        refreshPrices();
+      }, 2000);
+    } else {
+      if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+        window.LegacyCoinTrader.showToast(`Error: ${data.error}`, 'error');
+      }
+    }
+  })
+  .catch(error => {
+    console.error('Error selling position:', error);
+    if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+      window.LegacyCoinTrader.showToast('Error selling position', 'error');
+    }
+  })
+  .finally(() => {
+    if (sellBtn) {
+      sellBtn.innerHTML = originalText;
+      sellBtn.disabled = false;
+    }
+  });
+}
+
+// Expose for inline handlers and add delegated handler for robustness
+window.sellPosition = sellPosition;
+
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('button.btn.btn-danger[data-symbol][data-amount]');
+  if (!btn) return;
+  const symbol = btn.getAttribute('data-symbol');
+  const amountAttr = btn.getAttribute('data-amount');
+  const amount = parseFloat(amountAttr);
+  if (!symbol || isNaN(amount)) return;
+  // Ensure we call the main function
+  sellPosition(symbol, amount);
+});
+</script>
+
+<!-- Chart functionality moved to position_charts.js to fix CSP issues -->
+<script src="{{ url_for('static', filename='position_charts.js') }}" defer></script>
+
+{% endblock %}

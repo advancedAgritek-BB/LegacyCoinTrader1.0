@@ -1,0 +1,19 @@
+# Environment Variables for Kraken API (add to .env file or shell profile)
+# export KRAKEN_API_KEY="your_actual_api_key_here"
+# export KRAKEN_API_SECRET="your_actual_api_secret_here"
+
+# Current configuration (using test keys - NOT WORKING)
+coinbase_api_key: ''
+coinbase_api_secret: ''
+coinbase_passphrase: ''
+exchange: kraken
+
+# API keys are loaded from .env file automatically
+# The bot reads KRAKEN_API_KEY and KRAKEN_API_SECRET from environment variables
+# No need to specify them here - they're in your .env file
+
+mode: cex
+paper_wallet_balance: 10000.0
+telegram_chat_id: '827777274'
+telegram_token: 8126215032:AAEhQZLiXpssauKf0ktQsq1XqXl94QriCdE
+wallet_address: EoiVpzLA6b6JBKXTB5WRFor3mPkseM6UisLHt8qK9g1c

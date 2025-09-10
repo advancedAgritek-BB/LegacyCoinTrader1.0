@@ -1,0 +1,111 @@
+/* MONITORING PAGE ENHANCED STYLES */
+
+/* Status Badge Enhancements */
+.component-table .status-badge.healthy,
+.status-badge.healthy,
+span.status-badge.healthy {
+    background: linear-gradient(135deg, #10b981, #059669) !important;
+    color: white !important;
+    padding: 6px 12px !important;
+    border-radius: 20px !important;
+    font-weight: 700 !important;
+    font-size: 11px !important;
+    text-transform: uppercase !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+    border: none !important;
+    display: inline-block !important;
+}
+
+.component-table .status-badge.warning,
+.status-badge.warning,
+span.status-badge.warning {
+    background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+    color: white !important;
+    padding: 6px 12px !important;
+    border-radius: 20px !important;
+    font-weight: 700 !important;
+    font-size: 11px !important;
+    text-transform: uppercase !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+    border: none !important;
+    display: inline-block !important;
+}
+
+.component-table .status-badge.unknown,
+.status-badge.unknown,
+span.status-badge.unknown {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed) !important;
+    color: white !important;
+    padding: 6px 12px !important;
+    border-radius: 20px !important;
+    font-weight: 700 !important;
+    font-size: 11px !important;
+    text-transform: uppercase !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+    border: none !important;
+    display: inline-block !important;
+}
+
+.component-table .status-badge.critical,
+.status-badge.critical,
+span.status-badge.critical {
+    background: linear-gradient(135deg, #ef4444, #dc2626) !important;
+    color: white !important;
+    padding: 6px 12px !important;
+    border-radius: 20px !important;
+    font-weight: 700 !important;
+    font-size: 11px !important;
+    text-transform: uppercase !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+    border: none !important;
+    display: inline-block !important;
+}
+
+/* Button Enhancements */
+.monitoring-container .btn-secondary,
+.table-actions .btn-secondary,
+button.btn-secondary {
+    background: transparent !important;
+    border: 2px solid #8b5cf6 !important;
+    color: #8b5cf6 !important;
+    padding: 8px 16px !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+}
+
+.monitoring-container .btn-secondary:hover,
+.table-actions .btn-secondary:hover,
+button.btn-secondary:hover {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed) !important;
+    color: white !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 16px rgba(139, 92, 246, 0.4) !important;
+}
+
+/* Chart Filter Buttons */
+.filter-btn {
+    border: 2px solid #3b82f6 !important;
+    background: transparent !important;
+    color: #3b82f6 !important;
+    font-weight: 600 !important;
+    transition: all 0.2s ease !important;
+}
+
+.filter-btn.active {
+    background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
+    color: white !important;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4) !important;
+}
+
+.filter-btn:hover:not(.active) {
+    background: rgba(59, 130, 246, 0.1) !important;
+    transform: translateY(-1px) !important;
+}
+
+/* Visual Indicator */
+.page-title {
+    border-left: 4px solid #8b5cf6 !important;
+    padding-left: 16px !important;
+}

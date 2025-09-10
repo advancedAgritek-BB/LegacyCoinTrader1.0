@@ -1,0 +1,108 @@
+---
+version: '3.8'
+
+# Development override configuration
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  # Override for development - mount source code for hot reloading
+  api-gateway:
+    environment:
+      - GATEWAY_LOG_LEVEL=DEBUG
+    volumes:
+      - ./services/api_gateway:/app
+      - /app/__pycache__  # Exclude cache
+    command: ["python", "-m", "watchdog", "app.py"]  # Use file watcher for reloads
+
+  trading-engine:
+    environment:
+      - TRADING_ENGINE_LOG_LEVEL=DEBUG
+      - TRADING_ENGINE_CYCLE_INTERVAL=300  # Slower cycles for development
+    volumes:
+      - ./services/trading_engine:/app
+      - /app/__pycache__
+
+  market-data:
+    environment:
+      - MARKET_DATA_LOG_LEVEL=DEBUG
+      - MARKET_DATA_CACHE_ENABLED=false  # Disable caching for development
+    volumes:
+      - ./services/market_data:/app
+      - ./crypto_bot:/app/crypto_bot
+      - /app/__pycache__
+
+  portfolio:
+    environment:
+      - PORTFOLIO_LOG_LEVEL=DEBUG
+      - PORTFOLIO_PAPER_TRADING=true  # Force paper trading in development
+    volumes:
+      - ./services/portfolio:/app
+      - ./crypto_bot:/app/crypto_bot
+      - /app/__pycache__
+
+  strategy-engine:
+    environment:
+      - STRATEGY_ENGINE_LOG_LEVEL=DEBUG
+    volumes:
+      - ./services/strategy_engine:/app
+      - ./crypto_bot:/app/crypto_bot
+      - /app/__pycache__
+
+  token-discovery:
+    environment:
+      - TOKEN_DISCOVERY_LOG_LEVEL=DEBUG
+      - TOKEN_DISCOVERY_SCAN_INTERVAL=60  # Faster scanning for development
+    volumes:
+      - ./services/token_discovery:/app
+      - ./crypto_bot:/app/crypto_bot
+      - /app/__pycache__
+
+  execution:
+    environment:
+      - EXECUTION_LOG_LEVEL=DEBUG
+      - EXECUTION_DRY_RUN=true  # Force dry run in development
+    volumes:
+      - ./services/execution:/app
+      - ./crypto_bot:/app/crypto_bot
+      - ./config:/app/config
+      - /app/__pycache__
+
+  monitoring:
+    environment:
+      - MONITORING_LOG_LEVEL=DEBUG
+    volumes:
+      - ./services/monitoring:/app
+      - ./crypto_bot:/app/crypto_bot
+      - ./logs:/app/logs
+      - /app/__pycache__
+
+  frontend:
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+    volumes:
+      - ./frontend:/app
+      - ./static:/app/static
+      - ./templates:/app/templates
+      - /app/__pycache__
+
+  # Development database for testing
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=legacy_coin_trader_dev
+      - POSTGRES_USER=dev_user
+      - POSTGRES_PASSWORD=dev_password
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev_user -d legacy_coin_trader_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_dev_data:
+    driver: local

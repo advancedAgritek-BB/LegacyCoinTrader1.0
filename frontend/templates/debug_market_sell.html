@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Sell Debug</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .debug-section { border: 1px solid #ccc; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .btn { padding: 10px 20px; margin: 5px; border: none; border-radius: 5px; cursor: pointer; }
+        .btn-primary { background-color: #007bff; color: white; }
+        .btn-danger { background-color: #dc3545; color: white; }
+        .btn-success { background-color: #28a745; color: white; }
+        .log { background-color: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; margin: 10px 0; border-radius: 5px; max-height: 400px; overflow-y: auto; }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        .info { color: #17a2b8; }
+        .warning { color: #ffc107; }
+    </style>
+</head>
+<body>
+    <h1>Market Sell Debug Page</h1>
+    
+    <div class="debug-section">
+        <h3>1. Check LegacyCoinTrader Object</h3>
+        <button class="btn btn-primary" onclick="checkLegacyCoinTrader()">Check LegacyCoinTrader</button>
+        <div id="legacyCoinTraderStatus"></div>
+    </div>
+    
+    <div class="debug-section">
+        <h3>2. Test API Endpoint</h3>
+        <button class="btn btn-success" onclick="testAPI()">Test API Endpoint</button>
+        <div id="apiStatus"></div>
+    </div>
+    
+    <div class="debug-section">
+        <h3>3. Test Market Sell Function</h3>
+        <button class="btn btn-danger" onclick="testMarketSellFunction()">Test Market Sell Function</button>
+        <div id="functionStatus"></div>
+    </div>
+    
+    <div class="debug-section">
+        <h3>4. Test with Event</h3>
+        <button class="btn btn-danger" id="testButton" onclick="testWithEvent(event)">
+            Test with Event Parameter
+        </button>
+        <div id="eventStatus"></div>
+    </div>
+    
+    <div class="debug-section">
+        <h3>5. Debug Log</h3>
+        <div id="debugLog" class="log"></div>
+        <button class="btn btn-primary" onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <script>
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('debugLog');
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type;
+            logDiv.innerHTML += `<div class="${className}">[${timestamp}] ${message}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function checkLegacyCoinTrader() {
+            log('Checking LegacyCoinTrader object...', 'info');
+            
+            if (typeof window.LegacyCoinTrader === 'undefined') {
+                log('❌ LegacyCoinTrader object is NOT defined', 'error');
+                document.getElementById('legacyCoinTraderStatus').innerHTML = '<span style="color: red;">❌ NOT LOADED</span>';
+                return false;
+            }
+            
+            if (typeof window.LegacyCoinTrader.showToast === 'undefined') {
+                log('❌ LegacyCoinTrader.showToast method is NOT defined', 'error');
+                document.getElementById('legacyCoinTraderStatus').innerHTML = '<span style="color: red;">❌ showToast NOT AVAILABLE</span>';
+                return false;
+            }
+            
+            log('✅ LegacyCoinTrader object is loaded and showToast is available', 'success');
+            document.getElementById('legacyCoinTraderStatus').innerHTML = '<span style="color: green;">✅ LOADED</span>';
+            return true;
+        }
+
+        function testAPI() {
+            log('Testing API endpoint...', 'info');
+            
+            fetch('/api/sell-position', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    symbol: 'DEBUG/USD',
+                    amount: 0.001
+                })
+            })
+            .then(response => {
+                log(`API response status: ${response.status}`, 'info');
+                return response.json();
+            })
+            .then(data => {
+                log(`API response data: ${JSON.stringify(data)}`, 'success');
+                if (data.success) {
+                    document.getElementById('apiStatus').innerHTML = '<span style="color: green;">✅ API WORKING</span>';
+                } else {
+                    document.getElementById('apiStatus').innerHTML = `<span style="color: red;">❌ API ERROR: ${data.error}</span>`;
+                }
+            })
+            .catch(error => {
+                log(`API error: ${error.message}`, 'error');
+                document.getElementById('apiStatus').innerHTML = `<span style="color: red;">❌ API ERROR: ${error.message}</span>`;
+            });
+        }
+
+        function testMarketSellFunction() {
+            log('Testing market sell function...', 'info');
+            
+            try {
+                // Test if the function exists
+                if (typeof marketSellPosition === 'undefined') {
+                    log('❌ marketSellPosition function is NOT defined', 'error');
+                    document.getElementById('functionStatus').innerHTML = '<span style="color: red;">❌ FUNCTION NOT DEFINED</span>';
+                    return;
+                }
+                
+                log('✅ marketSellPosition function exists', 'success');
+                
+                // Test the function with null event
+                marketSellPosition('DEBUG/USD', 0.001, null);
+                document.getElementById('functionStatus').innerHTML = '<span style="color: green;">✅ FUNCTION CALLED</span>';
+                
+            } catch (error) {
+                log(`❌ Function test error: ${error.message}`, 'error');
+                document.getElementById('functionStatus').innerHTML = `<span style="color: red;">❌ FUNCTION ERROR: ${error.message}</span>`;
+            }
+        }
+
+        function testWithEvent(event) {
+            log('Testing with event parameter...', 'info');
+            log(`Event object: ${event ? 'present' : 'null'}`, 'info');
+            log(`Event target: ${event ? event.target.tagName : 'N/A'}`, 'info');
+            
+            try {
+                marketSellPosition('DEBUG/USD', 0.001, event);
+                document.getElementById('eventStatus').innerHTML = '<span style="color: green;">✅ EVENT TEST PASSED</span>';
+            } catch (error) {
+                log(`❌ Event test error: ${error.message}`, 'error');
+                document.getElementById('eventStatus').innerHTML = `<span style="color: red;">❌ EVENT TEST ERROR: ${error.message}</span>`;
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('debugLog').innerHTML = '';
+        }
+
+        // Market sell function (copied from the main template)
+        function marketSellPosition(symbol, amount, event) {
+            log(`marketSellPosition called with: ${symbol}, ${amount}, event: ${event ? 'present' : 'null'}`, 'info');
+            
+            // Check if LegacyCoinTrader is available
+            if (!window.LegacyCoinTrader || !window.LegacyCoinTrader.showToast) {
+                log('❌ LegacyCoinTrader object not available', 'error');
+                alert('Error: LegacyCoinTrader not loaded. Please refresh the page.');
+                return;
+            }
+            
+            if (!confirm(`Are you sure you want to market sell ${amount} ${symbol}? This action cannot be undone.`)) {
+                log('User cancelled the sell operation', 'info');
+                return;
+            }
+            
+            // Show loading state
+            const button = event ? event.target.closest('button') : null;
+            const originalText = button ? button.innerHTML : '';
+            if (button) {
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Selling...';
+                button.disabled = true;
+                log('Button loading state applied', 'info');
+            }
+            
+            log('Sending sell request to API...', 'info');
+            
+            fetch('/api/sell-position', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    symbol: symbol,
+                    amount: amount
+                })
+            })
+            .then(response => {
+                log(`API response status: ${response.status}`, 'info');
+                return response.json();
+            })
+            .then(data => {
+                log(`API response data: ${JSON.stringify(data)}`, 'info');
+                if (data.success) {
+                    window.LegacyCoinTrader.showToast(`Market sell order submitted for ${amount} ${symbol}`, 'success');
+                    log('Market sell order submitted successfully', 'success');
+                } else {
+                    window.LegacyCoinTrader.showToast(`Error: ${data.error}`, 'error');
+                    log(`Error: ${data.error}`, 'error');
+                    // Reset button
+                    if (button) {
+                        button.innerHTML = originalText;
+                        button.disabled = false;
+                    }
+                }
+            })
+            .catch(error => {
+                log(`Error selling position: ${error.message}`, 'error');
+                window.LegacyCoinTrader.showToast('Error submitting sell order', 'error');
+                // Reset button
+                if (button) {
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                }
+            });
+        }
+
+        // Initialize
+        log('Debug page loaded', 'info');
+        
+        // Check LegacyCoinTrader after a short delay
+        setTimeout(() => {
+            checkLegacyCoinTrader();
+        }, 1000);
+    </script>
+</body>
+</html>

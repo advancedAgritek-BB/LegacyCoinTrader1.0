@@ -1,0 +1,108 @@
+# Modern Requirements for LegacyCoinTrader 2.0 - Compatible with existing system
+
+# Core Python (existing versions)
+python-dotenv>=1.0.0
+pydantic>=1.10.0,<2.0.0
+
+# Async and Concurrency (existing compatible)
+aiohttp>=3.8.0,<4.0.0
+httpx>=0.24.0,<0.25.0
+uvloop>=0.17.0; sys_platform != 'win32'
+
+# Cryptocurrency and Trading (existing)
+ccxt>=4.0.0,<5.0.0
+solana>=0.32.0,<0.36.0
+solders>=0.20.0,<0.22.0
+pythclient>=0.1.0
+
+# Machine Learning and Data Science (existing)
+pandas>=1.5.0,<2.0.0
+numpy>=1.21.0,<1.25.0
+scikit-learn>=1.2.0,<2.0.0
+lightgbm>=4.0.0,<5.0.0
+scipy>=1.9.0,<2.0.0
+statsmodels>=0.13.0,<0.15.0
+numba>=0.56.0,<0.58.0
+joblib>=1.2.0,<2.0.0
+
+# Web Framework and API (existing compatible)
+fastapi>=0.95.0,<0.101.0
+uvicorn[standard]>=0.21.0,<0.24.0
+starlette>=0.27.0,<0.28.0
+websockets>=10.0,<12.0
+
+# Database and Caching (existing)
+redis>=4.3.0,<5.0.0
+sqlalchemy>=1.4.0,<2.0.0
+alembic>=1.8.0,<2.0.0
+psycopg2-binary>=2.9.0,<3.0.0
+pymongo>=4.3.0,<5.0.0
+
+# Security and Encryption
+cryptography>=39.0.0,<42.0.0
+bcrypt>=4.0.0,<5.0.0
+passlib[bcrypt]>=1.7.0,<2.0.0
+python-jose[cryptography]>=3.3.0,<4.0.0
+python-multipart>=0.0.5
+
+# Monitoring and Observability
+prometheus-client>=0.16.0,<0.18.0
+structlog>=22.1.0,<23.2.0
+sentry-sdk[fastapi]>=1.15.0,<1.38.0
+
+# Testing and Quality Assurance (NEW)
+pytest>=7.0.0,<8.0.0
+pytest-asyncio>=0.21.0,<0.22.0
+pytest-cov>=4.0.0,<5.0.0
+pytest-mock>=3.10.0,<4.0.0
+pytest-xdist>=3.0.0,<3.5.0
+pytest-benchmark>=4.0.0,<5.0.0
+pytest-html>=4.0.0,<5.0.0
+black>=22.0.0,<24.0.0
+isort>=5.10.0,<6.0.0
+flake8>=5.0.0,<7.0.0
+mypy>=1.0.0,<1.7.0
+bandit>=1.7.0,<2.0.0
+safety>=2.3.0,<3.0.0
+
+# Development Tools (NEW)
+pre-commit>=3.0.0,<4.0.0
+commitizen>=3.0.0,<4.0.0
+
+# Utilities (existing + new)
+click>=8.0.0,<9.0.0
+rich>=12.0.0,<14.0.0
+typer>=0.7.0,<0.10.0
+loguru>=0.6.0,<0.8.0
+python-multipart>=0.0.5
+email-validator>=2.0.0,<3.0.0
+
+# Telegram Bot (existing)
+python-telegram-bot>=20.0,<21.0
+
+# Financial and Technical Analysis (existing)
+ta>=0.10.0
+
+# Performance and Optimization (NEW)
+cachetools>=5.0.0,<6.0.0
+lru-dict>=1.1.0,<2.0.0
+
+# Web Dashboard (existing)
+jinja2>=3.0.0,<4.0.0
+aiofiles>=22.0.0,<24.0.0
+
+# Configuration Management (NEW)
+dynaconf>=3.1.0,<4.0.0
+
+# API Rate Limiting (NEW)
+slowapi>=0.1.8,<0.2.0
+
+# Date and Time (existing)
+pendulum>=2.1.0,<3.0.0
+
+# Serialization (NEW)
+orjson>=3.8.0,<4.0.0
+msgpack>=1.0.0,<2.0.0
+
+# Environment Detection (NEW)
+platformdirs>=2.5.0,<4.0.0

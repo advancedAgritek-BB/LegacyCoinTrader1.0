@@ -1,0 +1,54 @@
+# Enhanced Scanning Configuration
+# This file configures the enhanced scanning system with integrated caching
+# and continuous strategy review for trade execution opportunities.
+
+# Enhanced Scanning Configuration
+enhanced_scanning:
+  enabled: true
+  scan_interval: 30
+  max_tokens_per_scan: 100
+  min_score_threshold: 0.4
+  enable_sentiment: false
+  enable_pyth_prices: true
+  min_volume_usd: 5000
+  max_spread_pct: 1.5
+  min_liquidity_score: 0.6
+  min_strategy_fit: 0.6
+  min_confidence: 0.5
+  discovery_sources:
+    - "basic_scanner"
+    - "dex_aggregators"
+  data_sources:
+    price:
+      - "pyth"
+      - "jupiter"
+    volume:
+      - "birdeye"
+    orderbook:
+      - "jupiter"
+
+# Scan Cache Configuration
+scan_cache:
+  max_cache_size: 500
+  review_interval_minutes: 20
+  max_age_hours: 12
+  min_score_threshold: 0.4
+  persist_to_disk: true
+  auto_cleanup: true
+
+# Integration Configuration
+integration:
+  enable_bot_integration: true
+  enable_strategy_router_integration: true
+  enable_risk_manager_integration: true
+  scan_interval: 30
+  max_concurrent_scans: 3
+
+# Monitoring Configuration
+monitoring:
+  enable_scan_metrics: true
+  log_scan_results: true
+  track_scan_performance: true
+  alert_on_scan_failures: true
+  scan_metrics_interval: 60
+  max_scan_logs: 1000

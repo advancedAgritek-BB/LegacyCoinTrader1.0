@@ -1,0 +1,252 @@
+---
+version: '3.8'
+
+services:
+  # Shared Redis instance for caching and service discovery
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # API Gateway - Entry point for all requests
+  api-gateway:
+    build: ./services/api_gateway
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - GATEWAY_REDIS_HOST=redis
+      - GATEWAY_REDIS_PORT=6379
+    volumes:
+      - ./services/api_gateway:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Trading Engine - Core orchestration service
+  trading-engine:
+    build: ./services/trading_engine
+    ports:
+      - "8001:8001"
+    depends_on:
+      redis:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+    environment:
+      - TRADING_ENGINE_REDIS_HOST=redis
+      - TRADING_ENGINE_REDIS_PORT=6379
+      - TRADING_ENGINE_API_GATEWAY_HOST=api-gateway
+      - TRADING_ENGINE_API_GATEWAY_PORT=8000
+    volumes:
+      - ./services/trading_engine:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Market Data Service - Data acquisition and caching
+  market-data:
+    build: ./services/market_data
+    ports:
+      - "8002:8002"
+    depends_on:
+      redis:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+    environment:
+      - MARKET_DATA_REDIS_HOST=redis
+      - MARKET_DATA_REDIS_PORT=6379
+      - MARKET_DATA_API_GATEWAY_HOST=api-gateway
+      - MARKET_DATA_API_GATEWAY_PORT=8000
+    volumes:
+      - ./services/market_data:/app
+      - ./crypto_bot:/app/crypto_bot  # Mount existing crypto_bot for shared utilities
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Portfolio Service - Position and risk management
+  portfolio:
+    build: ./services/portfolio
+    ports:
+      - "8003:8003"
+    depends_on:
+      redis:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+    environment:
+      - PORTFOLIO_REDIS_HOST=redis
+      - PORTFOLIO_REDIS_PORT=6379
+      - PORTFOLIO_API_GATEWAY_HOST=api-gateway
+      - PORTFOLIO_API_GATEWAY_PORT=8000
+    volumes:
+      - ./services/portfolio:/app
+      - ./crypto_bot:/app/crypto_bot
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Strategy Engine - Strategy evaluation and routing
+  strategy-engine:
+    build: ./services/strategy_engine
+    ports:
+      - "8004:8004"
+    depends_on:
+      redis:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+      market-data:
+        condition: service_healthy
+    environment:
+      - STRATEGY_ENGINE_REDIS_HOST=redis
+      - STRATEGY_ENGINE_REDIS_PORT=6379
+      - STRATEGY_ENGINE_API_GATEWAY_HOST=api-gateway
+      - STRATEGY_ENGINE_API_GATEWAY_PORT=8000
+      - STRATEGY_ENGINE_MARKET_DATA_HOST=market-data
+      - STRATEGY_ENGINE_MARKET_DATA_PORT=8002
+    volumes:
+      - ./services/strategy_engine:/app
+      - ./crypto_bot:/app/crypto_bot
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Token Discovery Service - DEX and token scanning
+  token-discovery:
+    build: ./services/token_discovery
+    ports:
+      - "8005:8005"
+    depends_on:
+      redis:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+      market-data:
+        condition: service_healthy
+    environment:
+      - TOKEN_DISCOVERY_REDIS_HOST=redis
+      - TOKEN_DISCOVERY_REDIS_PORT=6379
+      - TOKEN_DISCOVERY_API_GATEWAY_HOST=api-gateway
+      - TOKEN_DISCOVERY_API_GATEWAY_PORT=8000
+      - TOKEN_DISCOVERY_MARKET_DATA_HOST=market-data
+      - TOKEN_DISCOVERY_MARKET_DATA_PORT=8002
+    volumes:
+      - ./services/token_discovery:/app
+      - ./crypto_bot:/app/crypto_bot
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Execution Service - Order execution and exchange integration
+  execution:
+    build: ./services/execution
+    ports:
+      - "8006:8006"
+    depends_on:
+      redis:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+    environment:
+      - EXECUTION_REDIS_HOST=redis
+      - EXECUTION_REDIS_PORT=6379
+      - EXECUTION_API_GATEWAY_HOST=api-gateway
+      - EXECUTION_API_GATEWAY_PORT=8000
+    volumes:
+      - ./services/execution:/app
+      - ./crypto_bot:/app/crypto_bot
+      - ./config:/app/config  # Mount config for exchange credentials
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Monitoring Service - System monitoring and alerting
+  monitoring:
+    build: ./services/monitoring
+    ports:
+      - "8007:8007"
+    depends_on:
+      redis:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+    environment:
+      - MONITORING_REDIS_HOST=redis
+      - MONITORING_REDIS_PORT=6379
+      - MONITORING_API_GATEWAY_HOST=api-gateway
+      - MONITORING_API_GATEWAY_PORT=8000
+    volumes:
+      - ./services/monitoring:/app
+      - ./crypto_bot:/app/crypto_bot
+      - ./logs:/app/logs  # Mount logs for monitoring
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Frontend - Web dashboard (updated to use microservices)
+  frontend:
+    build: ./frontend
+    ports:
+      - "5000:5000"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      - FLASK_ENV=development
+      - API_GATEWAY_URL=http://api-gateway:8000
+    volumes:
+      - ./frontend:/app
+      - ./static:/app/static
+      - ./templates:/app/templates
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    driver: bridge
+    name: legacy-coin-trader-network

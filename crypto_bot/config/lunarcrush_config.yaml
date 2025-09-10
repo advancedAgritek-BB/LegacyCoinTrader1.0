@@ -1,0 +1,89 @@
+# LunarCrush Configuration
+# This file configures the LunarCrush sentiment analysis integration
+
+# API Configuration
+api:
+  base_url: "https://lunarcrush.com/api4/public"
+  timeout: 10.0
+  max_retries: 3
+  retry_delay: 1.0
+
+# Sentiment Analysis Settings
+sentiment:
+  # Galaxy Score thresholds
+  min_galaxy_score: 60.0
+  max_galaxy_score: 100.0
+  
+  # Sentiment thresholds (0.0 - 1.0)
+  min_sentiment: 0.6
+  max_sentiment: 1.0
+  
+  # Alt Rank thresholds (lower is better)
+  max_alt_rank: 500
+  
+  # Social metrics thresholds
+  min_social_mentions: 100
+  min_social_volume: 50.0
+
+# Caching Configuration
+caching:
+  enabled: true
+  cache_duration: 300  # 5 minutes
+  max_cache_size: 1000  # number of symbols
+  cleanup_interval: 600  # 10 minutes
+
+# Trading Integration
+trading:
+  # Boost factor calculation
+  enable_sentiment_boost: true
+  max_boost_factor: 1.5  # maximum 50% boost
+  
+  # Alignment checking
+  require_sentiment_alignment: false
+  min_alignment_confidence: 0.7
+  
+  # Risk management
+  block_strong_opposition: true
+  min_opposition_threshold: 0.3
+
+# Data Processing
+processing:
+  # Symbol normalization
+  remove_usd_suffix: true
+  remove_usdt_suffix: true
+  remove_btc_suffix: true
+  
+  # Sentiment normalization
+  normalize_to_0_1: true
+  sentiment_multiplier: 0.01  # divide by 100
+  
+  # Direction determination
+  bullish_threshold: 0.6
+  bearish_threshold: 0.4
+
+# Monitoring and Logging
+monitoring:
+  log_level: "INFO"
+  log_sentiment_changes: true
+  log_api_calls: false
+  log_cache_hits: false
+  
+  # Performance metrics
+  track_response_times: true
+  track_error_rates: true
+  track_cache_efficiency: true
+
+# Error Handling
+error_handling:
+  # Fallback values on API failure
+  fallback_galaxy_score: 50.0
+  fallback_sentiment: 0.5
+  fallback_alt_rank: 1000
+  
+  # Retry configuration
+  max_consecutive_failures: 5
+  circuit_breaker_timeout: 300  # 5 minutes
+  
+  # Graceful degradation
+  use_cached_data_on_error: true
+  return_neutral_on_error: true

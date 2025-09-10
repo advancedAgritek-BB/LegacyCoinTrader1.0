@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chart Coordinate Test</title>
+    <style>
+        canvas {
+            border: 1px solid #ccc;
+            background: #f8f9fa;
+        }
+        .debug {
+            font-family: monospace;
+            font-size: 12px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Chart Coordinate Test</h1>
+    <p>This tests the Y-coordinate calculation logic used in the dashboard charts.</p>
+
+    <div class="debug">
+        <strong>Test Case: Long Position with Positive P&L</strong><br>
+        Entry Price: $50000<br>
+        Current Price: $51000<br>
+        Expected: Current price should be ABOVE entry price on chart
+    </div>
+
+    <canvas id="testChart" width="400" height="120"></canvas>
+
+    <div class="debug" id="debugOutput"></div>
+
+    <script>
+        function testChartCoordinates() {
+            const canvas = document.getElementById('testChart');
+            const ctx = canvas.getContext('2d');
+            const debug = document.getElementById('debugOutput');
+
+            // Test data
+            const entryPrice = 50000;
+            const currentPrice = 51000;
+            const prices = [49500, 49800, 50200, 50500, 50800, 51000]; // Sample price data
+
+            // Calculate price range (same logic as dashboard)
+            const minPrice = Math.min(...prices, entryPrice);
+            const maxPrice = Math.max(...prices, entryPrice);
+            const priceRange = maxPrice - minPrice;
+
+            debug.innerHTML = `
+                📊 Chart Analysis:<br>
+                Entry Price: $${entryPrice}<br>
+                Current Price: $${currentPrice}<br>
+                Price Range: $${minPrice} - $${maxPrice} ($${priceRange})<br>
+                Canvas Height: ${canvas.height}px<br>
+                <br>
+                📍 Y-Coordinates (0=top, ${canvas.height}=bottom):<br>
+            `;
+
+            // Calculate Y coordinates
+            const entryY = canvas.height - ((entryPrice - minPrice) / priceRange) * canvas.height;
+            const currentY = canvas.height - ((currentPrice - minPrice) / priceRange) * canvas.height;
+
+            debug.innerHTML += `
+                Entry Price Y: ${entryY.toFixed(1)}px<br>
+                Current Price Y: ${currentY.toFixed(1)}px<br>
+                <br>
+                🎯 Analysis:<br>
+                ${currentY < entryY ? '✅ CORRECT: Current price above entry price' : '❌ ISSUE: Current price below entry price'}<br>
+                ${entryY > 0 && entryY < canvas.height ? '✅ Entry price within visible range' : '⚠️ Entry price outside visible range'}<br>
+            `;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw price range background
+            ctx.fillStyle = '#f8f9fa';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw price line (simplified)
+            ctx.strokeStyle = '#007bff';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+
+            prices.forEach((price, index) => {
+                const x = (index / (prices.length - 1)) * canvas.width;
+                const y = canvas.height - ((price - minPrice) / priceRange) * canvas.height;
+
+                if (index === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+            ctx.stroke();
+
+            // Draw entry price line
+            ctx.strokeStyle = '#6f42c1';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(0, entryY);
+            ctx.lineTo(canvas.width, entryY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw current price line (for reference)
+            ctx.strokeStyle = '#28a745';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath();
+            ctx.moveTo(0, currentY);
+            ctx.lineTo(canvas.width, currentY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Add labels
+            ctx.fillStyle = '#6f42c1';
+            ctx.font = '10px Arial';
+            ctx.fillText(`Entry: $${entryPrice}`, 5, entryY - 5);
+
+            ctx.fillStyle = '#28a745';
+            ctx.font = '10px Arial';
+            ctx.fillText(`Current: $${currentPrice}`, 5, currentY - 5);
+        }
+
+        // Run test when page loads
+        testChartCoordinates();
+    </script>
+</body>
+</html>

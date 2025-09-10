@@ -1,0 +1,242 @@
+# Advanced Memecoin Pump Sniper Configuration
+# This file configures the comprehensive pump sniping system
+
+# Master Orchestrator Settings
+pump_sniper_orchestrator:
+  enabled: true
+  min_decision_confidence: 0.7      # Minimum confidence required to snipe
+  max_concurrent_evaluations: 5     # Max pools to evaluate simultaneously
+  min_initial_liquidity: 5000       # Minimum USD liquidity to consider
+  
+  # Decision making weights (must sum to ~1.0)
+  decision_weights:
+    pump_probability: 0.25    # Weight for pump detection analysis
+    pool_quality: 0.20        # Weight for pool quality metrics
+    sentiment_score: 0.15     # Weight for social sentiment
+    momentum_score: 0.15      # Weight for momentum indicators
+    risk_score: 0.15          # Weight for risk assessment
+    timing_score: 0.10        # Weight for timing factors
+
+# Pump Detection System
+pump_detection:
+  enabled: true
+  min_pump_probability: 0.7         # Minimum pump probability threshold
+  min_timing_score: 0.6             # Minimum timing score threshold
+  max_risk_score: 0.4               # Maximum acceptable risk score
+  
+  # Signal analysis weights
+  signal_weights:
+    liquidity_analysis: 0.25         # Pool liquidity quality
+    transaction_velocity: 0.20       # Transaction frequency and size
+    social_sentiment: 0.15           # Social media buzz
+    price_momentum: 0.15             # Price movement patterns
+    volume_analysis: 0.15            # Volume patterns and spikes
+    risk_factors: -0.10              # Risk indicators (negative weight)
+
+# Liquidity Pool Analyzer
+pool_analyzer:
+  enabled: true
+  min_liquidity_usd: 10000          # Minimum pool liquidity
+  max_slippage_1pct: 0.05           # Maximum 5% slippage for 1% trade
+  min_health_score: 0.6             # Minimum pool health score
+  
+  # Pool quality scoring weights
+  quality_weights:
+    liquidity_depth: 0.25           # Depth of liquidity
+    trading_activity: 0.20          # Trading volume and frequency
+    price_stability: 0.15           # Price stability metrics
+    market_efficiency: 0.15         # Market making efficiency
+    trader_diversity: 0.15          # Number of unique traders
+    risk_factors: -0.10             # Risk penalties
+
+# Rapid Execution Engine
+rapid_executor:
+  enabled: true
+  default_slippage_pct: 0.03        # Default 3% slippage tolerance
+  max_position_size_pct: 0.1        # Maximum 10% of account per position
+  priority_fee_base: 1000           # Base priority fee in micro lamports
+  worker_count: 3                   # Number of execution workers
+  base_position_size_sol: 0.1       # Base position size in SOL
+  
+  # Default risk management
+  default_stop_loss_pct: 0.15       # 15% stop loss
+  default_take_profit_pct: 0.50     # 50% take profit
+  
+  # DEX preferences (in order)
+  dex_preferences:
+    - "raydium"
+    - "jupiter" 
+    - "orca"
+    - "serum"
+
+# Risk Management System
+sniper_risk_manager:
+  enabled: true
+  default_profile: "moderate"       # conservative, moderate, or aggressive
+  state_file: "crypto_bot/logs/sniper_risk_state.json"
+  
+  # Risk profile definitions
+  risk_profiles:
+    conservative:
+      max_position_size_pct: 0.02   # 2% max per position
+      max_total_exposure_pct: 0.10  # 10% max total exposure
+      max_daily_loss_pct: 0.05     # 5% max daily loss
+      max_positions: 3
+      min_liquidity_usd: 50000
+      stop_loss_pct: 0.15           # 15% stop loss
+      take_profit_pct: 0.50         # 50% take profit
+      
+    moderate:
+      max_position_size_pct: 0.05   # 5% max per position
+      max_total_exposure_pct: 0.20  # 20% max total exposure
+      max_daily_loss_pct: 0.10     # 10% max daily loss
+      max_positions: 5
+      min_liquidity_usd: 25000
+      stop_loss_pct: 0.20           # 20% stop loss
+      take_profit_pct: 0.75         # 75% take profit
+      
+    aggressive:
+      max_position_size_pct: 0.10   # 10% max per position
+      max_total_exposure_pct: 0.50  # 50% max total exposure
+      max_daily_loss_pct: 0.20     # 20% max daily loss
+      max_positions: 10
+      min_liquidity_usd: 10000
+      stop_loss_pct: 0.30           # 30% stop loss
+      take_profit_pct: 1.00         # 100% take profit
+
+# Social Sentiment Analysis
+social_sentiment:
+  enabled: true
+  
+  # API Configuration (set these in environment variables)
+  # TWITTER_BEARER_TOKEN=your_token
+  # LUNARCRUSH_API_KEY=your_key
+  
+  # Platforms to monitor
+  platforms:
+    - "twitter"
+    - "telegram"
+    - "discord" 
+    - "reddit"
+    
+  # Analysis thresholds
+  min_confidence: 0.6               # Minimum sentiment confidence
+  min_volume: 10                    # Minimum social mentions
+  influencer_threshold: 1000        # Follower threshold for influencers
+  
+  # Sentiment weights for decision making
+  sentiment_weights:
+    twitter: 0.4                    # Twitter weight
+    telegram: 0.3                   # Telegram weight
+    discord: 0.2                    # Discord weight
+    reddit: 0.1                     # Reddit weight
+
+# Momentum and Volume Detection
+momentum_detector:
+  enabled: true
+  volume_spike_threshold: 3.0       # 3x baseline volume for spike
+  momentum_lookback: 100            # Periods to look back for momentum
+  min_spike_duration: 30            # Minimum spike duration in seconds
+  
+  # Technical indicator periods
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  bollinger_period: 20
+  stochastic_period: 14
+  
+  # Pattern recognition settings
+  pattern_confidence_threshold: 0.7
+  breakout_volume_multiplier: 2.0
+
+# Pool Watcher Configuration  
+pool_watcher:
+  enabled: true
+  
+  # Helius API settings
+  url: "https://mainnet.helius-rpc.com/v1/?api-key=${HELIUS_KEY}"
+  websocket_url: "wss://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}"
+  interval: 3                       # Poll interval in seconds
+  
+  # Raydium program monitoring
+  raydium_program_id: "EhhTK0i58FmSPrbr30Y8wVDDDeWGPAHDq6vNru6wUATk"
+  
+  # Pool filtering
+  min_initial_liquidity: 1000       # Minimum liquidity to consider
+  protocols:
+    - "raydium"
+    - "orca"
+    - "serum"
+
+# Safety and Filtering
+safety_filters:
+  enabled: true
+  
+  # Token safety checks
+  check_freeze_authority: true
+  check_mint_authority: true
+  blacklisted_authorities: []
+  
+  # Liquidity safety
+  min_liquidity_stability: 0.5
+  max_liquidity_concentration: 0.8
+  
+  # Trading safety  
+  max_slippage_tolerance: 0.10      # 10% max slippage
+  min_trading_volume: 1000          # Minimum trading volume
+  min_unique_traders: 5             # Minimum unique traders
+
+# Performance and Monitoring
+monitoring:
+  enabled: true
+  
+  # Logging configuration
+  log_level: "INFO"
+  log_to_file: true
+  log_file: "crypto_bot/logs/pump_sniper.log"
+  
+  # Performance tracking
+  track_execution_times: true
+  track_slippage: true
+  track_pnl: true
+  
+  # Alerts and notifications
+  telegram_notifications: true
+  discord_notifications: false
+  email_notifications: false
+  
+  # Alert thresholds
+  large_profit_threshold: 0.50      # 50% profit alert
+  large_loss_threshold: 0.20       # 20% loss alert
+  high_risk_threshold: 0.80        # 80% risk score alert
+
+# Integration Settings
+integration:
+  # Main bot integration
+  integrate_with_main_bot: true
+  use_main_bot_balance: true
+  share_risk_limits: true
+  
+  # Strategy router integration
+  register_as_strategy: true
+  strategy_name: "pump_sniper"
+  strategy_weight: 0.3
+  
+  # Execution integration
+  use_rapid_executor: true
+  fallback_to_main_executor: true
+
+# Development and Testing
+development:
+  # Testing mode
+  test_mode: false
+  paper_trading: true               # Start with paper trading
+  
+  # Simulation settings
+  simulate_social_data: false
+  simulate_price_feeds: false
+  
+  # Debug options
+  verbose_logging: false
+  save_analysis_results: true
+  analysis_results_path: "crypto_bot/logs/pump_analysis/"

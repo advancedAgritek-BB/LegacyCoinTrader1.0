@@ -1,0 +1,714 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="trades-page fade-in">
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="card-title">
+            <i class="fas fa-exchange-alt"></i>
+            Trading History
+          </h5>
+        </div>
+        <div class="card-body">
+          <div class="trades-controls mb-3">
+            <div class="row">
+              <div class="col-md-6">
+                <div class="input-group">
+                  <span class="input-group-text">
+                    <i class="fas fa-search"></i>
+                  </span>
+                  <input type="text" class="form-control" id="tradeSearch" placeholder="Search trades...">
+                </div>
+              </div>
+              <div class="col-md-6 text-end">
+                <button class="btn btn-outline-primary" onclick="refreshTrades()">
+                  <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+                <button class="btn btn-outline-secondary" onclick="exportTrades()">
+                  <i class="fas fa-download"></i> Export
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <div class="table-responsive">
+            <table class="table" id="tradesTable">
+              <thead>
+                <tr>
+                  <th>Date/Time</th>
+                  <th>Symbol</th>
+                  <th>Type</th>
+                  <th>Amount</th>
+                  <th>Price</th>
+                  <th>Total</th>
+                  <th>P&L</th>
+                  <th>P&L %</th>
+                  <th>Current Price</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tradesTableBody">
+                <!-- Trades will be loaded here -->
+              </tbody>
+            </table>
+          </div>
+          
+          <div class="trades-summary mt-3">
+            <div class="row g-3">
+              <div class="col-xl-2 col-lg-4 col-md-6">
+                <div class="summary-item">
+                  <span class="summary-label">Total Trades</span>
+                  <span class="summary-value" id="totalTradesCount">0</span>
+                </div>
+              </div>
+              <div class="col-xl-2 col-lg-4 col-md-6">
+                <div class="summary-item">
+                  <span class="summary-label">Total Volume</span>
+                  <span class="summary-value" id="totalVolume">$0.00</span>
+                </div>
+              </div>
+              <div class="col-xl-2 col-lg-4 col-md-6">
+                <div class="summary-item">
+                  <span class="summary-label">Win Rate</span>
+                  <span class="summary-value" id="winRate">0%</span>
+                </div>
+              </div>
+              <div class="col-xl-2 col-lg-4 col-md-6">
+                <div class="summary-item">
+                  <span class="summary-label">Realized P&L</span>
+                  <span class="summary-value" id="realizedPnl">$0.00</span>
+                </div>
+              </div>
+              <div class="col-xl-2 col-lg-4 col-md-6">
+                <div class="summary-item">
+                  <span class="summary-label">Unrealized P&L</span>
+                  <span class="summary-value" id="unrealizedPnl">$0.00</span>
+                </div>
+              </div>
+              <div class="col-xl-2 col-lg-4 col-md-6">
+                <div class="summary-item">
+                  <span class="summary-label">Total P&L</span>
+                  <span class="summary-value" id="totalPnl">$0.00</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Errors Section -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="card-title">
+            <i class="fas fa-exclamation-triangle"></i>
+            Recent Errors
+          </h5>
+        </div>
+        <div class="card-body">
+          <div class="errors-container" id="errorsContainer">
+            <!-- Errors will be loaded here -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let tradesData = [];
+let errorsData = [];
+
+// Initialize the trades page
+document.addEventListener('DOMContentLoaded', function() {
+  console.log('DOM loaded, initializing trades page');
+  loadTrades();
+  loadErrors();
+  
+  // Set up search functionality
+  const searchInput = document.getElementById('tradeSearch');
+  if (searchInput) {
+    searchInput.addEventListener('input', function(e) {
+      filterTrades(e.target.value);
+    });
+  }
+});
+
+// Load trades data
+function loadTrades() {
+  fetch('/trades_data')
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      console.log('Trades data received:', data);
+      tradesData = data || [];
+      console.log('Trades data length:', tradesData.length);
+      displayTrades(tradesData);
+      updateSummary(tradesData);
+    })
+    .catch(error => {
+      console.error('Error loading trades:', error);
+      // Display empty state
+      displayTrades([]);
+      updateSummary([]);
+    });
+}
+
+// Load errors
+function loadErrors() {
+  fetch('/trades_tail')
+    .then(response => response.json())
+    .then(data => {
+      if (data.errors) {
+        displayErrors(data.errors);
+      }
+    })
+    .catch(error => {
+      console.error('Error loading errors:', error);
+    });
+}
+
+// Display trades in the table
+function displayTrades(trades) {
+  console.log('displayTrades called with:', trades);
+  const tbody = document.getElementById('tradesTableBody');
+  if (!tbody) {
+    console.error('tradesTableBody not found');
+    return;
+  }
+  
+  tbody.innerHTML = '';
+  
+  if (trades.length === 0) {
+    console.log('No trades to display');
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" class="text-center text-muted py-4">
+          <i class="fas fa-info-circle fa-2x mb-2"></i>
+          <br>No trades found
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  trades.forEach(trade => {
+    const row = createTradeRow(trade);
+    tbody.appendChild(row);
+  });
+}
+
+// Create a trade table row
+function createTradeRow(trade) {
+  const row = document.createElement('tr');
+  
+  // Format the trade data
+  const date = new Date(trade.timestamp || trade.date || Date.now()).toLocaleString();
+  const symbol = trade.symbol || trade.pair || 'N/A';
+  const type = trade.side || trade.type || 'N/A';
+  const amount = trade.amount || trade.quantity || 0;
+  const price = trade.price || trade.execution_price || 0;
+  const total = amount * price;
+  const status = trade.status || 'completed';
+  
+  // Get PnL values
+  const pnl = trade.pnl || 0;
+  const pnlPercentage = trade.pnl_percentage || 0;
+  const unrealizedPnl = trade.unrealized_pnl || 0;
+  const unrealizedPnlPercentage = trade.unrealized_pnl_percentage || 0;
+  const currentPrice = trade.current_price || 0;
+  
+  // Determine status badge class
+  let statusClass = 'badge-info';
+  if (status === 'completed') statusClass = 'badge-success';
+  else if (status === 'active') statusClass = 'badge-warning';
+  else if (status === 'failed') statusClass = 'badge-danger';
+  else if (status === 'pending') statusClass = 'badge-info';
+  
+  // Determine type badge class
+  let typeClass = 'badge-secondary';
+  if (type.toLowerCase() === 'buy') typeClass = 'badge-success';
+  else if (type.toLowerCase() === 'sell') typeClass = 'badge-danger';
+  
+  // Determine PnL styling
+  let pnlClass = 'text-muted';
+  let pnlValue = pnl;
+  let pnlPercentValue = pnlPercentage;
+  
+  // For completed trades, show realized P&L
+  // For active trades, show unrealized P&L if available
+  if (status === 'active' && unrealizedPnl !== 0) {
+    pnlValue = unrealizedPnl;
+    pnlPercentValue = unrealizedPnlPercentage;
+  }
+  
+
+  
+  if (pnlValue > 0) {
+    pnlClass = 'text-success';
+  } else if (pnlValue < 0) {
+    pnlClass = 'text-danger';
+  }
+  
+  row.innerHTML = `
+    <td>${date}</td>
+    <td><strong>${symbol}</strong></td>
+    <td><span class="badge ${typeClass}">${type.toUpperCase()}</span></td>
+    <td>${formatNumber(amount)}</td>
+    <td>${formatCurrency(price)}</td>
+    <td>${formatCurrency(total)}</td>
+    <td class="${pnlClass}">${formatCurrency(pnlValue)}</td>
+    <td class="${pnlClass}">${pnlPercentValue.toFixed(2)}%</td>
+    <td>${formatCurrency(currentPrice)}</td>
+    <td><span class="badge ${statusClass}">${status}</span></td>
+    <td>
+      <button class="btn btn-sm btn-outline-primary" onclick="viewTradeDetails('${trade.id || trade.timestamp}')">
+        <i class="fas fa-eye"></i>
+      </button>
+    </td>
+  `;
+  
+  return row;
+}
+
+// Display errors
+function displayErrors(errors) {
+  const container = document.getElementById('errorsContainer');
+  if (!container) return;
+  
+  if (!errors || errors.trim() === '') {
+    container.innerHTML = `
+      <div class="text-center text-muted py-3">
+        <i class="fas fa-check-circle fa-2x mb-2"></i>
+        <br>No errors found
+      </div>
+    `;
+    return;
+  }
+  
+  const errorLines = errors.split('\n').filter(line => line.trim());
+  let html = '';
+  
+  errorLines.forEach(line => {
+    if (line.trim()) {
+      html += `
+        <div class="error-item">
+          <i class="fas fa-exclamation-circle text-danger"></i>
+          <span class="error-text">${line}</span>
+        </div>
+      `;
+    }
+  });
+  
+  container.innerHTML = html;
+}
+
+// Update summary statistics
+function updateSummary(trades) {
+  const totalTrades = trades.length;
+  const totalVolume = trades.reduce((sum, trade) => {
+    const amount = trade.amount || trade.quantity || 0;
+    const price = trade.price || trade.execution_price || 0;
+    return sum + (amount * price);
+  }, 0);
+  
+  // Calculate realized and unrealized P&L
+  let realizedPnl = 0;
+  let unrealizedPnl = 0;
+  let winningTrades = 0;
+  
+  trades.forEach(trade => {
+    const tradePnl = trade.pnl || 0;
+    const unrealizedTradePnl = trade.unrealized_pnl || 0;
+    
+    // Count winning trades (realized P&L > 0)
+    if (tradePnl > 0) {
+      winningTrades++;
+    }
+    
+    realizedPnl += tradePnl;
+    unrealizedPnl += unrealizedTradePnl;
+  });
+  
+  const winRate = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0;
+  const totalPnl = realizedPnl + unrealizedPnl;
+  
+
+  
+  // Update the summary display
+  document.getElementById('totalTradesCount').textContent = totalTrades;
+  document.getElementById('totalVolume').textContent = formatCurrency(totalVolume);
+  document.getElementById('winRate').textContent = `${winRate.toFixed(1)}%`;
+  document.getElementById('realizedPnl').textContent = formatCurrency(realizedPnl);
+  document.getElementById('unrealizedPnl').textContent = formatCurrency(unrealizedPnl);
+  document.getElementById('totalPnl').textContent = formatCurrency(totalPnl);
+  
+  // Color code the P&L values
+  const realizedPnlElement = document.getElementById('realizedPnl');
+  const unrealizedPnlElement = document.getElementById('unrealizedPnl');
+  const totalPnlElement = document.getElementById('totalPnl');
+  
+  // Color realized P&L
+  if (realizedPnl > 0) {
+    realizedPnlElement.className = 'summary-value text-success';
+  } else if (realizedPnl < 0) {
+    realizedPnlElement.className = 'summary-value text-danger';
+  } else {
+    realizedPnlElement.className = 'summary-value text-muted';
+  }
+  
+  // Color unrealized P&L
+  if (unrealizedPnl > 0) {
+    unrealizedPnlElement.className = 'summary-value text-success';
+  } else if (unrealizedPnl < 0) {
+    unrealizedPnlElement.className = 'summary-value text-danger';
+  } else {
+    unrealizedPnlElement.className = 'summary-value text-muted';
+  }
+  
+  // Color total P&L
+  if (totalPnl > 0) {
+    totalPnlElement.className = 'summary-value text-success';
+  } else if (totalPnl < 0) {
+    totalPnlElement.className = 'summary-value text-danger';
+  } else {
+    totalPnlElement.className = 'summary-value text-muted';
+  }
+}
+
+// Filter trades based on search term
+function filterTrades(searchTerm) {
+  if (!searchTerm) {
+    displayTrades(tradesData);
+    return;
+  }
+  
+  const filtered = tradesData.filter(trade => {
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      (trade.symbol && trade.symbol.toLowerCase().includes(searchLower)) ||
+      (trade.pair && trade.pair.toLowerCase().includes(searchLower)) ||
+      (trade.side && trade.side.toLowerCase().includes(searchLower)) ||
+      (trade.type && trade.type.toLowerCase().includes(searchLower)) ||
+      (trade.status && trade.status.toLowerCase().includes(searchLower))
+    );
+  });
+  
+  displayTrades(filtered);
+}
+
+// Refresh trades data
+function refreshTrades() {
+  loadTrades();
+  loadErrors();
+  window.LegacyCoinTrader.showToast('Trades refreshed', 'success');
+}
+
+// Export trades to CSV
+function exportTrades() {
+  if (tradesData.length === 0) {
+    window.LegacyCoinTrader.showToast('No trades to export', 'warning');
+    return;
+  }
+  
+  // Create CSV content
+  const headers = ['Date/Time', 'Symbol', 'Type', 'Amount', 'Price', 'Total', 'Status', 'P&L'];
+  const csvContent = [
+    headers.join(','),
+    ...tradesData.map(trade => [
+      new Date(trade.timestamp || trade.date || Date.now()).toISOString(),
+      trade.symbol || trade.pair || '',
+      trade.side || trade.type || '',
+      trade.amount || trade.quantity || '',
+      trade.price || trade.execution_price || '',
+      (trade.amount || trade.quantity || 0) * (trade.price || trade.execution_price || 0),
+      trade.status || '',
+      trade.pnl || ''
+    ].join(','))
+  ].join('\n');
+  
+  // Download the CSV file
+  const blob = new Blob([csvContent], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `trades_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+  window.URL.revokeObjectURL(url);
+  
+  window.LegacyCoinTrader.showToast('Trades exported successfully', 'success');
+}
+
+// View trade details (placeholder function)
+function viewTradeDetails(tradeId) {
+  // This would typically open a modal with detailed trade information
+  window.LegacyCoinTrader.showToast(`Viewing details for trade: ${tradeId}`, 'info');
+}
+
+// Utility functions for formatting
+function formatNumber(num) {
+  if (typeof num !== 'number' || isNaN(num)) return '0';
+  return num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 8 });
+}
+
+function formatCurrency(num) {
+  if (typeof num !== 'number' || isNaN(num)) return '$0.00';
+  return '$' + num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+  // Auto-refresh every 30 seconds (disabled to prevent P&L fluctuation)
+  // setInterval(loadTrades, 30000);
+  
+  // Refresh prices every 10 seconds for real-time updates (disabled to prevent P&L fluctuation)
+  // setInterval(refreshPrices, 10000);
+
+// Function to refresh current prices
+function refreshPrices() {
+  // Show loading indicator
+  const currentPriceCells = document.querySelectorAll('#tradesTableBody td:nth-child(9)');
+  currentPriceCells.forEach(cell => {
+    if (cell.textContent.trim() !== '') {
+      cell.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    }
+  });
+  
+  fetch('/api/current-prices')
+    .then(response => response.json())
+    .then(prices => {
+      // Update current prices in the table
+      updateCurrentPrices(prices);
+    })
+    .catch(error => {
+      console.error('Error refreshing prices:', error);
+      // Restore original content on error
+      currentPriceCells.forEach(cell => {
+        if (cell.innerHTML.includes('fa-spinner')) {
+          cell.innerHTML = '$0.00';
+        }
+      });
+    });
+}
+
+// Function to update current prices in the table
+function updateCurrentPrices(prices) {
+  const tbody = document.getElementById('tradesTableBody');
+  if (!tbody) return;
+  
+  const rows = tbody.getElementsByTagName('tr');
+  for (let row of rows) {
+    const cells = row.getElementsByTagName('td');
+    if (cells.length >= 9) {
+      const symbolCell = cells[1];
+      const currentPriceCell = cells[8];
+      
+      if (symbolCell && currentPriceCell) {
+        const symbol = symbolCell.textContent.trim();
+        if (prices[symbol]) {
+          const oldPrice = currentPriceCell.textContent;
+          const newPrice = formatCurrency(prices[symbol]);
+          
+          // Only update if price actually changed
+          if (oldPrice !== newPrice) {
+            currentPriceCell.textContent = newPrice;
+            
+            // Add highlight animation
+            currentPriceCell.classList.add('price-updated');
+            setTimeout(() => {
+              currentPriceCell.classList.remove('price-updated');
+            }, 1000);
+            
+            // Update PnL if we have the entry price
+            const priceCell = cells[4];
+            const pnlCell = cells[6];
+            const pnlPercentCell = cells[7];
+            
+            if (priceCell && pnlCell && pnlPercentCell) {
+              const entryPrice = parseFloat(priceCell.textContent.replace('$', '').replace(',', ''));
+              const currentPrice = prices[symbol];
+              const amount = parseFloat(cells[3].textContent.replace(',', ''));
+              
+              if (entryPrice > 0 && currentPrice > 0 && amount > 0) {
+                // Calculate unrealized PnL
+                const side = cells[1].textContent.trim().toLowerCase(); // Get side from the side column
+                let pnl;
+                if (side === 'sell' || side === 'short') {
+                  // Short position: profit when price goes down
+                  pnl = (entryPrice - currentPrice) * amount;
+                } else {
+                  // Long position: profit when price goes up
+                  pnl = (currentPrice - entryPrice) * amount;
+                }
+                const pnlPercent = (pnl / (entryPrice * amount)) * 100;
+                
+                // Update PnL cells
+                pnlCell.textContent = formatCurrency(pnl);
+                pnlPercentCell.textContent = pnlPercent.toFixed(2) + '%';
+                
+                // Update styling
+                if (pnl > 0) {
+                  pnlCell.className = 'text-success';
+                  pnlPercentCell.className = 'text-success';
+                } else if (pnl < 0) {
+                  pnlCell.className = 'text-danger';
+                  pnlPercentCell.className = 'text-danger';
+                } else {
+                  pnlCell.className = 'text-muted';
+                  pnlPercentCell.className = 'text-muted';
+                }
+                
+                // Add highlight animation to PnL cells
+                pnlCell.classList.add('price-updated');
+                pnlPercentCell.classList.add('price-updated');
+                setTimeout(() => {
+                  pnlCell.classList.remove('price-updated');
+                  pnlPercentCell.classList.remove('price-updated');
+                }, 1000);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+</script>
+
+<style>
+.trades-controls {
+  background: var(--bg-secondary);
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: var(--bg-secondary);
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-color);
+  height: 80px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.summary-item:hover {
+  background: var(--bg-tertiary);
+  transform: translateY(-2px);
+}
+
+.summary-label {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+  font-weight: 500;
+}
+
+.summary-value {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  word-break: break-all;
+}
+
+.summary-value.text-success {
+  color: var(--success-color) !important;
+}
+
+.summary-value.text-danger {
+  color: var(--danger-color) !important;
+}
+
+.summary-value.text-muted {
+  color: var(--text-muted) !important;
+}
+
+/* Responsive adjustments for summary items */
+@media (max-width: 768px) {
+  .summary-item {
+    height: auto;
+    min-height: 70px;
+    padding: 0.75rem;
+  }
+
+  .summary-label {
+    font-size: 0.7rem;
+  }
+
+  .summary-value {
+    font-size: 1rem;
+  }
+}
+
+.error-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg-secondary);
+  border-radius: 0.5rem;
+  margin-bottom: 0.5rem;
+  border-left: 3px solid var(--danger-color);
+}
+
+.error-text {
+  color: var(--text-secondary);
+  font-family: 'Courier New', monospace;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.text-success { color: var(--success-color) !important; }
+.text-danger { color: var(--danger-color) !important; }
+.text-muted { color: var(--text-muted) !important; }
+
+/* PnL styling */
+.pnl-positive {
+  color: var(--success-color) !important;
+  font-weight: 600;
+}
+
+.pnl-negative {
+  color: var(--danger-color) !important;
+  font-weight: 600;
+}
+
+.pnl-neutral {
+  color: var(--text-muted) !important;
+}
+
+/* Current price highlighting */
+.current-price {
+  background: rgba(0, 123, 255, 0.1);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-weight: 500;
+}
+
+/* Real-time update animation */
+@keyframes priceUpdate {
+  0% { background-color: rgba(255, 193, 7, 0.3); }
+  100% { background-color: transparent; }
+}
+
+.price-updated {
+  animation: priceUpdate 1s ease-out;
+}
+</style>
+{% endblock %}

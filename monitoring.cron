@@ -1,0 +1,17 @@
+# Trading Bot Monitoring Cron Jobs
+# Install with: crontab monitoring.cron
+
+# Health check every 5 minutes
+*/5 * * * * cd /Users/brandonburnette/Downloads/LegacyCoinTrader1.0 && /usr/local/bin/python3 auto_health_check.py --quiet >> crypto_bot/logs/health_check.log 2>&1
+
+# Enhanced monitoring status check every minute
+* * * * * cd /Users/brandonburnette/Downloads/LegacyCoinTrader1.0 && /usr/local/bin/python3 enhanced_monitoring.py --status >> crypto_bot/logs/monitoring_status.log 2>&1
+
+# Daily monitoring report at 6 AM
+0 6 * * * cd /Users/brandonburnette/Downloads/LegacyCoinTrader1.0 && /usr/local/bin/python3 auto_health_check.py --report-only > crypto_bot/logs/daily_health_report_$(date +\%Y\%m\%d).json
+
+# Weekly cleanup on Sundays at 2 AM
+0 2 * * 0 cd /Users/brandonburnette/Downloads/LegacyCoinTrader1.0 && find crypto_bot/logs -name "*.log" -mtime +7 -delete && find crypto_bot/logs -name "*_report_*.json" -mtime +30 -delete
+
+# Restart monitoring service if it's not running (every 10 minutes)
+*/10 * * * * cd /Users/brandonburnette/Downloads/LegacyCoinTrader1.0 && pgrep -f "enhanced_monitoring.py" > /dev/null || (echo "$(date): Restarting monitoring service" >> crypto_bot/logs/service_monitor.log && /usr/local/bin/python3 enhanced_monitoring.py --daemon &)

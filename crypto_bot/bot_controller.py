@@ -1,0 +1,227 @@
+from __future__ import annotations
+
+"""Async wrapper controlling the trading bot."""
+
+import asyncio
+import sys
+from pathlib import Path
+from typing import Dict, List, Union, Optional
+
+from crypto_bot.utils.logger import LOG_DIR, setup_logger
+
+
+import yaml
+from crypto_bot.utils.symbol_utils import fix_symbol
+
+from .portfolio_rotator import PortfolioRotator
+from .utils.open_trades import get_open_trades
+from .execution.cex_executor import get_exchange, execute_trade_async
+
+
+class TradingBotController:
+    """High level controller exposing simple async methods."""
+
+    def __init__(
+        self,
+        config_path: Union[str, Path] = "crypto_bot/config.yaml",
+        trades_file: Union[str, Path] = LOG_DIR / "trades.csv",
+        log_file: Union[str, Path] = LOG_DIR / "bot.log",
+    ) -> None:
+        self.config_path = Path(config_path)
+        self.trades_file = Path(trades_file)
+        self.log_file = Path(log_file)
+        self.config = self._load_config()
+        self.rotator = PortfolioRotator()
+        self.exchange, self.ws_client = get_exchange(self.config)
+        self.proc: Optional[asyncio.subprocess.Process] = None
+        self.enabled: Dict[str, bool] = {
+            "trend_bot": True,
+            "grid_bot": True,
+            "sniper_bot": True,
+            "dex_scalper": True,
+            "dca_bot": True,
+            "mean_bot": True,
+            "breakout_bot": True,
+            "micro_scalp_bot": True,
+            "bounce_scalper": True,
+        }
+        self.state = {
+            "running": False,
+            "mode": self.config.get("execution_mode", "dry_run"),
+            "liquidate": False,
+            "liquidate_all": False,
+        }
+        self.logger = setup_logger(__name__, LOG_DIR / "bot_controller.log")
+
+
+    def _load_config(self) -> dict:
+        if self.config_path.exists():
+            with open(self.config_path) as f:
+                data = yaml.safe_load(f) or {}
+        else:
+            data = {}
+
+        strat_dir = self.config_path.parent.parent / "config" / "strategies"
+        trend_file = strat_dir / "trend_bot.yaml"
+        if trend_file.exists():
+            with open(trend_file) as sf:
+                overrides = yaml.safe_load(sf) or {}
+            trend_cfg = data.get("trend", {})
+            if isinstance(trend_cfg, dict):
+                trend_cfg.update(overrides)
+            else:
+                trend_cfg = overrides
+            data["trend"] = trend_cfg
+
+        if "symbol" in data:
+            data["symbol"] = fix_symbol(data["symbol"])
+        if "symbols" in data:
+            data["symbols"] = [fix_symbol(s) for s in data.get("symbols", [])]
+        return data
+
+    async def start_trading(self) -> Dict[str, object]:
+        """Launch ``crypto_bot.main`` as a subprocess if not already running."""
+        if self.proc and self.proc.returncode is None:
+            return {"running": True, "status": "already_running"}
+        self.proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "crypto_bot.main",
+        )
+        self.state["running"] = True
+        return {"running": True, "status": "started"}
+
+    async def stop_trading(self) -> Dict[str, object]:
+        """Terminate the subprocess if running."""
+        if self.proc and self.proc.returncode is None:
+            self.proc.terminate()
+            await self.proc.wait()
+            self.proc = None
+        self.state["running"] = False
+        return {"running": False, "status": "stopped"}
+
+    async def close(self) -> None:
+        """Close exchange and WebSocket client connections."""
+        if self.ws_client and hasattr(self.ws_client, 'close_async'):
+            try:
+                await self.ws_client.close_async()
+                self.logger.info("Bot controller WebSocket client closed successfully")
+            except Exception as exc:
+                self.logger.error("Error closing bot controller WebSocket client: %s", exc)
+        elif self.ws_client and hasattr(self.ws_client, 'close'):
+            try:
+                self.ws_client.close()
+                self.logger.info("Bot controller WebSocket client closed successfully")
+            except Exception as exc:
+                self.logger.error("Error closing bot controller WebSocket client: %s", exc)
+        
+        if self.exchange and hasattr(self.exchange, 'close'):
+            try:
+                if asyncio.iscoroutinefunction(getattr(self.exchange, 'close')):
+                    await self.exchange.close()
+                else:
+                    await asyncio.to_thread(self.exchange.close)
+                self.logger.info("Bot controller exchange closed successfully")
+            except Exception as exc:
+                self.logger.error("Error closing bot controller exchange: %s", exc)
+            finally:
+                self.exchange = None
+                self.ws_client = None
+
+    async def get_status(self) -> Dict[str, object]:
+        """Return current running state and enabled strategies."""
+        running = self.proc is not None and self.proc.returncode is None
+        self.state["running"] = running
+        return {
+            "running": running,
+            "mode": self.state.get("mode"),
+            "enabled_strategies": self.enabled.copy(),
+        }
+
+    async def list_strategies(self) -> List[str]:
+        """Return names of available strategies."""
+        return list(self.enabled.keys())
+
+    async def toggle_strategy(self, name: str) -> Dict[str, object]:
+        """Enable or disable ``name`` and return the new state."""
+        if name not in self.enabled:
+            raise ValueError(f"Unknown strategy: {name}")
+        self.enabled[name] = not self.enabled[name]
+        return {"strategy": name, "enabled": self.enabled[name]}
+
+    async def list_positions(self) -> List[Dict]:
+        """Return currently open positions from TradeManager (source of truth)."""
+        try:
+            from crypto_bot.utils.trade_manager import get_trade_manager
+            trade_manager = get_trade_manager()
+
+            positions = trade_manager.get_all_positions()
+            result = []
+
+            for pos in positions:
+                if pos.is_open:
+                    # Get current price from TradeManager's cache
+                    current_price = float(trade_manager.price_cache.get(pos.symbol, pos.average_price))
+
+                    # Calculate unrealized P&L
+                    from decimal import Decimal
+                    pnl, pnl_pct = pos.calculate_unrealized_pnl(Decimal(str(current_price)))
+
+                    result.append({
+                        "symbol": pos.symbol,
+                        "side": pos.side,
+                        "amount": float(pos.total_amount),
+                        "price": float(pos.average_price),
+                        "current_price": current_price,
+                        "pnl": float(pnl),
+                        "pnl_percentage": float(pnl_pct),
+                        "entry_time": pos.entry_time.isoformat(),
+                        "source": "trade_manager"
+                    })
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"Failed to get positions from TradeManager: {e}")
+            # Fallback to CSV-based method (deprecated)
+            try:
+                return get_open_trades(self.trades_file)
+            except Exception as csv_e:
+                self.logger.error(f"Failed to get positions from CSV fallback: {csv_e}")
+                return []
+
+    async def close_position(self, symbol: str, amount: float) -> Dict:
+        """Submit a market order closing ``amount`` of ``symbol``."""
+        return await execute_trade_async(
+            self.exchange,
+            self.ws_client,
+            symbol,
+            "sell",
+            amount,
+            dry_run=self.config.get("execution_mode") == "dry_run",
+            use_websocket=self.config.get("use_websocket", False),
+            config=self.config,
+        )
+
+    async def close_all_positions(self) -> Dict[str, str]:
+        """Signal the trading bot to liquidate all open positions."""
+        self.state["liquidate_all"] = True
+        return {"status": "liquidation_scheduled"}
+
+    async def fetch_logs(self, lines: int = 20) -> List[str]:
+        """Return the last ``lines`` from the bot log."""
+        if not self.log_file.exists():
+            return []
+        data = self.log_file.read_text().splitlines()
+        return data[-lines:]
+
+    async def reload_config(self) -> Dict[str, object]:
+        """Reload configuration from ``self.config_path``."""
+        try:
+            self.config = self._load_config()
+            self.exchange, self.ws_client = get_exchange(self.config)
+            self.state["mode"] = self.config.get("execution_mode", "dry_run")
+            return {"status": "reloaded", "mode": self.state["mode"]}
+        except Exception as exc:  # pragma: no cover - unexpected
+            return {"status": "error", "error": str(exc)}
+

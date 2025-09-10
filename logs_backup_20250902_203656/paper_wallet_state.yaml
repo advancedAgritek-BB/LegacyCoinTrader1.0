@@ -1,0 +1,41 @@
+balance: 5405.968282633234
+initial_balance: 10000.0
+positions:
+  DOT/USD:
+    amount: 268.16840976
+    entry_price: 3.7384
+    entry_time: '2025-09-01T19:44:09.871341'
+    reserved: 0.0
+    side: short
+    symbol: DOT/USD
+  MICHI/USD:
+    amount: 39364.32667245
+    entry_price: 0.02235
+    entry_time: '2025-09-01T07:11:40.746983'
+    reserved: 0.0
+    side: long
+    symbol: MICHI/USD
+  TREMP/USD:
+    amount: 26877.31839341
+    entry_price: 0.01866
+    entry_time: '2025-09-01T07:11:39.600808'
+    reserved: 0.0
+    side: long
+    symbol: TREMP/USD
+  UNI/USD:
+    amount: 138.21524663
+    entry_price: 9.408
+    entry_time: '2025-09-01T02:55:15.170671'
+    reserved: 0.0
+    side: long
+    symbol: UNI/USD
+  XRP/EUR:
+    amount: 390.23590715
+    entry_price: 2.33156
+    entry_time: '2025-09-01T07:11:40.755009'
+    reserved: 0.0
+    side: long
+    symbol: XRP/EUR
+realized_pnl: 0.0
+total_trades: 21
+winning_trades: 0

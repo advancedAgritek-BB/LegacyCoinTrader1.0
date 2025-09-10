@@ -1,0 +1,156 @@
+# Production Configuration for LegacyCoinTrader
+# This file contains production-ready settings and optimizations
+
+production:
+  mode: true
+  debug: false
+  log_level: INFO
+
+# Environment Variables Template (copy to .env file)
+environment:
+  KRAKEN_API_KEY: "your_kraken_api_key_here"
+  KRAKEN_API_SECRET: "your_kraken_api_secret_here"
+  API_KEY: "your_kraken_api_key_here"  # Compatibility mapping
+  API_SECRET: "your_kraken_api_secret_here"  # Compatibility mapping
+  EXCHANGE: "kraken"
+  FLASK_ENV: "production"
+  PRODUCTION: "true"
+
+# Performance Optimizations
+performance:
+  memory:
+    max_memory_usage_pct: 80.0
+    memory_pressure_threshold: 85.0
+    adaptive_cache_sizing: true
+    gc_threshold: 0.7
+    cache_size_limit_mb: 500
+
+  concurrency:
+    adaptive_concurrency: true
+    min_concurrent_requests: 1
+    max_concurrent_requests: 20
+    response_time_threshold: 1.0
+    success_rate_threshold: 0.8
+
+  rate_limiting:
+    adaptive_rate_limiting: true
+    base_request_delay: 1.0
+    max_request_delay: 10.0
+    error_backoff_multiplier: 2.0
+    max_requests_per_minute: 30
+
+  caching:
+    adaptive_cache_ttl: true
+    min_cache_ttl: 60
+    max_cache_ttl: 21600  # 6 hours
+    cache_hit_rate_threshold: 0.7
+    cache_size_multiplier: 2.0
+
+  # OHLCV Fetcher Configuration
+  ohlcv_fetcher:
+    use_enhanced_ohlcv_fetcher: true  # Use enhanced fetcher for better performance and reliability
+    max_concurrent_ohlcv: 3  # Max concurrent CEX requests
+    max_concurrent_dex_ohlcv: 10  # Max concurrent DEX requests
+
+# Symbol Validation Enhancements
+symbol_validation:
+  production_mode: true
+  filter_invalid_symbols: true
+  min_liquidity_score: 0.6
+  min_volume_usd: 10000
+  max_price_deviation: 0.1
+  strict_mode: true
+  validate_exchange_support: true
+
+# Risk Management
+risk:
+  enable_partial_exits: true
+  enable_trailing_stop: true
+  max_drawdown: 0.25
+  max_positions: 10
+  max_risk_per_trade: 0.05
+  max_total_risk: 0.2
+  position_size_pct: 0.15
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.04
+  min_position_size_usd: 10
+
+# Circuit Breaker Configuration
+circuit_breaker:
+  enabled: true
+  failure_threshold: 5
+  recovery_timeout: 180
+  half_open_max_calls: 2
+  monitored_endpoints:
+    - fetch_ticker
+    - fetch_ohlcv
+    - create_order
+    - fetch_balance
+
+# Monitoring and Alerting
+monitoring:
+  enable_performance_monitoring: true
+  metrics_export_interval: 60
+  alert_enabled: true
+  memory_threshold_alert: 85
+  error_rate_threshold: 5
+  response_time_threshold: 2.0
+  cache_hit_rate_threshold: 70
+
+# Error Handling
+error_handling:
+  max_retries: 3
+  retry_delay: 2.0
+  exponential_backoff: true
+  max_backoff: 60.0
+  continue_on_error: true
+  fallback_data_sources: true
+  graceful_degradation: true
+  log_errors: true
+
+# Database Integration (Optional)
+database:
+  enabled: false
+  host: "localhost"
+  port: 5432
+  database: "crypto_trader_prod"
+  user: "postgres"
+  password: ""
+  min_connections: 2
+  max_connections: 10
+  command_timeout: 30
+
+# Web Server Configuration
+web_server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  worker_class: "gevent"
+  timeout: 120
+  max_requests_per_worker: 1000
+
+# Logging Configuration
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file_rotation: true
+  max_file_size: 10485760  # 10MB
+  backup_count: 5
+
+# Security Settings
+security:
+  api_key_required: true
+  rate_limiting_enabled: true
+  max_requests_per_minute: 60
+  enable_cors: false
+  allowed_origins: ["localhost", "127.0.0.1"]
+
+# Strategy Configuration
+strategy:
+  evaluation_mode: mapped
+  min_confidence_score: 0.001
+  max_concurrent_signals: 5
+  strategy_router_enabled: true
+  regime_detection_enabled: true
+  performance_tracking_enabled: true
+  symbol_batch_size: 50

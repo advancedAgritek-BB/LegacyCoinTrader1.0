@@ -1,0 +1,53 @@
+# LegacyCoinTrader 2.0 - Local Development Environment
+# Copy this to .env.local and update with your settings
+
+# Application Settings
+ENVIRONMENT=development
+DEBUG=true
+APP_NAME=LegacyCoinTrader
+VERSION=2.0.0
+
+# Database (SQLite for local testing)
+DATABASE_URL=sqlite+aiosqlite:///./legacy_trader_dev.db
+
+# Redis (Local instance - install Redis first)
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_DB=0
+REDIS_PASSWORD=
+
+# Exchange Settings (Test credentials - DO NOT USE IN PRODUCTION)
+EXCHANGE=kraken
+API_KEY=test_api_key_12345
+API_SECRET=test_api_secret_67890
+API_PASSPHRASE=
+
+# Security Settings
+JWT_SECRET_KEY=your_local_jwt_secret_key_here_change_in_production
+JWT_ALGORITHM=HS256
+JWT_EXPIRATION_HOURS=24
+
+# Trading Settings
+EXECUTION_MODE=dry_run
+MAX_OPEN_POSITIONS=5
+MAX_RISK_PER_TRADE=0.05
+POSITION_SIZE_PCT=0.1
+
+# Telegram (Disabled for local testing)
+TELEGRAM_ENABLED=false
+TELEGRAM_TOKEN=
+TELEGRAM_CHAT_ID=
+
+# Solana (Disabled for local testing)
+HELIUS_KEY=
+SOLANA_PRIVATE_KEY=
+SOLANA_RPC_URL=https://api.mainnet.solana.com
+
+# Logging
+LOG_LEVEL=INFO
+LOG_DIR=./logs
+
+# Development Settings
+RELOAD=true
+HOST=0.0.0.0
+PORT=8000

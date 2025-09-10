@@ -1,0 +1,38 @@
+# macOS-Compatible Dependencies for LegacyCoinTrader
+# Optimized for macOS performance without GPU acceleration
+
+# Core data processing (already in main requirements.txt)
+# pandas
+# numpy
+# scikit-learn
+# lightgbm
+
+# Performance optimization for macOS
+# Note: mkl and openblas are not available on macOS via pip
+# Using numpy and scipy which include optimized BLAS implementations
+# accelerate>=0.20.0  # Apple's performance framework (removed - not available via pip)
+
+# Parallel processing
+joblib>=1.3.0  # Parallel processing
+multiprocessing-logging>=0.3.0  # Better multiprocessing logging
+
+# Data processing acceleration
+# pandas>=2.0.0  # Latest pandas for better performance
+# numpy>=1.24.0  # Latest numpy for better performance
+
+# Optional: Machine learning acceleration (CPU-based)
+scikit-learn>=1.3.0  # ML algorithms with optimized CPU performance
+lightgbm>=4.0.0  # Gradient boosting with CPU optimization
+
+# Monitoring and profiling
+psutil>=5.9.0  # System monitoring
+memory-profiler>=0.61.0  # Memory usage profiling
+
+# Development and testing
+pytest>=7.0.0  # Testing framework
+pytest-asyncio>=0.21.0  # Async testing support
+
+# macOS-specific optimizations (using conda-forge versions if needed)
+# Note: pyobjc packages are not available via pip on all macOS versions
+# These are optional and can be installed via conda if needed:
+# conda install -c conda-forge pyobjc-framework-accelerate pyobjc-framework-metal

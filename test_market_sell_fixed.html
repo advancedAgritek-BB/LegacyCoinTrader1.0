@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Sell Test - Fixed</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background: #0f0f23; color: #f8fafc; padding: 20px; }
+        .card { background: #1e293b; border: 1px solid #334155; }
+        .btn-danger { background: #ef4444; border: #ef4444; }
+        .btn-danger:hover { background: #dc2626; border: #dc2626; }
+        .position-item { background: #1e293b; border: 1px solid #334155; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem; }
+        .position-actions .btn { min-width: 120px; transition: all 0.2s ease; }
+        .position-actions .btn:disabled { opacity: 0.7; cursor: not-allowed; }
+        .toast { position: fixed; top: 20px; right: 20px; background: #1e293b; border: 1px solid #334155; border-radius: 0.5rem; padding: 1rem 1.5rem; color: #f8fafc; z-index: 9999; min-width: 300px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Market Sell Button Test - Fixed Version</h1>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card open-positions-card">
+                    <div class="card-header">
+                        <h5 class="card-title">Open Positions</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="position-item">
+                            <div class="position-header">
+                                <span class="position-symbol">BTC/USD</span>
+                                <span class="badge badge-success">BUY</span>
+                            </div>
+                            <div class="position-details">
+                                <div class="position-row">
+                                    <span class="label">Amount:</span>
+                                    <span class="value">0.001</span>
+                                </div>
+                                <div class="position-row">
+                                    <span class="label">Entry Price:</span>
+                                    <span class="value">$45,000.00</span>
+                                </div>
+                                <div class="position-row">
+                                    <span class="label">Current Price:</span>
+                                    <span class="value">$46,000.00</span>
+                                </div>
+                                <div class="position-row">
+                                    <span class="label">PnL:</span>
+                                    <span class="value text-success">$1.00</span>
+                                </div>
+                            </div>
+                            <div class="position-actions">
+                                <button class="btn btn-danger btn-sm" 
+                                        onclick="marketSellPosition('BTC/USD', 0.001, event)"
+                                        title="Market sell this position immediately">
+                                    <i class="fas fa-sell"></i> Market Sell
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title">Test Controls</h5>
+                    </div>
+                    <div class="card-body">
+                        <button class="btn btn-primary mb-2" onclick="testMultipleCalls()">Test Multiple Calls</button>
+                        <button class="btn btn-warning mb-2" onclick="testBeforeReady()">Test Before Ready</button>
+                        <button class="btn btn-info mb-2" onclick="checkLegacyTrader()">Check LegacyTrader</button>
+                        <div id="testResults" class="mt-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Simulate the LegacyCoinTrader object
+        window.LegacyCoinTrader = {
+            showToast: function(message, type = 'info') {
+                const toast = document.createElement('div');
+                toast.className = `toast toast-${type}`;
+                toast.innerHTML = `
+                    <div class="toast-content">
+                        <i class="fas fa-${getToastIcon(type)}"></i>
+                        <span>${message}</span>
+                    </div>
+                `;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 3000);
+            }
+        };
+
+        function getToastIcon(type) {
+            const icons = { success: 'check-circle', error: 'exclamation-circle', warning: 'exclamation-triangle', info: 'info-circle' };
+            return icons[type] || 'info-circle';
+        }
+
+        // Prevent multiple simultaneous calls
+        let isProcessingMarketSell = false;
+        let isPageReady = false;
+
+        // Mark page as ready when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            isPageReady = true;
+            console.log('Page ready for market sell operations');
+        });
+
+        function marketSellPosition(symbol, amount, event) {
+            // Check if page is ready
+            if (!isPageReady) {
+                console.log('Page not ready yet, ignoring market sell call');
+                return;
+            }
+            
+            // Prevent multiple simultaneous calls
+            if (isProcessingMarketSell) {
+                console.log('Market sell already in progress, ignoring call');
+                return;
+            }
+            
+            // Check if button is already in loading state
+            const button = event ? event.target.closest('button') : null;
+            if (button && button.disabled) {
+                console.log('Button already disabled, ignoring call');
+                return;
+            }
+            
+            console.log('=== MARKET SELL DEBUG START ===');
+            console.log('marketSellPosition called with:', { symbol, amount, event });
+            
+            // Check if LegacyCoinTrader is available
+            console.log('Checking LegacyCoinTrader availability...');
+            console.log('window.LegacyTrader:', window.LegacyCoinTrader);
+            console.log('window.LegacyCoinTrader.showToast:', window.LegacyCoinTrader?.showToast);
+            
+            // Wait for LegacyCoinTrader to be available
+            if (!window.LegacyCoinTrader || !window.LegacyCoinTrader.showToast) {
+                console.error('LegacyCoinTrader object not available, waiting...');
+                // Wait a bit and try again
+                setTimeout(() => {
+                    if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+                        marketSellPosition(symbol, amount, event);
+                    } else {
+                        console.error('LegacyCoinTrader still not available after waiting');
+                        // Use a fallback notification method
+                        if (typeof showToast === 'function') {
+                            showToast('Error: LegacyCoinTrader not loaded. Please refresh the page.', 'error');
+                        } else {
+                            console.error('No toast function available');
+                        }
+                    }
+                }, 100);
+                return;
+            }
+            
+            // Set processing flag
+            isProcessingMarketSell = true;
+            
+            console.log('LegacyCoinTrader is available, proceeding...');
+            
+            if (!confirm(`Are you sure you want to market sell ${amount} ${symbol}? This action cannot be undone.`)) {
+                isProcessingMarketSell = false;
+                return;
+            }
+            
+            // Show loading state
+            const originalText = button ? button.innerHTML : '';
+            if (button) {
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Selling...';
+                button.disabled = true;
+            }
+            
+            console.log('Sending sell request to API:', { symbol, amount });
+            
+            // Simulate API call
+            setTimeout(() => {
+                console.log('Sell successful, showing toast...');
+                window.LegacyCoinTrader.showToast(`Market sell order submitted for ${amount} ${symbol}`, 'success');
+                
+                // Reset button immediately
+                if (button) {
+                    console.log('Resetting button...');
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                }
+                
+                // Clear processing flag
+                isProcessingMarketSell = false;
+                console.log('=== MARKET SELL DEBUG END ===');
+            }, 2000);
+        }
+
+        function testMultipleCalls() {
+            const results = document.getElementById('testResults');
+            results.innerHTML = '<p>Testing multiple simultaneous calls...</p>';
+            
+            // Try to call marketSellPosition multiple times quickly
+            marketSellPosition('TEST/USD', 0.001, null);
+            marketSellPosition('TEST/USD', 0.001, null);
+            marketSellPosition('TEST/USD', 0.001, null);
+            
+            results.innerHTML += '<p>Multiple calls attempted. Check console for results.</p>';
+        }
+
+        function testBeforeReady() {
+            const results = document.getElementById('testResults');
+            results.innerHTML = '<p>Testing call before page is ready...</p>';
+            
+            // Temporarily set page as not ready
+            const originalReady = isPageReady;
+            isPageReady = false;
+            
+            marketSellPosition('TEST/USD', 0.001, null);
+            
+            // Restore ready state
+            setTimeout(() => {
+                isPageReady = originalReady;
+                results.innerHTML += '<p>Test completed. Check console for results.</p>';
+            }, 100);
+        }
+
+        function checkLegacyTrader() {
+            const results = document.getElementById('testResults');
+            results.innerHTML = `
+                <p><strong>LegacyCoinTrader Status:</strong></p>
+                <p>Available: ${!!window.LegacyCoinTrader}</p>
+                <p>showToast function: ${!!window.LegacyCoinTrader?.showToast}</p>
+                <p>Page Ready: ${isPageReady}</p>
+                <p>Processing: ${isProcessingMarketSell}</p>
+            `;
+        }
+
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Test page loaded');
+            checkLegacyTrader();
+        });
+    </script>
+</body>
+</html>

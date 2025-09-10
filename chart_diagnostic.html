@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chart Diagnostic Tool</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .diagnostic { background: #f0f0f0; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .error { background: #ffe6e6; border-left: 4px solid #ff4444; }
+        .success { background: #e6ffe6; border-left: 4px solid #00ff88; }
+        .warning { background: #fff3cd; border-left: 4px solid #ffc107; }
+        canvas { border: 1px solid #333; margin: 10px 0; }
+        .debug-output { font-family: monospace; background: #000; color: #0f0; padding: 10px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Chart Diagnostic Tool</h1>
+    
+    <div id="diagnostics"></div>
+    
+    <!-- Mock position card structure -->
+    <div class="position-card" style="border: 1px solid #ccc; padding: 20px; margin: 20px 0;">
+        <h3>Mock Position: BTC/USD</h3>
+        <div class="position-chart">
+            <div class="chart-container">
+                <canvas id="chart-BTC-USD" width="300" height="100"></canvas>
+                <div class="chart-overlay">
+                    <div class="entry-line" style="top: 50%;">
+                        <div class="line-label">Entry: $50000</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="debug-output" id="console-output"></div>
+
+    <script>
+        // Mock console.log to capture output
+        const originalLog = console.log;
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        
+        const consoleOutput = document.getElementById('console-output');
+        
+        function addToConsoleOutput(message, type = 'log') {
+            const timestamp = new Date().toLocaleTimeString();
+            const color = type === 'error' ? '#ff4444' : type === 'warn' ? '#ffc107' : '#0f0';
+            consoleOutput.innerHTML += `<div style="color: ${color}">[${timestamp}] ${message}</div>`;
+        }
+        
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            addToConsoleOutput(args.join(' '), 'log');
+        };
+        
+        console.error = function(...args) {
+            originalError.apply(console, args);
+            addToConsoleOutput(args.join(' '), 'error');
+        };
+        
+        console.warn = function(...args) {
+            originalWarn.apply(console, args);
+            addToConsoleOutput(args.join(' '), 'warn');
+        };
+        
+        // Diagnostic functions
+        function runDiagnostics() {
+            const diagnostics = document.getElementById('diagnostics');
+            
+            // Test 1: Check if canvas elements exist
+            const canvases = document.querySelectorAll('canvas[id^="chart-"]');
+            if (canvases.length > 0) {
+                diagnostics.innerHTML += '<div class="diagnostic success">✅ Found ' + canvases.length + ' chart canvas elements</div>';
+            } else {
+                diagnostics.innerHTML += '<div class="diagnostic error">❌ No chart canvas elements found</div>';
+            }
+            
+            // Test 2: Check canvas context
+            canvases.forEach((canvas, index) => {
+                try {
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        diagnostics.innerHTML += '<div class="diagnostic success">✅ Canvas ' + (index + 1) + ' context available</div>';
+                    } else {
+                        diagnostics.innerHTML += '<div class="diagnostic error">❌ Canvas ' + (index + 1) + ' context not available</div>';
+                    }
+                } catch (error) {
+                    diagnostics.innerHTML += '<div class="diagnostic error">❌ Canvas ' + (index + 1) + ' error: ' + error.message + '</div>';
+                }
+            });
+            
+            // Test 3: Check position data structure
+            const mockPositionData = {
+                'BTC/USD': {
+                    symbol: 'BTC/USD',
+                    entry_price: 50000,
+                    current_price: 51000,
+                    pnl: 1000,
+                    size: 0.1
+                }
+            };
+            
+            window.positionData = mockPositionData;
+            diagnostics.innerHTML += '<div class="diagnostic success">✅ Mock position data created</div>';
+            
+            // Test 4: Test chart creation function
+            testChartCreation();
+        }
+        
+        // Test chart creation
+        function testChartCreation() {
+            const canvas = document.getElementById('chart-BTC-USD');
+            if (!canvas) {
+                console.error('Canvas not found');
+                return;
+            }
+            
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                console.error('Canvas context not available');
+                return;
+            }
+            
+            console.log('Testing chart creation...');
+            
+            // Mock the chart creation process
+            const position = {
+                symbol: 'BTC/USD',
+                entry_price: 50000,
+                current_price: 51000,
+                pnl: 1000
+            };
+            
+            // Mock data (simulating what fetchRealChartData would return)
+            const mockPrices = [50000, 50100, 49900, 50200, 50150, 50300, 50250, 50400, 50350, 50500];
+            
+            console.log('Creating chart with ' + mockPrices.length + ' data points');
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Calculate bounds
+            const minPrice = Math.min(...mockPrices, position.entry_price);
+            const maxPrice = Math.max(...mockPrices, position.entry_price);
+            const priceRange = maxPrice - minPrice;
+            
+            if (priceRange === 0) {
+                console.warn('No price range');
+                return;
+            }
+            
+            console.log('Price range: $' + minPrice + ' - $' + maxPrice);
+            
+            // Draw price line
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            for (let i = 0; i < mockPrices.length; i++) {
+                const x = 15 + (i / (mockPrices.length - 1)) * (canvas.width - 30);
+                const y = canvas.height - 15 - ((mockPrices[i] - minPrice) / priceRange) * (canvas.height - 30);
+                
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+            
+            // Draw entry line
+            const entryY = canvas.height - 15 - ((position.entry_price - minPrice) / priceRange) * (canvas.height - 30);
+            ctx.strokeStyle = '#9966ff';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(15, entryY);
+            ctx.lineTo(canvas.width - 15, entryY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            console.log('Chart drawn successfully');
+        }
+        
+        // Run diagnostics when page loads
+        window.addEventListener('load', function() {
+            console.log('Page loaded, running diagnostics...');
+            runDiagnostics();
+        });
+    </script>
+</body>
+</html>

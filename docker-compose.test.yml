@@ -1,0 +1,194 @@
+---
+version: '3.8'
+
+# Testing environment configuration
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.test.yml up --abort-on-container-exit
+
+services:
+  # Override services for testing
+  redis:
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+
+  api-gateway:
+    environment:
+      - GATEWAY_LOG_LEVEL=DEBUG
+      - GATEWAY_RATE_LIMIT_REQUESTS=10000  # Higher limits for testing
+      - GATEWAY_RATE_LIMIT_WINDOW=60
+    volumes:
+      - ./services/api_gateway:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  trading-engine:
+    environment:
+      - TRADING_ENGINE_LOG_LEVEL=DEBUG
+      - TRADING_ENGINE_CYCLE_INTERVAL=30  # Faster cycles for testing
+      - TRADING_ENGINE_BATCH_SIZE=10
+    volumes:
+      - ./services/trading_engine:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  market-data:
+    environment:
+      - MARKET_DATA_LOG_LEVEL=DEBUG
+      - MARKET_DATA_CACHE_SIZE=50  # Smaller cache for testing
+    volumes:
+      - ./services/market_data:/app
+      - ./crypto_bot:/app/crypto_bot
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  portfolio:
+    environment:
+      - PORTFOLIO_LOG_LEVEL=DEBUG
+      - PORTFOLIO_PAPER_TRADING=true  # Force paper trading for tests
+    volumes:
+      - ./services/portfolio:/app
+      - ./crypto_bot:/app/crypto_bot
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  strategy-engine:
+    environment:
+      - STRATEGY_ENGINE_LOG_LEVEL=DEBUG
+    volumes:
+      - ./services/strategy_engine:/app
+      - ./crypto_bot:/app/crypto_bot
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  token-discovery:
+    environment:
+      - TOKEN_DISCOVERY_LOG_LEVEL=DEBUG
+      - TOKEN_DISCOVERY_SCAN_INTERVAL=10  # Faster scanning for tests
+    volumes:
+      - ./services/token_discovery:/app
+      - ./crypto_bot:/app/crypto_bot
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  execution:
+    environment:
+      - EXECUTION_LOG_LEVEL=DEBUG
+      - EXECUTION_DRY_RUN=true  # Force dry run for tests
+    volumes:
+      - ./services/execution:/app
+      - ./crypto_bot:/app/crypto_bot
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  monitoring:
+    environment:
+      - MONITORING_LOG_LEVEL=DEBUG
+    volumes:
+      - ./services/monitoring:/app
+      - ./crypto_bot:/app/crypto_bot
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  frontend:
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+    volumes:
+      - ./frontend:/app
+      - ./static:/app/static
+      - ./templates:/app/templates
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # E2E Test Runner
+  e2e-tests:
+    build:
+      context: .
+      dockerfile: tests/e2e/Dockerfile
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+      trading-engine:
+        condition: service_healthy
+      market-data:
+        condition: service_healthy
+      portfolio:
+        condition: service_healthy
+      strategy-engine:
+        condition: service_healthy
+      token-discovery:
+        condition: service_healthy
+      execution:
+        condition: service_healthy
+      monitoring:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    volumes:
+      - ./tests/e2e:/app/tests
+      - ./e2e_test_results.json:/app/e2e_test_results.json
+    environment:
+      - API_GATEWAY_URL=http://api-gateway:8000
+      - TEST_TIMEOUT=300  # 5 minutes timeout
+    command: ["python", "/app/tests/test_e2e_framework.py"]
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 1
+
+  # Test database (optional)
+  test-postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=legacy_coin_trader_test
+      - POSTGRES_USER=test_user
+      - POSTGRES_PASSWORD=test_password
+    volumes:
+      - test_postgres_data:/var/lib/postgresql/data
+      - ./tests/db/init:/docker-entrypoint-initdb.d
+    ports:
+      - "5433:5432"  # Different port to avoid conflicts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d legacy_coin_trader_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  test_postgres_data:
+    driver: local
