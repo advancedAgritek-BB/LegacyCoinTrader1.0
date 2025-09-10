@@ -18,7 +18,7 @@
                 <div class="metric-icon purple">
                         <i class="fas fa-brain"></i>
                     </div>
-                <div class="metric-value" id="strategyEvaluations">0</div>
+                <div class="metric-value" id="strategyEvaluations" aria-live="polite">0</div>
                     <div class="metric-label">Strategy Evaluations</div>
                 <div class="metric-change positive">
                     <i class="fas fa-arrow-up"></i>
@@ -30,7 +30,7 @@
                 <div class="metric-icon blue">
                         <i class="fas fa-exchange-alt"></i>
                     </div>
-                <div class="metric-value" id="orderExecutions">0</div>
+                <div class="metric-value" id="orderExecutions" aria-live="polite">0</div>
                     <div class="metric-label">Order Executions</div>
                 <div class="metric-change positive">
                     <i class="fas fa-arrow-up"></i>
@@ -42,7 +42,7 @@
                 <div class="metric-icon green">
                         <i class="fas fa-memory"></i>
                     </div>
-                    <div class="metric-value" id="memoryUsage">0MB</div>
+                    <div class="metric-value" id="memoryUsage" aria-live="polite">0%</div>
                     <div class="metric-label">Memory Usage</div>
                 <div class="metric-change negative">
                     <i class="fas fa-arrow-down"></i>
@@ -54,7 +54,7 @@
                 <div class="metric-icon orange">
                         <i class="fas fa-microchip"></i>
                     </div>
-                    <div class="metric-value" id="cpuUsage">0%</div>
+                    <div class="metric-value" id="cpuUsage" aria-live="polite">0%</div>
                     <div class="metric-label">CPU Usage</div>
                 <div class="metric-change negative">
                     <i class="fas fa-arrow-down"></i>
@@ -66,7 +66,7 @@
                 <div class="metric-icon cyan">
                         <i class="fas fa-search"></i>
                     </div>
-                <div class="metric-value" id="tokensScanned">0</div>
+                <div class="metric-value" id="tokensScanned" aria-live="polite">0</div>
                     <div class="metric-label">Tokens Scanned</div>
                 <div class="metric-change positive">
                     <i class="fas fa-arrow-up"></i>
@@ -78,7 +78,7 @@
                 <div class="metric-icon red">
                         <i class="fas fa-exclamation-triangle"></i>
                     </div>
-                <div class="metric-value" id="errorsCount">0</div>
+                <div class="metric-value" id="errorsCount" aria-live="polite">0</div>
                     <div class="metric-label">Errors</div>
                 <div class="metric-change neutral">
                     <i class="fas fa-minus"></i>
@@ -90,7 +90,7 @@
                 <div class="metric-icon indigo">
                         <i class="fas fa-wifi"></i>
                     </div>
-                <div class="metric-value" id="websocketConnections">0</div>
+                <div class="metric-value" id="websocketConnections" aria-live="polite">0</div>
                     <div class="metric-label">WebSocket Connections</div>
                 <div class="metric-change positive">
                     <i class="fas fa-arrow-up"></i>
@@ -102,7 +102,7 @@
                 <div class="metric-icon purple">
                         <i class="fas fa-robot"></i>
                     </div>
-                    <div class="metric-value" id="apiCalls">0</div>
+                    <div class="metric-value" id="apiCalls" aria-live="polite">0</div>
                     <div class="metric-label">API Calls</div>
                 <div class="metric-change positive">
                     <i class="fas fa-arrow-up"></i>
@@ -119,16 +119,18 @@
                     Component Status
             </div>
                 <div class="table-actions">
-                    <button class="btn btn-secondary" onclick="refreshAllData()">
+                    <span class="last-updated" id="lastUpdated" aria-live="polite" title="Last refresh time">Last updated: —</span>
+                    <button class="btn btn-secondary" onclick="refreshAllData()" aria-label="Refresh data">
                         <i class="fas fa-sync-alt"></i>
                         Refresh
                     </button>
-                    <button class="btn btn-secondary">
+                    <button class="btn btn-secondary" aria-label="Export table">
                         <i class="fas fa-download"></i>
                         Export
                     </button>
                 </div>
             </div>
+            <div class="table-wrapper">
             <table class="component-table">
                 <thead>
                     <tr>
@@ -148,7 +150,7 @@
                         <td>Never</td>
                         <td>Enhanced scanner status unknown</td>
                         <td><small>scanner_active: false, tokens_scanned: 0</small></td>
-                        <td><button class="btn btn-secondary" title="View component details"><i class="fas fa-eye"></i></button></td>
+                        <td><button class="btn btn-secondary" title="View component details" aria-label="View details for Enhanced Scanner"><i class="fas fa-eye"></i></button></td>
                     </tr>
                     <tr>
                         <td>Evaluation Pipeline</td>
@@ -156,7 +158,7 @@
                         <td>Never</td>
                         <td>Evaluation pipeline status unknown</td>
                         <td><small>evaluation_count: 97, failed_evaluations: 19</small></td>
-                        <td><button class="btn btn-secondary" title="View component details"><i class="fas fa-eye"></i></button></td>
+                        <td><button class="btn btn-secondary" title="View component details" aria-label="View details for Evaluation Pipeline"><i class="fas fa-eye"></i></button></td>
                     </tr>
                     <tr>
                         <td>Execution Pipeline</td>
@@ -164,7 +166,7 @@
                         <td>Never</td>
                         <td>Order execution pipeline active</td>
                         <td><small>execution_count: 48, pending_orders: 0</small></td>
-                        <td><button class="btn btn-secondary" title="View component details"><i class="fas fa-eye"></i></button></td>
+                        <td><button class="btn btn-secondary" title="View component details" aria-label="View details for Execution Pipeline"><i class="fas fa-eye"></i></button></td>
                     </tr>
                     <tr>
                         <td>Monitoring System</td>
@@ -172,7 +174,7 @@
                         <td>Never</td>
                         <td>Monitoring system status unknown</td>
                         <td><small>health_check_running: false, monitoring: running</small></td>
-                        <td><button class="btn btn-secondary" title="View component details"><i class="fas fa-eye"></i></button></td>
+                        <td><button class="btn btn-secondary" title="View component details" aria-label="View details for Monitoring System"><i class="fas fa-eye"></i></button></td>
                     </tr>
                     <tr>
                         <td>Strategy Router</td>
@@ -180,7 +182,7 @@
                         <td>Never</td>
                         <td>Strategy router status unknown</td>
                         <td><small>recent_routing: 0</small></td>
-                        <td><button class="btn btn-secondary" title="View component details"><i class="fas fa-eye"></i></button></td>
+                        <td><button class="btn btn-secondary" title="View component details" aria-label="View details for Strategy Router"><i class="fas fa-eye"></i></button></td>
                     </tr>
                     <tr>
                         <td>System Resources</td>
@@ -188,7 +190,7 @@
                         <td>Never</td>
                         <td>System resources: CPU 28.0%, Memory 58.5%</td>
                         <td><small>cpu_percent: 28, disk_percent: 2.3</small></td>
-                        <td><button class="btn btn-secondary" title="View component details"><i class="fas fa-eye"></i></button></td>
+                        <td><button class="btn btn-secondary" title="View component details" aria-label="View details for System Resources"><i class="fas fa-eye"></i></button></td>
                     </tr>
                     <tr>
                         <td>WebSocket Connections</td>
@@ -196,10 +198,11 @@
                         <td>Never</td>
                         <td>WebSocket connection status unknown</td>
                         <td><small>connections: 0, connectivity_ok: false</small></td>
-                        <td><button class="btn btn-secondary" title="View component details"><i class="fas fa-eye"></i></button></td>
+                        <td><button class="btn btn-secondary" title="View component details" aria-label="View details for WebSocket Connections"><i class="fas fa-eye"></i></button></td>
                     </tr>
                 </tbody>
             </table>
+            </div>
             </div>
 
         <!-- Performance Charts -->
@@ -395,6 +398,7 @@
                     updateMetricCards(result.data);
                     updateComponentTable(result.data);
                     updateHealthChart();
+                    updateLastUpdated();
                 } else {
                     console.warn('⚠️ Invalid monitoring data format:', result);
                     // Use mock data if API fails
@@ -445,6 +449,7 @@
                 if (result.success) {
                     monitoringData.metrics = result.data;
                     updatePerformanceChart();
+                    updateLastUpdated();
                 }
             } catch (error) {
                 console.error('Error fetching metrics:', error);
@@ -540,7 +545,7 @@
                     <td>${status.message}</td>
                     <td><small>${metricsText}</small></td>
                     <td>
-                        <button class="btn btn-secondary" onclick="viewComponent('${component}')">
+                        <button class="btn btn-secondary" onclick="viewComponent('${component}')" aria-label="View details for ${componentName}">
                             <i class="fas fa-eye"></i>
                         </button>
                     </td>
@@ -781,6 +786,14 @@
         function viewComponent(componentName) {
             console.log('Viewing component:', componentName);
             // Here you could open a modal or navigate to a detailed view
+        }
+
+        // Update "Last updated" timestamp
+        function updateLastUpdated() {
+            const el = document.getElementById('lastUpdated');
+            if (!el) return;
+            const now = new Date();
+            el.textContent = `Last updated: ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
         }
     </script>
 {% endblock %}

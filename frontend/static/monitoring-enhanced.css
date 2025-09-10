@@ -109,3 +109,27 @@ button.btn-secondary:hover {
     border-left: 4px solid #8b5cf6 !important;
     padding-left: 16px !important;
 }
+
+/* Table usability */
+.table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.component-table {
+    min-width: 900px;
+}
+
+.component-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-tertiary);
+    z-index: 1;
+}
+
+/* Last updated indicator */
+.last-updated {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-right: 12px;
+}

@@ -169,6 +169,41 @@ pre {
   letter-spacing: var(--tracking-tight);
 }
 
+/* ===== TYPOGRAPHY UTILITIES ===== */
+.prose {
+  max-width: 80ch;
+}
+
+.prose p { margin-bottom: var(--space-md); }
+.prose h1, .prose h2, .prose h3, .prose h4 { margin-top: var(--space-xl); }
+.prose h1 + p, .prose h2 + p, .prose h3 + p { margin-top: var(--space-sm); }
+.prose ul, .prose ol { padding-left: 1.25rem; margin: 0 0 var(--space-md); }
+.prose li { margin: 0 0 var(--space-xs); }
+.prose a { text-decoration-thickness: 2px; text-underline-offset: 3px; }
+
+.lead { font-size: var(--font-lg); color: var(--text-secondary); line-height: var(--leading-loose); }
+.eyebrow { font-size: var(--font-xs); text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-muted); font-weight: 800; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Data & tables */
+table { width: 100%; border-collapse: separate; border-spacing: 0; }
+thead th {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-secondary);
+}
+tbody td {
+  padding: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Numbers in widgets */
+.metric-value { font-variant-numeric: tabular-nums; }
+
 body.dark-theme {
   background: linear-gradient(135deg, var(--bg-primary) 0%, #1a1f3a 30%, var(--bg-secondary) 70%, var(--bg-surface) 100%);
   background-attachment: fixed;
@@ -221,7 +256,7 @@ body.dark-theme {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-`  filter: drop-shadow(0 0 12px rgba(99, 102, 241, 0.6));
+  filter: drop-shadow(0 0 12px rgba(99, 102, 241, 0.6));
 }
 
 .sidebar-nav {
