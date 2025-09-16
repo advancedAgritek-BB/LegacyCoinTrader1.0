@@ -221,6 +221,16 @@ python test_strategy_fixes.py     # Strategy validation
 - **Performance Guide**: See `PERFORMANCE.md` for optimization details
 - **Strategy Guide**: See `STRATEGY_OPTIMIZATION_README.md` for advanced configuration
 
+## 🧩 Optional Dependencies
+
+- **SciPy (Recommended)**: Several strategies use probability distribution
+  functions from ``scipy.stats`` for calculating quantile-based thresholds.
+  When SciPy is not installed, they automatically import
+  ``crypto_bot.utils.optional_deps.scipy_stats`` which provides a lightweight
+  fallback object. The fallback keeps the bot running by returning neutral
+  values (e.g., ``norm.ppf`` → ``0.0``), but signal quality is reduced. Install
+  SciPy whenever possible to maintain the intended statistical behaviour.
+
 ## ⚡ Performance Features
 
 ### **Adaptive Systems**

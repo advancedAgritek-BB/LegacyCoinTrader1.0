@@ -3,20 +3,7 @@ from typing import Optional, Tuple
 import pandas as pd
 import numpy as np
 
-try:  # pragma: no cover - optional dependency
-    from scipy import stats as scipy_stats
-    if not hasattr(scipy_stats, "norm"):
-        raise ImportError
-except Exception:  # pragma: no cover - fallback when scipy missing
-    class _Norm:
-        @staticmethod
-        def ppf(_x):
-            return 0.0
-
-    class _FakeStats:
-        norm = _Norm()
-
-    scipy_stats = _FakeStats()
+from crypto_bot.utils.optional_deps import scipy_stats
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils import stats
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
