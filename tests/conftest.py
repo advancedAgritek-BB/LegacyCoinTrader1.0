@@ -7,6 +7,7 @@ import numpy as np
 from pathlib import Path
 import sys
 import os
+from typing import Callable, Iterable, Optional
 
 # Add crypto_bot to path for proper imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -114,6 +115,87 @@ def sample_ohlcv_data():
     df = pd.DataFrame(data)
     df.set_index('timestamp', inplace=True)
     return df
+
+
+def _build_ohlcv(
+    closes: Iterable[float],
+    *,
+    volumes: Optional[Iterable[float]] = None,
+    step_seconds: int = 60,
+) -> pd.DataFrame:
+    """Construct a minimal OHLCV dataframe from a series of closes.
+
+    The helper keeps the open near the previous close and adds a small
+    buffer to the high/low so strategies relying on candle ranges work
+    with deterministic values.
+    """
+
+    closes = np.asarray(list(closes), dtype=float)
+    if closes.size == 0:
+        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
+    opens = np.roll(closes, 1)
+    opens[0] = closes[0]
+    highs = np.maximum(opens, closes) + 0.5
+    lows = np.minimum(opens, closes) - 0.5
+    if volumes is None:
+        volumes = np.full(closes.shape, 1_000.0)
+    else:
+        volumes = np.asarray(list(volumes), dtype=float)
+        if volumes.shape != closes.shape:
+            raise ValueError("Volume series must match closes length")
+
+    index = pd.date_range(
+        "2024-01-01", periods=len(closes), freq=pd.Timedelta(seconds=step_seconds)
+    )
+    return pd.DataFrame(
+        {
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": volumes,
+        },
+        index=index,
+    )
+
+
+@pytest.fixture
+def make_ohlcv() -> Callable[[Iterable[float]], pd.DataFrame]:
+    """Factory fixture returning deterministic OHLCV builders."""
+
+    def _factory(closes: Iterable[float], *, volumes: Optional[Iterable[float]] = None,
+                 step_seconds: int = 60) -> pd.DataFrame:
+        return _build_ohlcv(closes, volumes=volumes, step_seconds=step_seconds)
+
+    return _factory
+
+
+@pytest.fixture
+def ohlcv_trending_up(make_ohlcv):
+    """Upward trending OHLCV series."""
+
+    closes = np.linspace(100, 120, 60)
+    volumes = np.linspace(1_000, 2_000, 60)
+    return make_ohlcv(closes, volumes=volumes)
+
+
+@pytest.fixture
+def ohlcv_trending_down(make_ohlcv):
+    """Downward trending OHLCV series."""
+
+    closes = np.linspace(120, 100, 60)
+    volumes = np.linspace(2_000, 1_000, 60)
+    return make_ohlcv(closes, volumes=volumes)
+
+
+@pytest.fixture
+def ohlcv_range_bound(make_ohlcv):
+    """Range-bound market useful for mean-reversion scenarios."""
+
+    base = 100 + np.sin(np.linspace(0, 3 * np.pi, 60))
+    volumes = np.full_like(base, 1_500.0)
+    return make_ohlcv(base, volumes=volumes)
 
 @pytest.fixture
 def sample_position():
