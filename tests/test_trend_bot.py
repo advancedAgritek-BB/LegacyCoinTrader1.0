@@ -50,16 +50,33 @@ def _df_adx_range():
     # Create stronger upward trend to get overbought RSI
     close = pd.Series([base_price + i * 1.0 + np.random.normal(0, 0.5) for i in range(60)], dtype=float)
     close = close.abs() + 10  # Ensure all prices are positive
-    
+
     high = close + np.random.uniform(0.1, 1.0, len(close))
     low = close - np.random.uniform(0.1, 1.0, len(close))
     low = low.clip(lower=1.0)  # Ensure low prices are positive
-    
+
     # Use high volume to ensure volume condition is met
     volume = pd.Series([100.0] * 59 + [300.0])  # High final volume like _df_trend(150.0)
     df = pd.DataFrame({"open": close, "high": high, "low": low, "close": close, "volume": volume})
-    
+
     return df
+
+
+def _df_downtrend_overbought():
+    np.random.seed(123)
+    length = 120
+    trend = np.linspace(200, 80, length)
+    noise = np.random.normal(0, 2, length)
+    close = pd.Series(trend + noise, dtype=float)
+    min_close = close.min()
+    if min_close <= 0:
+        close = close - min_close + 5
+
+    high = close + np.random.uniform(0.5, 1.5, len(close))
+    low = (close - np.random.uniform(0.5, 1.5, len(close))).clip(lower=1.0)
+    volume = pd.Series([150.0] * (len(close) - 1) + [320.0])
+
+    return pd.DataFrame({"open": close, "high": high, "low": low, "close": close, "volume": volume})
 
 
 def test_no_signal_when_volume_below_ma():
@@ -145,3 +162,32 @@ def test_torch_signal_default_weight(monkeypatch):
     score, _ = trend_bot.generate_signal(df, cfg)
     expected = base_score * 0.3 + 0.2 * 0.7
     assert score == pytest.approx(expected)
+
+
+def test_short_signal_returns_positive_score(monkeypatch):
+    df = _df_downtrend_overbought()
+    original_cache = trend_bot.cache_series
+
+    def fake_cache_series(name, df_in, series, lookback, symbol=None):
+        if name == "rsi":
+            if isinstance(series, pd.Series):
+                base = series.copy()
+            else:
+                base = pd.Series(series, index=getattr(df_in, "index", None))
+            base = base.ffill()
+            tail = base.index[-5:] if len(base) >= 5 else base.index
+            boosted_values = np.linspace(70, 88, len(tail))
+            base.loc[tail] = boosted_values
+            return original_cache(name, df_in, base, lookback, symbol)
+        return original_cache(name, df_in, series, lookback, symbol)
+
+    monkeypatch.setattr(trend_bot, "cache_series", fake_cache_series)
+    cfg = {
+        "donchian_confirmation": False,
+        "indicator_lookback": 60,
+        "k": 0,
+        "atr_normalization": False,
+    }
+    score, direction = trend_bot.generate_signal(df, cfg)
+    assert direction == "short"
+    assert 0 < score <= 1.0

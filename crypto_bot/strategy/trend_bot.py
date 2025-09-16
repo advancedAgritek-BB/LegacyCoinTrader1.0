@@ -215,7 +215,9 @@ def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
         score = min((latest["rsi"] - 50) / 50, 1.0)
         direction = "long"
     elif short_cond:
-        score = min((50 - latest["rsi"]) / 50, 1.0)
+        overbought_range = max(1e-9, 100 - dynamic_overbought)
+        normalized = (latest["rsi"] - dynamic_overbought) / overbought_range
+        score = max(0.0, min(normalized, 1.0))
         direction = "short"
     elif reversal_long:
         score = min((dynamic_oversold - latest["rsi"]) / dynamic_oversold, 1.0)
