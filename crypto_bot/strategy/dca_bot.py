@@ -1,6 +1,7 @@
 from typing import Optional, Tuple
 
 import pandas as pd
+from .base import CallableStrategy
 
 
 def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[float, str]:
@@ -20,3 +21,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return True
+
+strategy = CallableStrategy('dca_bot', generate_signal)

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.indicator_cache import cache_series
+from .base import CallableStrategy
 
 
 @dataclass
@@ -310,3 +311,5 @@ def get_strategy_info() -> Dict[str, Any]:
             "Requires low-latency infrastructure"
         ]
     }
+
+strategy = CallableStrategy('ultra_scalp_bot', generate_signal)

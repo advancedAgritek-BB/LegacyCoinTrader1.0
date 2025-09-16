@@ -11,6 +11,7 @@ from crypto_bot.utils import stats
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 from crypto_bot.cooldown_manager import in_cooldown
+from .base import CallableStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ def generate_signal(
     adx_window = int(params.get("adx_window", 14))
     adx_threshold = float(params.get("adx_threshold", 25.0))
     bb_window = int(params.get("bb_window", 20))
+    bb_oversold_buffer = float(params.get("bb_oversold_buffer", 0.3))
     ema_trend = int(params.get("ema_trend", 200))
     ml_weight = float(params.get("ml_weight", 0.5))
     atr_normalization = bool(params.get("atr_normalization", True))
@@ -85,7 +87,8 @@ def generate_signal(
 
     lookback = max(rsi_window, vol_window, adx_window, bb_window, dip_bars)
     recent = df.tail(required_bars)
-    if len(recent) < required_bars:
+    min_required = max(lookback + 1, 2 * adx_window)
+    if len(recent) < min_required:
         return 0.0, "none"
 
     rsi = calculate_rsi(recent["close"], window=rsi_window)
@@ -140,7 +143,7 @@ def generate_signal(
         )
         return 0.0, "none"
 
-    oversold = latest["rsi"] < rsi_oversold and latest["bb_pct"] < 0
+    oversold = latest["rsi"] < rsi_oversold and latest["bb_pct"] <= bb_oversold_buffer
     vol_spike = (
         latest["volume"] > latest["vol_ma"] * vol_mult if latest["vol_ma"] > 0 else False
     )
@@ -214,3 +217,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "mean-reverting"
+
+strategy = CallableStrategy('dip_hunter', generate_signal)

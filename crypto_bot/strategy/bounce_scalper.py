@@ -32,6 +32,7 @@ from crypto_bot.utils import stats
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.cooldown_manager import in_cooldown, mark_cooldown
 from crypto_bot.utils.regime_pnl_tracker import get_recent_win_rate
+from .base import CallableStrategy
 
 # Flag to bypass cooldown and win-rate filtering once
 FORCE_SIGNAL = False
@@ -397,3 +398,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "bounce"
+
+strategy = CallableStrategy('bounce_scalper', generate_signal)

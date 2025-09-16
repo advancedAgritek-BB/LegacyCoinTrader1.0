@@ -10,6 +10,7 @@ import pandas as pd
 from crypto_bot.execution.solana_mempool import SolanaMempoolMonitor
 from crypto_bot.solana import fetch_solana_prices
 from crypto_bot.utils.volatility import normalize_score_by_volatility
+from .base import CallableStrategy
 
 NAME = "cross_chain_arb_bot"
 
@@ -109,3 +110,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:  # pragma: no cover - simple
         return regime in {"sideways", "volatile"}
+
+strategy = CallableStrategy('cross_chain_arb_bot', generate_signal)

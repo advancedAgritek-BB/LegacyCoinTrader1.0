@@ -26,6 +26,7 @@ import ta
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 from crypto_bot.utils.indicators import calculate_atr
 from crypto_bot.utils.volatility import normalize_score_by_volatility
+from .base import CallableStrategy
 
 logger = setup_logger(__name__, LOG_DIR / "market_making.log")
 
@@ -395,3 +396,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime in ["sideways", "ranging", "low_trend"]
+
+strategy = CallableStrategy('market_making_bot', generate_signal)

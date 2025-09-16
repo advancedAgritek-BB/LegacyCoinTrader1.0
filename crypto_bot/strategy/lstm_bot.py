@@ -6,6 +6,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
+from .base import CallableStrategy
 NAME = "lstm_bot"
 
 ML_AVAILABLE = init_ml_or_warn()
@@ -97,3 +98,5 @@ class regime_filter:
     @staticmethod
     def matches(_regime: str) -> bool:
         return True
+
+strategy = CallableStrategy('lstm_bot', generate_signal)

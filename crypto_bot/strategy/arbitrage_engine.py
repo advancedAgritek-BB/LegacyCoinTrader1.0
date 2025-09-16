@@ -22,6 +22,7 @@ from collections import deque
 import heapq
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from .base import CallableStrategy
 
 logger = setup_logger(__name__, LOG_DIR / "arbitrage.log")
 
@@ -527,3 +528,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime in ["volatile", "high_volatility", "arbitrage"]
+
+strategy = CallableStrategy('arbitrage_engine', generate_signal)

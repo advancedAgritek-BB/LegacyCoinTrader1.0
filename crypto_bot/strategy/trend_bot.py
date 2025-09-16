@@ -289,6 +289,7 @@ def generate_signal(
         weight = float(torch_cfg.weight)
         try:  # pragma: no cover - best effort
             from crypto_bot.torch_signal_model import predict_signal as _pred
+from .base import CallableStrategy
 
             ml_score = _pred(df)
             base = score if score > 0 else 0.0
@@ -306,3 +307,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "trending"
+
+strategy = CallableStrategy('trend_bot', generate_signal)

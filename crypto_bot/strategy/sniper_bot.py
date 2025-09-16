@@ -10,6 +10,7 @@ from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.pair_cache import load_liquid_pairs
 from crypto_bot.utils.indicators import calculate_atr
 from crypto_bot.volatility_filter import calc_atr
+from .base import CallableStrategy
 
 DEFAULT_PAIRS = ["BTC/USD", "ETH/USD"]
 ALLOWED_PAIRS = load_liquid_pairs() or DEFAULT_PAIRS
@@ -227,3 +228,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "volatile"
+
+strategy = CallableStrategy('sniper_bot', generate_signal)

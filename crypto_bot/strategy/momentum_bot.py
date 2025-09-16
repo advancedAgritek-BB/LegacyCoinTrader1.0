@@ -12,6 +12,7 @@ from crypto_bot.utils.indicators import calculate_rsi
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 import numpy as np
+from .base import CallableStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -193,17 +194,6 @@ class regime_filter:
         return regime in {"trending", "volatile"}
 
 
-class Strategy:
-    """Strategy wrapper so :func:`load_strategies` can auto-register it."""
+__all__ = ["generate_signal", "regime_filter", "strategy"]
 
-    def __init__(self) -> None:
-        self.name = "momentum_bot"
-        self.generate_signal = generate_signal
-        self.regime_filter = regime_filter
-
-    def signal(self, *args, **kwargs):
-        """Compatibility wrapper for pipelines expecting ``signal``."""
-        return self.generate_signal(*args, **kwargs)
-
-
-__all__ = ["generate_signal", "regime_filter", "Strategy"]
+strategy = CallableStrategy('momentum_bot', generate_signal)

@@ -23,6 +23,7 @@ from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.indicators import calculate_atr
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
+from .base import CallableStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -223,3 +224,5 @@ class regime_filter:
     def matches(regime: str) -> bool:
         """Return ``True`` for every supplied regime."""
         return True
+
+strategy = CallableStrategy('range_arb_bot', generate_signal)

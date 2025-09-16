@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.indicators import (
+from .base import CallableStrategy
     calculate_atr,
     calculate_bollinger_bands,
     calculate_rsi,
@@ -357,3 +358,5 @@ def get_strategy_info() -> Dict[str, Any]:
             "Requires good volatility timing"
         ]
     }
+
+strategy = CallableStrategy('volatility_harvester', generate_signal)

@@ -5,6 +5,7 @@ import time
 import pandas as pd
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any, Literal
+from .base import CallableStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -191,3 +192,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "sideways"
+
+strategy = CallableStrategy('maker_spread', generate_signal)

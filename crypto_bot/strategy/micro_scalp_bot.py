@@ -10,6 +10,7 @@ from crypto_bot.execution.solana_mempool import SolanaMempoolMonitor
 from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.volatility import normalize_score_by_volatility
+from .base import CallableStrategy
 
 
 @dataclass
@@ -331,3 +332,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "scalp"
+
+strategy = CallableStrategy('micro_scalp_bot', generate_signal)

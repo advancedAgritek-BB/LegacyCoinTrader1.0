@@ -235,6 +235,7 @@ def generate_signal(
     if ml_enabled:
         try:
             from crypto_bot.ml_signal_model import predict_signal
+from .base import CallableStrategy
             ml_score = predict_signal(df)
             score = (score + ml_score) / 2
         except Exception:
@@ -252,3 +253,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "mean-reverting"
+
+strategy = CallableStrategy('mean_bot', generate_signal)

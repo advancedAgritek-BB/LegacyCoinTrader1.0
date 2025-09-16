@@ -8,6 +8,7 @@ import pandas as pd
 
 from ..sentiment_filter import get_lunarcrush_sentiment_boost, get_sentiment_score
 from crypto_bot.utils.indicators import calculate_atr
+from .base import CallableStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -154,3 +155,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "volatile"
+
+strategy = CallableStrategy('meme_wave_bot', generate_signal)

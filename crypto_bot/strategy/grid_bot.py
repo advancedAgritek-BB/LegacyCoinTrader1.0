@@ -268,6 +268,7 @@ def generate_signal(
     if cfg.use_ml_center:
         try:  # pragma: no cover - best effort
             from crypto_bot import grid_center_model
+from .base import CallableStrategy
             centre = grid_center_model.predict_centre(recent)
         except Exception:
             centre = float("nan")
@@ -337,3 +338,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "sideways"
+
+strategy = CallableStrategy('grid_bot', generate_signal)

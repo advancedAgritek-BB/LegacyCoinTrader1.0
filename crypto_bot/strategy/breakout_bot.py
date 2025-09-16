@@ -30,6 +30,7 @@ from crypto_bot.utils.indicators import (
 )
 from crypto_bot.utils import stats
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from .base import CallableStrategy
 
 logger = setup_logger(__name__, LOG_DIR / "breakout_bot.log")
 
@@ -260,3 +261,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "breakout"
+
+strategy = CallableStrategy('breakout_bot', generate_signal)

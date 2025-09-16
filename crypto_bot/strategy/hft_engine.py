@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Literal
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 from crypto_bot.execution.cex_executor import execute_trade_async
+from .base import CallableStrategy
 
 
 # Placeholder async generator patched in tests or by runtime code.  It yields
@@ -164,3 +165,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "volatile"
+
+strategy = CallableStrategy('hft_engine', generate_signal)

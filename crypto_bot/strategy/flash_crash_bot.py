@@ -4,6 +4,7 @@ import pandas as pd
 import ta
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
+from .base import CallableStrategy
 
 NAME = "flash_crash_bot"
 
@@ -64,3 +65,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "volatile"
+
+strategy = CallableStrategy('flash_crash_bot', generate_signal)

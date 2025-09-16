@@ -10,6 +10,7 @@ from crypto_bot.utils import stats
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
+from .base import CallableStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -175,3 +176,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "mean-reverting"
+
+strategy = CallableStrategy('stat_arb_bot', generate_signal)

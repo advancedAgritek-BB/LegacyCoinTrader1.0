@@ -10,6 +10,7 @@ import ta
 from crypto_bot.utils.pyth_utils import get_pyth_price
 
 from crypto_bot.fund_manager import auto_convert_funds
+from crypto_bot.strategy.base import CallableStrategy
 
 
 class RugCheckAPI:
@@ -99,3 +100,4 @@ class regime_filter:
     def matches(regime: str) -> bool:
         return regime == "volatile"
 
+strategy = CallableStrategy('sniper_solana', generate_signal)

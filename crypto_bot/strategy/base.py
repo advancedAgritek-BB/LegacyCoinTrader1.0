@@ -103,7 +103,8 @@ class CallableStrategy(Strategy):
     ) -> None:
         super().__init__(name=name)
         self._func = func
-        self._module = module
+        inferred_module = inspect.getmodule(func)
+        self._module = module or inferred_module
         self._before_hook = before
         self._after_hook = after
 
@@ -138,6 +139,25 @@ class CallableStrategy(Strategy):
         raise AttributeError(
             f"{self.__class__.__name__} object has no attribute {item!r}"
         )
+
+    def __setattr__(self, key: str, value: Any) -> None:
+        if key.startswith("_") or key == "name":
+            object.__setattr__(self, key, value)
+            return
+        if self._module is not None:
+            setattr(self._module, key, value)
+            return
+        object.__setattr__(self, key, value)
+
+    def __delattr__(self, item: str) -> None:
+        if item.startswith("_") or item == "name":
+            object.__delattr__(self, item)
+            return
+        if self._module is not None:
+            if hasattr(self._module, item):
+                delattr(self._module, item)
+            return
+        object.__delattr__(self, item)
 
     def __repr__(self) -> str:  # pragma: no cover - trivial
         return f"CallableStrategy(name={self.name!r}, func={self._func!r})"
