@@ -109,6 +109,9 @@ async def test_strategies_direct():
                 # Test maker_spread
                 try:
                     score, direction = maker_spread_signal(df, config)
+                    assert direction in {"long", "short", "none"}, (
+                        f"Unexpected maker spread direction: {direction}"
+                    )
                     print(f"   📊 Maker Spread: score={score:.3f}, direction='{direction}'")
                 except Exception as e:
                     print(f"   ❌ Maker Spread failed: {e}")

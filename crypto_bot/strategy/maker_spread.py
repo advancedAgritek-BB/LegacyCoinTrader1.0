@@ -182,7 +182,8 @@ def generate_signal(
         if not pd.isna(vol_sma) and vol_sma > 0:
             score = min(score * 1.2, 0.8)  # Boost but cap at 0.8
 
-    return score, "maker_spread"
+    direction = "long" if score > 0 else "none"
+    return score, direction
 
 
 class regime_filter:

@@ -25,7 +25,7 @@ class DummyPG:
 
 
 def load_execute_signals():
-    called = {"called": False}
+    called = {"called": False, "trade_manager_calls": 0}
     src = Path("crypto_bot/main.py").read_text()
     module = ast.parse(src)
     funcs = {}
@@ -35,6 +35,21 @@ def load_execute_signals():
     async def _trade(*a, **k):
         called["called"] = True
         return {"id": "1"}
+
+    class DummyTradeManager:
+        async def execute_trade_async(self, coro) -> None:
+            called["trade_manager_calls"] += 1
+            await coro
+
+        async def wait_for_completion(self, timeout: float = 30.0) -> None:
+            return None
+
+        async def cleanup_completed(self) -> None:
+            return None
+
+    async def _execute_cex_trade(*args, **kwargs):
+        called["called"] = True
+        return True
 
     ns = {
         "asyncio": asyncio,
@@ -47,6 +62,8 @@ def load_execute_signals():
         "log_position": lambda *a, **k: None,
         "_monitor_micro_scalp_exit": lambda *a, **k: None,
         "BotContext": BotContext,
+        "trade_manager": DummyTradeManager(),
+        "execute_cex_trade": _execute_cex_trade,
     }
     exec(funcs["direction_to_side"], ns)
     exec(funcs["execute_signals"], ns)
@@ -88,3 +105,39 @@ async def test_execute_signals_respects_allow_short(monkeypatch, caplog):
     assert ctx.positions == {}
     assert not called["called"]
     assert "Short selling disabled" in caplog.text
+    assert called["trade_manager_calls"] == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_signals_trades_for_long_direction():
+    df = pd.DataFrame({"close": [100.0]})
+    candidate = {
+        "symbol": "XBT/USDT",
+        "direction": "long",
+        "df": df,
+        "name": "maker_spread",
+        "probabilities": {},
+        "regime": "sideways",
+        "score": 0.6,
+    }
+    ctx = BotContext(
+        positions={},
+        df_cache={"1h": {"XBT/USDT": df}},
+        regime_cache={},
+        config={"execution_mode": "dry_run", "allow_short": False, "top_n_symbols": 1},
+        exchange=object(),
+        ws_client=None,
+        risk_manager=DummyRM(),
+        notifier=None,
+        paper_wallet=PaperWallet(1000.0, allow_short=False),
+        position_guard=DummyPG(),
+    )
+    ctx.balance = 1000.0
+    ctx.analysis_results = [candidate]
+    ctx.timing = {}
+
+    execute_signals, called = load_execute_signals()
+    await execute_signals(ctx)
+
+    assert called["called"]
+    assert called["trade_manager_calls"] == 1
