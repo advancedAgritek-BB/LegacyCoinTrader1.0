@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Dict, Optional, Tuple, List
 from dataclasses import dataclass
 from enum import Enum
+from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 import requests
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
-from pathlib import Path
 
 
 logger = setup_logger(__name__, LOG_DIR / "sentiment.log")
@@ -21,6 +20,7 @@ FNG_URL = "https://api.alternative.me/fng/?limit=1"
 # LunarCrush is the primary sentiment source - Twitter sentiment has been removed
 LUNARCRUSH_BASE_URL = "https://lunarcrush.com/api4/public"
 LUNARCRUSH_API_KEY = os.getenv("LUNARCRUSH_API_KEY", "hpn7960ebtf31fplz8j0eurxqmdn418mequk61bq")
+TRENDING_CACHE_TTL = 120
 
 
 class SentimentDirection(Enum):
@@ -63,6 +63,7 @@ class LunarCrushClient:
         self.api_key = api_key
         self.base_url = LUNARCRUSH_BASE_URL
         self._cache: Dict[str, SentimentData] = {}
+        self._trending_cache: Dict[str, Tuple[float, List[Tuple[str, SentimentData]]]] = {}
         self._session = requests.Session()
         self._session.headers.update({
             "Authorization": f"Bearer {api_key}",
@@ -144,33 +145,266 @@ class LunarCrushClient:
             logger.error(f"Failed to fetch LunarCrush sentiment for {symbol}: {exc}")
             raise
     
-    async def get_trending_tokens(self, limit: int = 20) -> List[Dict]:
-        """Get trending tokens based on social sentiment and volume."""
+    def _trending_cache_key(self, chain: Optional[str]) -> str:
+        """Return the cache key for the trending cache."""
+        return (chain or "all").lower()
+
+    @staticmethod
+    def _coerce_number(value: object) -> Optional[float]:
+        """Attempt to coerce the provided value into a float."""
+        if isinstance(value, Mapping):
+            for key in ("score", "value", "avg", "average", "percent", "count", "total", "rank"):
+                if key in value:
+                    coerced = LunarCrushClient._coerce_number(value[key])
+                    if coerced is not None:
+                        return coerced
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            try:
+                return float(stripped)
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _extract_number(source: Mapping[str, object], keys: Iterable[str]) -> Optional[float]:
+        """Extract a numeric value for any of the provided keys."""
+        for key in keys:
+            for candidate in (key, key.lower(), key.upper()):
+                if candidate in source:
+                    value = LunarCrushClient._coerce_number(source[candidate])
+                    if value is not None:
+                        return value
+        return None
+
+    def _extract_metric(self, entry: Mapping[str, object], keys: Iterable[str]) -> Optional[float]:
+        """Extract a numeric metric from a trending entry."""
+        containers: List[Mapping[str, object]] = []
+        if isinstance(entry, Mapping):
+            containers.append(entry)
+        metrics = entry.get("metrics")
+        if isinstance(metrics, Mapping):
+            containers.append(metrics)
+        for container in containers:
+            value = self._extract_number(container, keys)
+            if value is not None:
+                return value
+        return None
+
+    def _extract_social_metric(self, entry: Mapping[str, object], keys: Iterable[str]) -> Optional[float]:
+        """Extract a social metric (mentions/volume) from a trending entry."""
+        metrics = entry.get("metrics")
+        candidates: List[Mapping[str, object]] = []
+        if isinstance(metrics, Mapping):
+            candidates.append(metrics)
+            social = metrics.get("social")
+            if isinstance(social, Mapping):
+                candidates.append(social)
+        if isinstance(entry, Mapping):
+            candidates.append(entry)
+        for container in candidates:
+            value = self._extract_number(container, keys)
+            if value is not None:
+                return value
+        return None
+
+    @staticmethod
+    def _normalize_sentiment_value(value: Optional[float]) -> float:
+        """Normalize sentiment from 0-100/0-1 ranges into 0-1."""
+        if value is None:
+            return 0.5
+        sentiment = float(value)
+        if sentiment > 1:
+            sentiment /= 100.0
+        return max(0.0, min(1.0, sentiment))
+
+    @staticmethod
+    def _determine_direction(galaxy_score: float, sentiment: float) -> SentimentDirection:
+        """Determine sentiment direction based on score thresholds."""
+        if galaxy_score > 70 and sentiment > 0.6:
+            return SentimentDirection.BULLISH
+        if galaxy_score < 30 or sentiment < 0.4:
+            return SentimentDirection.BEARISH
+        return SentimentDirection.NEUTRAL
+
+    @staticmethod
+    def _iter_trending_entries(payload: object) -> Iterable[Mapping[str, object]]:
+        """Yield coin entries from the trending payload."""
+        if not isinstance(payload, Mapping):
+            return []
+        data = payload.get("data")
+        if isinstance(data, list):
+            entries = data
+        elif isinstance(data, Mapping):
+            for key in ("coins", "items", "data"):
+                candidate = data.get(key)
+                if isinstance(candidate, list):
+                    entries = candidate
+                    break
+            else:
+                entries = []
+        else:
+            entries = []
+        return [entry for entry in entries if isinstance(entry, Mapping)]
+
+    @staticmethod
+    def _entry_matches_chain(entry: Mapping[str, object], chain: Optional[str]) -> bool:
+        """Return True when the trending entry matches the requested chain."""
+        if not chain:
+            return True
+
+        chain_lower = chain.lower()
+        found_metadata = False
+
+        for key in ("chain", "blockchain", "network"):
+            value = entry.get(key)
+            if isinstance(value, str):
+                found_metadata = True
+                if value.lower() == chain_lower:
+                    return True
+
+        for key in ("chains", "networks", "tags"):
+            value = entry.get(key)
+            if isinstance(value, list):
+                found_metadata = True
+                for item in value:
+                    if isinstance(item, str) and item.lower() == chain_lower:
+                        return True
+
+        metrics = entry.get("metrics")
+        if isinstance(metrics, Mapping):
+            for key in ("chain", "blockchain", "network"):
+                value = metrics.get(key)
+                if isinstance(value, str):
+                    found_metadata = True
+                    if value.lower() == chain_lower:
+                        return True
+
+            for key in ("chains", "networks"):
+                value = metrics.get(key)
+                if isinstance(value, list):
+                    found_metadata = True
+                    for item in value:
+                        if isinstance(item, str) and item.lower() == chain_lower:
+                            return True
+
+        # If no chain metadata was available we optimistically include the entry.
+        return not found_metadata
+
+    def _normalize_trending_entry(self, entry: Mapping[str, object]) -> Optional[Tuple[str, SentimentData]]:
+        """Convert a trending entry into ``(symbol, SentimentData)``."""
+        raw_symbol = entry.get("symbol") or entry.get("s") or entry.get("ticker")
+        if not raw_symbol:
+            return None
+
+        symbol = str(raw_symbol).upper()
+        metrics = entry.get("metrics") if isinstance(entry.get("metrics"), Mapping) else {}
+
+        galaxy_score = self._extract_metric(entry, ("galaxy_score", "galaxyScore")) or 0.0
+        alt_rank = self._extract_metric(entry, ("alt_rank", "altRank"))
+        sentiment_raw = self._extract_metric(entry, ("average_sentiment", "sentiment", "sentiment_score", "sentimentScore"))
+        social_mentions = self._extract_social_metric(entry, ("social_mentions", "socialMentions", "mentions"))
+        social_volume = self._extract_social_metric(entry, ("social_volume", "socialVolume", "volume"))
+
+        sentiment = self._normalize_sentiment_value(sentiment_raw)
+        direction = self._determine_direction(float(galaxy_score), sentiment)
+
         try:
-            url = f"{self.base_url}/trending"
-            response = self._session.get(url, timeout=10)
+            alt_rank_int = int(alt_rank) if alt_rank is not None else 1000
+        except (TypeError, ValueError):
+            alt_rank_int = 1000
+
+        social_mentions_int = 0
+        if social_mentions is not None:
+            try:
+                social_mentions_int = int(social_mentions)
+            except (TypeError, ValueError):
+                social_mentions_int = 0
+
+        social_volume_float = 0.0
+        if social_volume is not None:
+            try:
+                social_volume_float = float(social_volume)
+            except (TypeError, ValueError):
+                social_volume_float = 0.0
+
+        return symbol, SentimentData(
+            galaxy_score=float(galaxy_score),
+            alt_rank=alt_rank_int,
+            sentiment=sentiment,
+            sentiment_direction=direction,
+            social_mentions=social_mentions_int,
+            social_volume=social_volume_float,
+            last_updated=time.time(),
+        )
+
+    async def get_trending_tokens(
+        self,
+        limit: int = 20,
+        chain: Optional[str] = None,
+    ) -> List[Tuple[str, SentimentData]]:
+        """Return trending tokens from the LunarCrush v4 API.
+
+        Args:
+            limit: Maximum number of entries to return.
+            chain: Optional blockchain filter (e.g. ``"solana"``).
+        """
+
+        try:
+            limit = max(0, int(limit))
+        except (TypeError, ValueError):
+            limit = 0
+
+        if limit <= 0:
+            return []
+
+        cache_key = self._trending_cache_key(chain)
+        now = time.time()
+        cached = self._trending_cache.get(cache_key)
+        if cached and now - cached[0] < TRENDING_CACHE_TTL:
+            return [(symbol, data) for symbol, data in cached[1][:limit]]
+
+        params = {"limit": max(limit, 1)}
+        if chain:
+            params["chains"] = chain
+
+        url = f"{self.base_url}/trending"
+
+        try:
+            response = self._session.get(url, params=params, timeout=10)
             response.raise_for_status()
-            data = response.json()
-            
-            if not data or "data" not in data:
-                return []
-            
-            trending = []
-            for coin in data["data"][:limit]:
-                trending.append({
-                    "symbol": coin.get("symbol", ""),
-                    "name": coin.get("name", ""),
-                    "galaxy_score": float(coin.get("galaxy_score", 0)),
-                    "alt_rank": int(coin.get("alt_rank", 1000)),
-                    "social_mentions": int(coin.get("social_mentions", 0)),
-                    "social_volume": float(coin.get("social_volume", 0))
-                })
-            
-            return trending
-            
+            payload = response.json()
+
+            entries = list(self._iter_trending_entries(payload))
+            results: List[Tuple[str, SentimentData]] = []
+
+            for entry in entries:
+                if not self._entry_matches_chain(entry, chain):
+                    continue
+                normalized = self._normalize_trending_entry(entry)
+                if not normalized:
+                    continue
+                results.append(normalized)
+                if len(results) >= limit:
+                    break
+
+            self._trending_cache[cache_key] = (now, results)
+            return [(symbol, data) for symbol, data in results[:limit]]
+
         except Exception as exc:
             logger.error(f"Failed to fetch trending tokens: {exc}")
+            if cached:
+                return [(symbol, data) for symbol, data in cached[1][:limit]]
             return []
+
+    async def get_trending_solana_tokens(self, limit: int = 20) -> List[Tuple[str, SentimentData]]:
+        """Return trending Solana tokens as ``(symbol, SentimentData)`` tuples."""
+        return await self.get_trending_tokens(limit=limit, chain="solana")
 
 
 # Global client instance

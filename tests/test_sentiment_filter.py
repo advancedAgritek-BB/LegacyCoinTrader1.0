@@ -2,13 +2,14 @@ import os
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from crypto_bot.sentiment_filter import (
-    too_bearish, 
-    boost_factor, 
+    too_bearish,
+    boost_factor,
     get_sentiment_score,
     get_lunarcrush_sentiment_boost,
     check_sentiment_alignment,
     SentimentDirection,
-    LunarCrushClient
+    SentimentData,
+    LunarCrushClient,
 )
 
 
@@ -235,6 +236,133 @@ async def test_lunarcrush_client_caching():
         
         # Verify only one API call was made
         assert mock_session.get.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_trending_solana_tokens_parses_payload():
+    """Ensure the trending helper normalizes v4 payload data."""
+    with patch('crypto_bot.sentiment_filter.requests.Session') as mock_session_class:
+        mock_session = MagicMock()
+        mock_session_class.return_value = mock_session
+
+        trending_payload = {
+            "data": {
+                "coins": [
+                    {
+                        "symbol": "SOL",
+                        "name": "Solana",
+                        "chain": "solana",
+                        "metrics": {
+                            "galaxy_score": {"score": 75.5},
+                            "alt_rank": {"rank": 12},
+                            "average_sentiment": {"score": 68.0},
+                            "social": {
+                                "mentions": 1234,
+                                "volume": 9876.5,
+                            },
+                        },
+                    },
+                    {
+                        "symbol": "BONK",
+                        "chain": "solana",
+                        "metrics": {
+                            "galaxyScore": 55.0,
+                            "altRank": 200,
+                            "sentiment": 42.0,
+                            "socialMentions": 450,
+                            "socialVolume": 1900.0,
+                        },
+                    },
+                    {
+                        "symbol": "ETH",
+                        "chain": "ethereum",
+                        "metrics": {
+                            "galaxy_score": 90.0,
+                            "sentiment": 80.0,
+                        },
+                    },
+                ]
+            }
+        }
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = trending_payload
+        mock_session.get.return_value = mock_response
+
+        client = LunarCrushClient("test_api_key")
+        results = await client.get_trending_solana_tokens(limit=3)
+
+        assert len(results) == 2
+
+        (symbol_sol, data_sol), (symbol_bonk, data_bonk) = results
+
+        assert symbol_sol == "SOL"
+        assert isinstance(data_sol, SentimentData)
+        assert data_sol.galaxy_score == 75.5
+        assert data_sol.alt_rank == 12
+        assert data_sol.social_mentions == 1234
+        assert data_sol.social_volume == pytest.approx(9876.5)
+        assert data_sol.sentiment == pytest.approx(0.68)
+        assert data_sol.sentiment_direction == SentimentDirection.BULLISH
+
+        assert symbol_bonk == "BONK"
+        assert data_bonk.sentiment_direction == SentimentDirection.NEUTRAL
+        assert data_bonk.social_mentions == 450
+
+        _, kwargs = mock_session.get.call_args
+        assert kwargs["params"]["limit"] == 3
+        assert kwargs["params"]["chains"] == "solana"
+
+
+@pytest.mark.asyncio
+async def test_get_trending_solana_tokens_uses_cache():
+    """Verify that trending data responses are cached by the client."""
+    with patch('crypto_bot.sentiment_filter.requests.Session') as mock_session_class:
+        mock_session = MagicMock()
+        mock_session_class.return_value = mock_session
+
+        trending_payload = {
+            "data": {
+                "coins": [
+                    {
+                        "symbol": "SOL",
+                        "chain": "solana",
+                        "metrics": {
+                            "galaxy_score": 80.0,
+                            "sentiment": 70.0,
+                            "social_mentions": 300,
+                            "social_volume": 1200,
+                        },
+                    },
+                    {
+                        "symbol": "BONK",
+                        "chain": "solana",
+                        "metrics": {
+                            "galaxy_score": 60.0,
+                            "sentiment": 55.0,
+                            "social_mentions": 200,
+                            "social_volume": 800,
+                        },
+                    },
+                ]
+            }
+        }
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = trending_payload
+        mock_session.get.return_value = mock_response
+
+        client = LunarCrushClient("test_api_key")
+        first_results = await client.get_trending_solana_tokens(limit=2)
+        assert len(first_results) == 2
+        assert mock_session.get.call_count == 1
+
+        second_results = await client.get_trending_solana_tokens(limit=1)
+        assert len(second_results) == 1
+        assert mock_session.get.call_count == 1  # No additional HTTP calls
+        assert second_results[0][0] == first_results[0][0]
 
 
 def test_sentiment_direction_enum():
