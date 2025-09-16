@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import logging
 from fastapi import FastAPI
 import json
 import re
 from typing import TYPE_CHECKING, List, Optional
 
 from crypto_bot.utils.logger import LOG_DIR
+from frontend.app import get_open_positions
+
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover - type checking only
     from crypto_bot.bot_controller import TradingBotController
@@ -26,6 +31,13 @@ PERFORMANCE_FILE = LOG_DIR / "strategy_performance.json"
 SCORES_FILE = LOG_DIR / "strategy_scores.json"
 
 
+POS_PATTERN = re.compile(
+    r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
+    r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+) "
+    r"pnl \$(?P<pnl>[0-9.+-]+).*balance \$(?P<balance>[0-9.]+)"
+)
+
+
 @app.get("/live-signals")
 def live_signals() -> dict:
     """Return latest signal scores as a mapping of symbol to score."""
@@ -35,80 +47,57 @@ def live_signals() -> dict:
         except Exception:
             return {}
     return {}
-
-
-POS_PATTERN = re.compile(
-    r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
-    r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+) "
-    r"pnl \$(?P<pnl>[0-9.+-]+).*balance \$(?P<balance>[0-9.]+)"
-)
-
-
 @app.get("/positions")
 def positions() -> List[dict]:
-    """Return parsed position log entries."""
+    """Return open positions served by the shared TradeManager helper."""
     try:
-        # Try to get positions from TradeManager first (more accurate)
-        from crypto_bot.utils.trade_manager import TradeManager
-        tm = TradeManager()
-        positions = tm.get_all_positions()
-        
-        entries = []
-        for pos in positions:
-            if pos.is_open:  # Only return open positions
-                # Get current price for P&L calculation
-                try:
-                    import ccxt
-                    exchange = ccxt.kraken()
-                    ticker = exchange.fetch_ticker(pos.symbol)
-                    current_price = ticker['last']
-                    
-                    # Calculate P&L
-                    pnl, pnl_pct = pos.calculate_unrealized_pnl(current_price)
-                    
-                    # Calculate current value
-                    current_value = float(pos.total_amount) * current_price
-                    
-                    entries.append({
-                        "symbol": pos.symbol,
-                        "side": pos.side,
-                        "amount": float(pos.total_amount),
-                        "entry_price": float(pos.average_price),
-                        "current_price": current_price,
-                        "position_value": current_value,
-                        "pnl": float(pnl),
-                        "balance": 0.0,  # Will be calculated separately
-                    })
-                except Exception as e:
-                    # Fallback to position data without current price
-                    # Calculate current value
-                    current_value = float(pos.total_amount) * float(pos.average_price)
-                    
-                    entries.append({
-                        "symbol": pos.symbol,
-                        "side": pos.side,
-                        "amount": float(pos.total_amount),
-                        "entry_price": float(pos.average_price),
-                        "current_price": float(pos.average_price),  # Use entry price as fallback
-                        "position_value": current_value,
-                        "pnl": 0.0,
-                        "balance": 0.0,
-                    })
-        
-        if entries:
-            return entries
-            
-    except Exception as e:
-        print(f"Error getting positions from TradeManager: {e}")
-    
-    # Fallback to log file parsing
+        raw_positions = get_open_positions()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("Failed to load positions from TradeManager helper: %s", exc)
+        raw_positions = []
+
+    entries: List[dict] = []
+    for position in raw_positions:
+        symbol = position.get("symbol")
+        side = position.get("side")
+        amount = float(position.get("amount", 0.0) or 0.0)
+        entry_price = float(position.get("entry_price", 0.0) or 0.0)
+        current_price = float(position.get("current_price", 0.0) or 0.0)
+        position_value = float(
+            position.get("position_value", position.get("current_value", 0.0))
+            or 0.0
+        )
+        pnl_value = float(position.get("pnl_value", 0.0) or 0.0)
+        pnl_percentage = float(
+            position.get("pnl", position.get("pnl_percentage", 0.0)) or 0.0
+        )
+
+        entries.append(
+            {
+                "symbol": symbol,
+                "side": side,
+                "amount": amount,
+                "entry_price": entry_price,
+                "current_price": current_price,
+                "position_value": position_value,
+                "pnl": pnl_value,
+                "balance": 0.0,
+                "pnl_percentage": pnl_percentage,
+            }
+        )
+
+    if entries:
+        return entries
+
+    # Legacy fallback for tests or when TradeManager data is unavailable
     if not POSITIONS_FILE.exists():
         return []
-    entries: List[dict] = []
+
     for line in POSITIONS_FILE.read_text().splitlines():
         match = POS_PATTERN.search(line)
         if not match:
             continue
+
         entries.append(
             {
                 "symbol": match.group("symbol"),
@@ -116,11 +105,14 @@ def positions() -> List[dict]:
                 "amount": float(match.group("amount")),
                 "entry_price": float(match.group("entry")),
                 "current_price": float(match.group("current")),
-                "position_value": float(match.group("amount")) * float(match.group("current")),
+                "position_value": float(match.group("amount"))
+                * float(match.group("current")),
                 "pnl": float(match.group("pnl")),
                 "balance": float(match.group("balance")),
+                "pnl_percentage": 0.0,
             }
         )
+
     return entries
 
 
