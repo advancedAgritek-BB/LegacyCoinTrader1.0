@@ -6,7 +6,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Literal
 
-from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.execution.cex_executor import execute_trade_async
 
 
@@ -59,7 +59,7 @@ class HFTEngine:
         self.batch_summary_secs = tele_cfg.get("batch_summary_secs", 60)
         self.dry_run = bool(self.fees_cfg.get("dry_run", True))
 
-        self.logger = setup_logger(__name__, LOG_DIR / "hft_engine.log")
+        self.logger = setup_strategy_logger("hft_engine")
         self.notifier = _DummyNotifier(self.logger)
 
         # Active signals keyed by symbol.  Each entry is a mapping containing:

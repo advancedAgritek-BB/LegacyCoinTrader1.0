@@ -29,9 +29,11 @@ from crypto_bot.utils.indicators import (
     calculate_rsi,
 )
 from crypto_bot.utils import stats
-from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from crypto_bot.utils.logging import setup_strategy_logger
 
-logger = setup_logger(__name__, LOG_DIR / "breakout_bot.log")
+NAME = "breakout_bot"
+
+logger = setup_strategy_logger(NAME)
 
 
 @dataclass
@@ -141,6 +143,7 @@ def generate_signal(
         and direction is the trade direction.
     """
     if df is None or df.empty:
+        logger.debug("%s: received empty dataframe", NAME)
         return 0.0, "none"
 
     cfg = BreakoutBotConfig.from_dict(config)
@@ -161,6 +164,9 @@ def generate_signal(
 
     lookback = max(bb_len, kc_len, donchian_window, vol_window, 14)
     if len(df) < lookback:
+        logger.debug(
+            "%s: insufficient history (have %d, need %d)", NAME, len(df), lookback
+        )
         return 0.0, "none"
 
     recent = df.iloc[-(lookback + 1) :]
@@ -176,6 +182,7 @@ def generate_signal(
         squeeze_pct,
     )
     if pd.isna(squeeze.iloc[-1]) or not squeeze.iloc[-1]:
+        logger.debug("%s: squeeze condition not met", NAME)
         return 0.0, "none"
 
     if higher_df is not None and not higher_df.empty:
@@ -226,6 +233,14 @@ def generate_signal(
         vol_ok = (
             vol_ma.iloc[-1] > 0 and volume.iloc[-1] > vol_ma.iloc[-1] * vol_multiplier
         )
+        if not vol_ok:
+            logger.debug(
+                "%s: volume filter blocked trade (volume %.2f vs ma %.2f * %.2f)",
+                NAME,
+                volume.iloc[-1],
+                vol_ma.iloc[-1],
+                vol_multiplier,
+            )
     else:
         vol_ok = True
     atr_last = atr.iloc[-1]
@@ -244,12 +259,25 @@ def generate_signal(
     if long_cond and vol_ok:
         direction = "long"
         score = 1.0
+        logger.info(
+            "%s: breakout long close=%.2f upper=%.2f", NAME, close.iloc[-1], upper_break
+        )
     elif short_cond and vol_ok:
         direction = "short"
         score = 1.0
+        logger.info(
+            "%s: breakdown short close=%.2f lower=%.2f", NAME, close.iloc[-1], lower_break
+        )
+    elif long_cond or short_cond:
+        logger.debug("%s: breakout setup blocked by volume filter", NAME)
 
     if score > 0 and cfg.atr_normalization:
         score = normalize_score_by_volatility(recent, score)
+
+    if score > 0:
+        logger.info("%s: signal %.2f direction %s", NAME, score, direction)
+    else:
+        logger.debug("%s: no breakout confirmation", NAME)
 
     return score, direction
 

@@ -1,6 +1,5 @@
 """Meme wave bot strategy for detecting and trading meme coin pumps."""
 
-import logging
 from typing import Dict, Optional, Tuple
 
 import pandas as pd
@@ -8,8 +7,11 @@ import pandas as pd
 
 from ..sentiment_filter import get_lunarcrush_sentiment_boost, get_sentiment_score
 from crypto_bot.utils.indicators import calculate_atr
+from crypto_bot.utils.logging import setup_strategy_logger
 
-logger = logging.getLogger(__name__)
+NAME = "meme_wave_bot"
+
+logger = setup_strategy_logger(NAME)
 
 
 def generate_signal(
@@ -31,6 +33,10 @@ def generate_signal(
         Tuple of (signal_strength, signal_type)
     """
     config = kwargs.get("config", {})
+
+    if df is None or df.empty:
+        logger.debug("%s: received empty dataframe", NAME)
+        return 0.0, "none"
     
     # Strategy parameters
     vol_threshold = config.get("vol_threshold", 2.0)
@@ -48,7 +54,7 @@ def generate_signal(
         recent_vol = float(config.get("recent_mempool_volume", 0.0))
         avg_vol = float(config.get("avg_mempool_volume", 0.0))
     except Exception as e:
-        logger.warning(f"Failed to get mempool volume data: {e}")
+        logger.warning("%s: failed to get mempool volume data: %s", NAME, e)
         recent_vol = 0.0
         avg_vol = 0.0
 
@@ -65,7 +71,7 @@ def generate_signal(
             else 0.0
         )
     except Exception as e:
-        logger.warning(f"Failed to calculate ATR: {e}")
+        logger.warning("%s: failed to calculate ATR: %s", NAME, e)
         atr_value = 0.0
 
     # Get sentiment using LunarCrush instead of Twitter
@@ -74,10 +80,17 @@ def generate_signal(
         sentiment = 0.5  # Default neutral sentiment
     except Exception:
         sentiment = 0.5  # Default neutral sentiment
-    logger.info("Meme-wave sentiment: %.2f for query '%s'", sentiment, query)
+    logger.info("%s: sentiment %.2f for query '%s'", NAME, sentiment, query)
 
     # Check basic volume and sentiment conditions
     if avg_vol and recent_vol >= avg_vol * vol_threshold and sentiment >= sentiment_thr:
+        logger.info(
+            "%s: immediate long signal recent_vol=%.2f avg_vol=%.2f sentiment=%.2f",
+            NAME,
+            recent_vol,
+            avg_vol,
+            sentiment,
+        )
         return 1.0, "long"
 
     # Check for price spike
@@ -88,6 +101,7 @@ def generate_signal(
     )
 
     if not spike:
+        logger.debug("%s: no price spike detected", NAME)
         return 0.0, "none"
 
     # Check mempool conditions
@@ -97,7 +111,7 @@ def generate_signal(
             if avg_vol <= 0 or recent_vol < float(vol_spike_thr) * avg_vol:
                 mempool_ok = False
         except Exception as e:
-            logger.warning(f"Failed to check mempool conditions: {e}")
+            logger.warning("%s: failed to check mempool conditions: %s", NAME, e)
             mempool_ok = False
 
     # Check sentiment conditions using LunarCrush
@@ -107,7 +121,7 @@ def generate_signal(
             # For synchronous operation, assume sentiment is OK
             sentiment_ok = True
         except Exception as e:
-            logger.warning(f"Failed to check sentiment conditions: {e}")
+            logger.warning("%s: failed to check sentiment conditions: %s", NAME, e)
             sentiment_ok = False
 
     # Check if all conditions are met
@@ -120,11 +134,21 @@ def generate_signal(
         signal_strength = (vol_strength * 0.7) + (sentiment_strength * 0.3)
         
         logger.info(
-            f"Meme wave signal generated: strength={signal_strength:.2f}, "
-            f"vol_strength={vol_strength:.2f}, sentiment_strength={sentiment_strength:.2f}"
+            "%s: signal %.2f (vol=%.2f sentiment=%.2f)",
+            NAME,
+            signal_strength,
+            vol_strength,
+            sentiment_strength,
         )
-        
+
         return signal_strength, "long"
+
+    logger.debug(
+        "%s: risk checks failed mempool_ok=%s sentiment_ok=%s",
+        NAME,
+        mempool_ok,
+        sentiment_ok,
+    )
 
     return 0.0, "none"
 
@@ -144,7 +168,7 @@ def get_sentiment_boost(symbol: str, trade_direction: str = "long") -> float:
         # For synchronous operation, return default boost
         return 1.0  # Default no boost
     except Exception as e:
-        logger.warning(f"Failed to get sentiment boost for {symbol}: {e}")
+        logger.warning("%s: failed to get sentiment boost for %s: %s", NAME, symbol, e)
         return 1.0  # Default no boost
 
 

@@ -3,12 +3,11 @@ regression."""
 
 from typing import Optional, Tuple
 
-import logging
-import warnings
 import numpy as np
 import pandas as pd
+import warnings
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import RBF, ConstantKernel, WhiteKernel
+from sklearn.gaussian_process.kernels import ConstantKernel, RBF, WhiteKernel
 from sklearn.preprocessing import StandardScaler
 
 # Suppress scikit-learn convergence warnings since we handle them in custom optimizer
@@ -23,11 +22,11 @@ from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.indicators import calculate_atr
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
-
-logger = logging.getLogger(__name__)
+from crypto_bot.utils.logging import setup_strategy_logger
 
 ML_AVAILABLE = init_ml_or_warn()
 NAME = "range_arb_bot"
+logger = setup_strategy_logger(NAME)
 if ML_AVAILABLE:
     MODEL = load_model("range_arb_bot")
 else:  # pragma: no cover - fallback
@@ -117,6 +116,7 @@ def generate_signal(
     config = kwargs.get("config")
 
     if df.empty:
+        logger.debug("%s: received empty dataframe", NAME)
         return 0.0, "none"
 
     params = config.get("range_arb_bot", {}) if config else {}
@@ -131,6 +131,9 @@ def generate_signal(
 
     lookback = max(atr_window, kr_window)
     if len(df) < lookback:
+        logger.debug(
+            "%s: insufficient history (have %d, need %d)", NAME, len(df), lookback
+        )
         return 0.0, "none"
 
     recent = df.iloc[-lookback:].copy()
@@ -157,17 +160,33 @@ def generate_signal(
         latest["atr_z"] >= vol_z_threshold
         or latest["vol_z"] >= vol_z_threshold
     ):
+        logger.debug(
+            "%s: volatility filter blocked signal (atr_z=%.2f vol_z=%.2f >= %.2f)",
+            NAME,
+            latest.get("atr_z", float("nan")),
+            latest.get("vol_z", float("nan")),
+            vol_z_threshold,
+        )
         return 0.0, "none"
 
     # Avoid volume spikes
     if latest["volume"] > latest["vol_ma"] * volume_mult:
+        logger.debug(
+            "%s: volume spike %.2f > %.2f * %.2f",
+            NAME,
+            latest.get("volume", float("nan")),
+            latest.get("vol_ma", float("nan")),
+            volume_mult,
+        )
         return 0.0, "none"
 
     pred_price = kernel_regression(recent, kr_window)
     if np.isnan(pred_price):
+        logger.debug("%s: kernel regression returned NaN", NAME)
         return 0.0, "none"
     z_val = last_window_zscore(recent["close"], lookback)
     if np.isnan(z_val):
+        logger.debug("%s: z-score calculation returned NaN", NAME)
         return 0.0, "none"
     z_dev = z_val
 
@@ -177,9 +196,15 @@ def generate_signal(
     if z_dev < -z_threshold:  # Undervalued, buy
         score = min(-z_dev / z_threshold, 1.0)
         direction = "long"
+        logger.info(
+            "%s: long setup z=%.2f threshold=%.2f", NAME, z_dev, -z_threshold
+        )
     elif z_dev > z_threshold:  # Overvalued, sell
         score = min(z_dev / z_threshold, 1.0)
         direction = "short"
+        logger.info(
+            "%s: short setup z=%.2f threshold=%.2f", NAME, z_dev, z_threshold
+        )
 
     if score > 0:
         if MODEL is not None:
@@ -207,6 +232,11 @@ def generate_signal(
                 pass
         if atr_normalization:
             score = normalize_score_by_volatility(df, score)
+        logger.info(
+            "%s: signal score %.2f direction %s", NAME, score, direction
+        )
+    else:
+        logger.debug("%s: no actionable deviation detected", NAME)
 
     return score, direction
 
