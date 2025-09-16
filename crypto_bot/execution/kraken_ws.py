@@ -541,6 +541,28 @@ class KrakenWSClient:
             "reconnections": 0
         }
 
+    @staticmethod
+    def _to_ccxt_symbol(symbol: Optional[str]) -> Optional[str]:
+        """Normalize Kraken symbols to CCXT format."""
+
+        if not isinstance(symbol, str):
+            return None
+
+        symbol = symbol.strip()
+        if not symbol:
+            return None
+
+        if "/" in symbol:
+            base, quote = symbol.split("/", 1)
+            if base.upper() == "XBT":
+                base = "BTC"
+            return f"{base}/{quote}"
+
+        if symbol.upper() == "XBT":
+            return "BTC"
+
+        return symbol
+
     def add_price_callback(self, symbol: str, callback: Callable[[str, float], None]) -> None:
         """Add a callback function to be called when price updates for a symbol.
         
@@ -561,14 +583,18 @@ class KrakenWSClient:
         Parameters
         ----------
         symbol : str
-            Trading pair symbol (e.g., "XBT/USD")
+            Trading pair symbol. Kraken-style bases like "XBT/USD" are
+            normalized to CCXT format ("BTC/USD").
         
         Returns
         -------
         Optional[float]
             Current price if available, None otherwise
         """
-        return self.price_cache.get(symbol, {}).get('last')
+        normalized_symbol = self._to_ccxt_symbol(symbol)
+        if not normalized_symbol:
+            return None
+        return self.price_cache.get(normalized_symbol, {}).get('last')
 
     def _handle_message(self, ws: WebSocketApp, message: str) -> None:
         """Default ``on_message`` handler that records heartbeats and processes ticker data."""
@@ -610,7 +636,9 @@ class KrakenWSClient:
                             symbol = ticker.get("symbol")
                             if symbol:
                                 # Convert Kraken format back to CCXT format
-                                ccxt_symbol = symbol.replace("XBT", "BTC") + "/USD"
+                                ccxt_symbol = self._to_ccxt_symbol(symbol)
+                                if not ccxt_symbol:
+                                    return
                                 
                                 # Extract price data
                                 price_data = {
