@@ -16,6 +16,11 @@ from crypto_bot.utils.logger import LOG_DIR, setup_logger
 
 CONFIG_PATH = Path(__file__).with_name("regime_config.yaml")
 
+# Confidence score returned when there is not enough history to classify the
+# regime reliably. Chosen to be neutral but non-zero so downstream consumers do
+# not treat the result as a hard veto.
+SHORT_HISTORY_CONFIDENCE: float = 0.5
+
 
 def _load_config(path: Path) -> dict:
     with open(path, "r") as f:
@@ -465,7 +470,7 @@ def classify_regime(
     ml_min_bars = cfg.get("ml_min_bars", 20)
 
     if df_map is None and (df is None or len(df) < ml_min_bars):
-        return "unknown", set()
+        return "unknown", SHORT_HISTORY_CONFIDENCE
 
     result = _classify_all(df, higher_df, cfg, df_map=df_map)
 

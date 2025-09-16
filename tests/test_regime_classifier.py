@@ -32,13 +32,13 @@ def test_classify_regime_returns_unknown_for_short_df():
         "volume": [100] * 10,
     }
     df = pd.DataFrame(data)
-    regime, probs = classify_regime(df)
+    regime, conf = classify_regime(df)
     assert regime == "unknown"
-    assert isinstance(probs, dict)
+    assert conf == pytest.approx(rc.SHORT_HISTORY_CONFIDENCE)
 
-    regime, info = classify_regime(df)
+    regime, conf_again = classify_regime(df)
     assert regime == "unknown"
-    assert isinstance(info, dict)
+    assert conf_again == pytest.approx(rc.SHORT_HISTORY_CONFIDENCE)
 
 
 def test_classify_regime_returns_unknown_for_14_rows():
@@ -52,7 +52,7 @@ def test_classify_regime_returns_unknown_for_14_rows():
     df = pd.DataFrame(data)
     label, conf = classify_regime(df)
     assert label == "unknown"
-    assert isinstance(conf, set)
+    assert conf == pytest.approx(rc.SHORT_HISTORY_CONFIDENCE)
     label, _ = classify_regime(df)
     assert isinstance(label, str)
 
@@ -60,7 +60,7 @@ def test_classify_regime_returns_unknown_for_14_rows():
 def test_classify_regime_handles_none_df():
     label, probs = classify_regime(None)
     assert label == "unknown"
-    assert probs == {"unknown": 0.0}
+    assert probs == pytest.approx(rc.SHORT_HISTORY_CONFIDENCE)
 
 
 def test_classify_regime_returns_unknown_between_15_and_19_rows():
@@ -356,6 +356,27 @@ def test_analyze_symbol_accepts_dict_patterns(monkeypatch):
     res = asyncio.run(run())
     assert res["patterns"] == {"foo": 1.0}
     assert isinstance(res["patterns"], dict)
+
+
+def test_analyze_symbol_low_history_confidence_neutral():
+    df = _make_trending_df(10)
+
+    async def run():
+        cfg = {
+            "timeframe": "1h",
+            "indicator_lookback": 1,
+            "regime_timeframes": ["1h"],
+            "min_consistent_agreement": 1,
+        }
+        df_map = {"1h": df}
+        return await analyze_symbol("AAA", df_map, "cex", cfg, None)
+
+    res = asyncio.run(run())
+    assert res["regime"] == "unknown"
+    assert res["confidence"] == pytest.approx(rc.SHORT_HISTORY_CONFIDENCE)
+    assert res["probabilities"].get("unknown") == pytest.approx(
+        rc.SHORT_HISTORY_CONFIDENCE
+    )
 
 
 def test_analyze_symbol_handles_missing_df():
