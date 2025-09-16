@@ -11,16 +11,14 @@ except Exception:  # pragma: no cover - fallback stub
             dump=lambda *a, **k: ''
         )
 
-# Provide lightweight fallbacks for heavy deps if not installed
+# Ensure numpy is available; the project requires the real dependency.
 try:  # prefer real numpy
-    import numpy  # type: ignore
-except Exception:  # pragma: no cover - fallback stub
-    try:
-        from numpy_stub import *  # type: ignore
-        import numpy_stub as _np_stub  # type: ignore
-        sys.modules.setdefault('numpy', _np_stub)
-    except Exception:
-        pass
+    import numpy  # type: ignore  # noqa: F401 - imported for side effects
+except Exception as exc:  # pragma: no cover - dependency is mandatory
+    raise ImportError(
+        "numpy is required for LegacyCoinTrader. Please install it via requirements.txt "
+        "or pyproject.toml."
+    ) from exc
 
 # Remove pandas stub import since pandas is available and the stub causes DataFrame conversion issues
 # try:  # prefer real pandas
