@@ -3,13 +3,19 @@
 Balance validation script - Run after bot restart to verify balance is correct
 """
 
-import yaml
-from pathlib import Path
 import time
+from pathlib import Path
+
+import yaml
+
+from crypto_bot.utils.logger import LOG_DIR, setup_logger
+
+
+logger = setup_logger("validate_balance_after_restart", LOG_DIR / "validate_balance_after_restart.log")
 
 def validate_balance():
-    print("🔍 VALIDATING BOT BALANCE AFTER RESTART:")
-    print("=" * 50)
+    logger.info("🔍 VALIDATING BOT BALANCE AFTER RESTART:")
+    logger.info("=" * 50)
 
     # Check paper wallet state file
     pw_file = Path("crypto_bot/logs/paper_wallet_state.yaml")
@@ -20,16 +26,18 @@ def validate_balance():
         balance = state.get('balance', 0)
         positions = state.get('positions', {})
 
-        print(f"File Balance: ${balance:.2f}")
-        print(f"Open Positions: {len(positions)}")
+        logger.info(f"File Balance: ${balance:.2f}")
+        logger.info(f"Open Positions: {len(positions)}")
 
         if balance > 0:
-            print("✅ File balance is positive")
+            logger.info("✅ File balance is positive")
         else:
-            print("❌ File balance is still negative")
+            logger.warning("❌ File balance is still negative")
+    else:
+        logger.warning(f"Paper wallet state file not found at {pw_file}")
 
     # Wait a moment for bot to start
-    print("\n⏳ Waiting for bot to start (10 seconds)...")
+    logger.info("⏳ Waiting for bot to start (10 seconds)...")
     time.sleep(10)
 
     # Check if bot is running
@@ -37,14 +45,14 @@ def validate_balance():
     try:
         result = subprocess.run(['pgrep', '-f', 'python.*bot'], capture_output=True, text=True)
         if result.stdout.strip():
-            print("✅ Bot is running")
+            logger.info("✅ Bot is running")
         else:
-            print("❌ Bot is not running")
+            logger.warning("❌ Bot is not running")
     except Exception as e:
-        print(f"⚠️ Could not check if bot is running: {e}")
+        logger.error(f"⚠️ Could not check if bot is running: {e}")
 
-    print("\n📋 VALIDATION COMPLETE")
-    print("If you see negative balance in logs, run this script again after bot restart")
+    logger.info("📋 VALIDATION COMPLETE")
+    logger.info("If you see negative balance in logs, run this script again after bot restart")
 
 if __name__ == "__main__":
     validate_balance()
