@@ -23,6 +23,11 @@ except Exception:  # pragma: no cover - fallback
 from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.indicators import (
+    calculate_atr,
+    calculate_bollinger_bands,
+    calculate_rsi,
+)
 from crypto_bot.utils import stats
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 
@@ -96,23 +101,14 @@ def _squeeze(
     recent = df.iloc[-(hist + 1) :]
 
     close = recent["close"]
-    high = recent["high"]
-    low = recent["low"]
 
-    # Calculate Bollinger Bands manually since ta library API changed
-    sma = close.rolling(bb_len).mean()
-    std = close.rolling(bb_len).std()
-    bb_upper = sma + (std * bb_std)
-    bb_lower = sma - (std * bb_std)
-    bb_width = bb_upper - bb_lower
-    bb_mid = sma
+    bb = calculate_bollinger_bands(close, window=bb_len, num_std=bb_std)
+    bb_mid = bb.middle
+    bb_upper = bb.upper
+    bb_lower = bb.lower
+    bb_width = bb.width
 
-    # Calculate ATR manually
-    high_low = high - low
-    high_close = (high - close.shift(1)).abs()
-    low_close = (low - close.shift(1)).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    atr = tr.rolling(window=kc_len).mean()
+    atr = calculate_atr(recent, window=kc_len)
     kc_width = 2 * atr * kc_mult
 
     if len(bb_width) >= lookback:
@@ -204,12 +200,7 @@ def generate_signal(
     dc_low = low.rolling(donchian_window).min().shift(1)
     vol_ma = volume.rolling(vol_window).mean()
 
-    # Calculate RSI manually
-    delta = close.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
+    rsi = calculate_rsi(close, window=14)
 
     # Calculate MACD manually
     ema_fast = close.ewm(span=12, adjust=False).mean()

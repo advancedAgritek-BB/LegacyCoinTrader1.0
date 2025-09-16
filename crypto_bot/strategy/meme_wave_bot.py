@@ -7,6 +7,7 @@ import pandas as pd
 
 
 from ..sentiment_filter import get_lunarcrush_sentiment_boost, get_sentiment_score
+from crypto_bot.utils.indicators import calculate_atr
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +56,14 @@ def generate_signal(
     price_change = float(df["close"].iloc[-1] - df["close"].iloc[-2]) if len(df) > 1 else 0.0
     vol = float(df["volume"].iloc[-1])
     
-    # Calculate ATR manually
+    # Calculate ATR using shared helper
     try:
-        high_low = df["high"] - df["low"]
-        high_close = (df["high"] - df["close"].shift(1)).abs()
-        low_close = (df["low"] - df["close"].shift(1)).abs()
-        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-        atr_series = tr.rolling(window=atr_window).mean()
-        atr_value = atr_series.iloc[-1] if len(atr_series) > 0 and not pd.isna(atr_series.iloc[-1]) else 0.0
+        atr_series = calculate_atr(df, window=atr_window)
+        atr_value = (
+            atr_series.iloc[-1]
+            if len(atr_series) > 0 and not pd.isna(atr_series.iloc[-1])
+            else 0.0
+        )
     except Exception as e:
         logger.warning(f"Failed to calculate ATR: {e}")
         atr_value = 0.0

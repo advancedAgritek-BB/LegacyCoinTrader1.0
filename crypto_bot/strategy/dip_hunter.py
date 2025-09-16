@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.indicators import calculate_atr, calculate_bollinger_bands, calculate_rsi
 from crypto_bot.utils import stats
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
@@ -87,12 +88,7 @@ def generate_signal(
     if len(recent) < required_bars:
         return 0.0, "none"
 
-    # Calculate RSI manually
-    delta = recent["close"].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=rsi_window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_window).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
+    rsi = calculate_rsi(recent["close"], window=rsi_window)
 
     # ADX requires at least twice the window length for a stable reading
     if len(recent) < 2 * adx_window:
@@ -105,26 +101,14 @@ def generate_signal(
     dm_plus = ((high_diff > low_diff) & (high_diff > 0)) * high_diff
     dm_minus = ((low_diff > high_diff) & (low_diff > 0)) * (-low_diff)
 
-    tr = pd.concat([
-        recent["high"] - recent["low"],
-        (recent["high"] - recent["close"].shift(1)).abs(),
-        (recent["low"] - recent["close"].shift(1)).abs()
-    ], axis=1).max(axis=1)
-
-    atr = tr.rolling(window=adx_window).mean()
+    atr = calculate_atr(recent, window=adx_window)
     di_plus = 100 * (dm_plus.rolling(window=adx_window).mean() / atr)
     di_minus = 100 * (dm_minus.rolling(window=adx_window).mean() / atr)
     dx = 100 * ((di_plus - di_minus).abs() / (di_plus + di_minus))
     adx = dx.rolling(window=adx_window).mean()
 
-    # Calculate Bollinger Bands manually
-    bb_mean = recent["close"].rolling(bb_window).mean()
-    bb_std = recent["close"].rolling(bb_window).std()
-    bb_width = (bb_std * 4) / bb_mean  # 2 standard deviations on each side
-    bb_mid = bb_mean
-    bb_upper = bb_mid + (bb_width / 2)
-    bb_lower = bb_mid - (bb_width / 2)
-    bb_pct = (recent["close"] - bb_lower) / (bb_upper - bb_lower)
+    bb = calculate_bollinger_bands(recent["close"], window=bb_window, num_std=2)
+    bb_pct = (recent["close"] - bb.lower) / (bb.upper - bb.lower)
     vol_ma = recent["volume"].rolling(vol_window).mean()
 
     rsi = cache_series("rsi_dip", df, rsi, lookback)

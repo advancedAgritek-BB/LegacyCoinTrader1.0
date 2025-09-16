@@ -22,6 +22,11 @@ except Exception:  # pragma: no cover - fallback
     scipy_stats = _FakeStats()
 from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.indicators import (
+    calculate_atr,
+    calculate_bollinger_bands,
+    calculate_rsi,
+)
 from crypto_bot.utils import stats
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
@@ -80,31 +85,30 @@ def generate_signal(
     lookback = 14
     recent = df.iloc[-(lookback + 1) :]
 
-    # Calculate RSI manually to avoid ta library issues
-    rsi = recent["close"].rolling(14).mean()  # Simplified RSI calculation
-    rsi_z = (rsi - rsi.rolling(14).mean()) / rsi.rolling(14).std() if len(rsi.dropna()) > 14 else 0
+    rsi = calculate_rsi(recent["close"], window=14)
+    if rsi.dropna().empty:
+        rsi_z = pd.Series([0.0] * len(recent), index=recent.index)
+    else:
+        rsi_filled = rsi.fillna(method="bfill").fillna(method="ffill")
+        rsi_z = stats.zscore(rsi_filled, lookback_cfg)
+        rsi_z = rsi_z.reindex(recent.index)
+        rsi_z[rsi.isna()] = 0.0
 
     mean = recent["close"].rolling(14).mean()
     std = recent["close"].rolling(14).std()
 
-    # Ensure we have valid data before calculations
     if len(mean.dropna()) == 0 or len(std.dropna()) == 0:
         bb_z = pd.Series([0] * len(recent), index=recent.index)
     else:
         bb_z = (recent["close"] - mean) / std
 
-    # Calculate Keltner Channel manually
     typical_price = (recent["high"] + recent["low"] + recent["close"]) / 3
-    atr = (recent["high"] - recent["low"]).rolling(14).mean()  # Simplified ATR
+    atr = calculate_atr(recent, window=14)
     kc_h = typical_price + atr * 2
     kc_l = typical_price - atr * 2
 
-    # Calculate Bollinger Bands manually
-    bb_mean = df["close"].rolling(14).mean()
-    bb_std = df["close"].rolling(14).std()
-    bb_width_full = (bb_std * 4) / bb_mean  # 2 standard deviations on each side
-    # Convert numpy array to pandas Series for rolling operations
-    bb_width_full_series = pd.Series(bb_width_full, index=df.index)
+    bb_full = calculate_bollinger_bands(df["close"], window=14, num_std=2)
+    bb_width_full_series = bb_full.width.divide(bb_full.middle)
     median_bw_20_full = bb_width_full_series.rolling(14).median()
     bb_width = bb_width_full_series.iloc[-(lookback + 1) :]
     median_bw_20 = median_bw_20_full.iloc[-(lookback + 1) :]
@@ -116,12 +120,7 @@ def generate_signal(
     cumulative_volume = recent["volume"].cumsum()
     vwap_series = cumulative_volume_price / cumulative_volume
 
-    # Calculate ATR manually (simplified)
-    high_low = df["high"] - df["low"]
-    high_close = (df["high"] - df["close"].shift(1)).abs()
-    low_close = (df["low"] - df["close"].shift(1)).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    atr_full = tr.rolling(14).mean()
+    atr_full = calculate_atr(df, window=14)
 
     # Calculate ADX manually (simplified)
     dm_plus = ((df["high"] - df["high"].shift(1)).where((df["high"] - df["high"].shift(1)) > (df["low"].shift(1) - df["low"]), 0))

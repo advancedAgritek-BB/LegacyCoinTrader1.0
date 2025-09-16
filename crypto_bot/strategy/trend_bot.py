@@ -21,6 +21,7 @@ except Exception:  # pragma: no cover - fallback when scipy missing
 
     scipy_stats = _FakeStats()
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.indicators import calculate_atr, calculate_rsi
 from crypto_bot.utils import stats
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 
@@ -128,26 +129,16 @@ def generate_signal(
     volume_mult = float(cfg.volume_mult)
     adx_threshold = float(cfg.adx_threshold)
 
-    # Calculate indicators manually
+    # Calculate indicators
     df["ema_fast"] = df["close"].ewm(span=fast_window, adjust=False).mean()
     df["ema_slow"] = df["close"].ewm(span=slow_window, adjust=False).mean()
 
-    # Calculate RSI manually
-    delta = df["close"].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    df["rsi"] = 100 - (100 / (1 + rs))
+    df["rsi"] = calculate_rsi(df["close"], window=14)
 
     df["rsi_z"] = stats.zscore(df["rsi"], lookback_cfg)
     df["volume_ma"] = df["volume"].rolling(window=volume_window).mean()
 
-    # Calculate ATR manually
-    high_low = df["high"] - df["low"]
-    high_close = (df["high"] - df["close"].shift(1)).abs()
-    low_close = (df["low"] - df["close"].shift(1)).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    df["atr"] = tr.rolling(window=atr_period).mean()
+    df["atr"] = calculate_atr(df, window=atr_period)
     
     # Use indicator_lookback if provided, otherwise use default calculation
     if lookback_cfg is not None:
@@ -161,12 +152,7 @@ def generate_signal(
     ema20 = recent["close"].ewm(span=20, adjust=False).mean()
     ema50 = recent["close"].ewm(span=50, adjust=False).mean()
 
-    # Calculate RSI manually for recent data
-    delta_recent = recent["close"].diff()
-    gain_recent = (delta_recent.where(delta_recent > 0, 0)).rolling(window=14).mean()
-    loss_recent = (-delta_recent.where(delta_recent < 0, 0)).rolling(window=14).mean()
-    rs_recent = gain_recent / loss_recent
-    rsi = 100 - (100 / (1 + rs_recent))
+    rsi = calculate_rsi(recent["close"], window=14)
 
     vol_ma = recent["volume"].rolling(window=volume_window).mean()
 
@@ -199,13 +185,7 @@ def generate_signal(
     dm_plus = ((high_diff > low_diff) & (high_diff > 0)) * high_diff
     dm_minus = ((low_diff > high_diff) & (low_diff > 0)) * (-low_diff)
 
-    tr = pd.concat([
-        df["high"] - df["low"],
-        (df["high"] - df["close"].shift(1)).abs(),
-        (df["low"] - df["close"].shift(1)).abs()
-    ], axis=1).max(axis=1)
-
-    atr = tr.rolling(window=7).mean()
+    atr = calculate_atr(df, window=7)
     di_plus = 100 * (dm_plus.rolling(window=7).mean() / atr)
     di_minus = 100 * (dm_minus.rolling(window=7).mean() / atr)
 
