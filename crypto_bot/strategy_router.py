@@ -85,6 +85,58 @@ from datetime import datetime, timedelta
 logger = setup_logger(__name__, LOG_DIR / "bot.log")
 _SYMBOL_LOCKS: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
 
+STRATEGY_CONFIG_TYPES: dict[str, type] = {
+    "trend_bot": getattr(trend_bot, "TrendBotConfig", None),
+    "mean_bot": getattr(mean_bot, "MeanBotConfig", None),
+    "dex_scalper": getattr(dex_scalper, "DexScalperConfig", None),
+    "breakout_bot": getattr(breakout_bot, "BreakoutBotConfig", None),
+    "micro_scalp_bot": getattr(micro_scalp_bot, "MicroScalpConfig", None),
+    "momentum_bot": getattr(momentum_bot, "MomentumBotConfig", None),
+    "sniper_bot": getattr(sniper_bot, "SniperBotConfig", None),
+}
+STRATEGY_CONFIG_TYPES = {
+    name: cls for name, cls in STRATEGY_CONFIG_TYPES.items() if cls is not None
+}
+
+
+def _resolve_strategy_name(fn: Callable[..., Any]) -> str:
+    """Return the canonical strategy name for ``fn``."""
+
+    module = getattr(fn, "__module__", "")
+    if module.startswith("crypto_bot.strategy."):
+        return module.rsplit(".", 1)[-1]
+    return getattr(fn, "__name__", "")
+
+
+def _build_strategy_config_object(
+    fn: Callable[[pd.DataFrame], Tuple[float, str]],
+    cfg: Optional[Union[RouterConfig, Mapping[str, Any]]],
+) -> Any:
+    """Return configuration object for ``fn`` derived from ``cfg``."""
+
+    strategy_name = _resolve_strategy_name(fn)
+    config_cls = STRATEGY_CONFIG_TYPES.get(strategy_name)
+
+    raw_cfg: Optional[Mapping[str, Any]]
+    if isinstance(cfg, RouterConfig):
+        raw_cfg = cfg.as_dict()
+    else:
+        raw_cfg = cfg  # type: ignore[assignment]
+
+    if config_cls is not None:
+        return config_cls.from_dict(raw_cfg)
+
+    if isinstance(raw_cfg, Mapping):
+        specific = raw_cfg.get(strategy_name)
+        if isinstance(specific, Mapping):
+            merged = dict(raw_cfg)
+            merged.update(specific)
+            return merged
+        return raw_cfg
+
+    return raw_cfg
+
+
 CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
 with open(CONFIG_PATH) as f:
     DEFAULT_CONFIG = yaml.safe_load(f)
@@ -772,14 +824,7 @@ def route(
             original_df_type = type(df)
             original_df_id = id(df)
 
-            # Merge strategy-specific config with global config
-            strategy_config = cfg
-            if cfg and isinstance(cfg, dict):
-                strategy_name = getattr(fn, '__name__', '').replace('_bot', '').replace('_', '')
-                if strategy_name in cfg:
-                    # Merge strategy-specific config with global config
-                    strategy_config = {**cfg, **cfg[strategy_name]}
-                    logger.debug(f"Applied strategy-specific config for {strategy_name}")
+            strategy_config = _build_strategy_config_object(fn, cfg)
 
             try:
                 # Check if the function is async

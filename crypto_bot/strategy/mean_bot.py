@@ -1,4 +1,7 @@
-from typing import Optional, Tuple
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -17,26 +20,62 @@ except Exception:  # pragma: no cover - fallback
         norm = _Norm()
 
     scipy_stats = _FakeStats()
+from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils import stats
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 
 
-def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[float, str]:
+@dataclass
+class MeanBotConfig:
+    """Configuration for the mean reversion strategy."""
+
+    indicator_lookback: int = 14
+    rsi_overbought_pct: float = 90.0
+    rsi_oversold_pct: float = 10.0
+    adx_threshold: float = 20.0
+    sl_mult: float = 1.5
+    tp_mult: float = 2.0
+    ml_enabled: bool = True
+    atr_normalization: bool = True
+
+    @classmethod
+    def from_dict(cls, data: object) -> "MeanBotConfig":
+        params = extract_params(
+            data,
+            {
+                "indicator_lookback",
+                "rsi_overbought_pct",
+                "rsi_oversold_pct",
+                "adx_threshold",
+                "sl_mult",
+                "tp_mult",
+                "ml_enabled",
+                "atr_normalization",
+            },
+            ("mean_bot", "mean"),
+        )
+        return apply_defaults(cls, params)
+
+
+def generate_signal(
+    df: pd.DataFrame,
+    config: Optional[MeanBotConfig | Mapping[str, Any]] = None,
+) -> Tuple[float, str]:
     """Score mean reversion opportunities using multiple indicators."""
 
     if len(df) < 50:
         return 0.0, "none"
 
-    params = config or {}
-    lookback_cfg = int(params.get("indicator_lookback", 14))
-    rsi_overbought_pct = float(params.get("rsi_overbought_pct", 90))
-    rsi_oversold_pct = float(params.get("rsi_oversold_pct", 10))
-    adx_threshold = float(params.get("adx_threshold", 20))
-    sl_mult = float(params.get("sl_mult", 1.5))
-    tp_mult = float(params.get("tp_mult", 2.0))
-    ml_enabled = bool(params.get("ml_enabled", True))
+    cfg = MeanBotConfig.from_dict(config)
+    lookback_cfg = int(cfg.indicator_lookback)
+    rsi_overbought_pct = float(cfg.rsi_overbought_pct)
+    rsi_oversold_pct = float(cfg.rsi_oversold_pct)
+    adx_threshold = float(cfg.adx_threshold)
+    sl_mult = float(cfg.sl_mult)
+    tp_mult = float(cfg.tp_mult)
+    ml_enabled = bool(cfg.ml_enabled)
 
     lookback = 14
     recent = df.iloc[-(lookback + 1) :]
@@ -202,7 +241,7 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
         except Exception:
             pass
 
-    if config is None or config.get("atr_normalization", True):
+    if cfg.atr_normalization:
         score = normalize_score_by_volatility(df, score)
 
     return float(max(0.0, min(score, 1.0))), direction

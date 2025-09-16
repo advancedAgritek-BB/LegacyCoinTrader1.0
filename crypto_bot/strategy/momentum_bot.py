@@ -1,14 +1,50 @@
-from typing import Optional, Tuple
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Mapping, Optional, Tuple
 
 import logging
 import pandas as pd
 
+from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class MomentumBotConfig:
+    """Configuration for the momentum breakout strategy."""
+
+    donchian_window: int = 20
+    volume_window: int = 20
+    volume_z_min: float = 0.5
+    rsi_threshold: float = 55.0
+    macd_min: float = 0.0
+    fast_length: int = 12
+    slow_length: int = 26
+    atr_normalization: bool = True
+
+    @classmethod
+    def from_dict(cls, data: object) -> "MomentumBotConfig":
+        params = extract_params(
+            data,
+            {
+                "donchian_window",
+                "volume_window",
+                "volume_z_min",
+                "rsi_threshold",
+                "macd_min",
+                "fast_length",
+                "slow_length",
+                "atr_normalization",
+            },
+            ("momentum_bot", "momentum"),
+        )
+        return apply_defaults(cls, params)
 
 NAME = "momentum_bot"
 
@@ -34,18 +70,18 @@ def generate_signal(
         kwargs.setdefault("config", timeframe)
         timeframe = None
     config = kwargs.get("config")
+    cfg = MomentumBotConfig.from_dict(config)
 
     if df is None or df.empty:
         return 0.0, "none"
 
-    params = config.get("momentum_bot", {}) if config else {}
-    window = int(params.get("donchian_window", 20))
-    vol_window = int(params.get("volume_window", 20))
-    vol_z_min = float(params.get("volume_z_min", 0.5))
-    rsi_threshold = float(params.get("rsi_threshold", 55))
-    macd_min = float(params.get("macd_min", 0.0))
-    macd_fast = int(params.get("fast_length", 12))
-    macd_slow = int(params.get("slow_length", 26))
+    window = int(cfg.donchian_window)
+    vol_window = int(cfg.volume_window)
+    vol_z_min = float(cfg.volume_z_min)
+    rsi_threshold = float(cfg.rsi_threshold)
+    macd_min = float(cfg.macd_min)
+    macd_fast = int(cfg.fast_length)
+    macd_slow = int(cfg.slow_length)
     rsi_window = 14
 
     min_len = max(window, vol_window, macd_slow, rsi_window)
@@ -140,7 +176,7 @@ def generate_signal(
                 logger.warning(f"ML prediction failed, using base score: {e}")
                 # Continue with base score if ML fails
                 pass
-        if config is None or config.get("atr_normalization", True):
+        if cfg.atr_normalization:
             score = normalize_score_by_volatility(recent, score)
 
     logger.info(

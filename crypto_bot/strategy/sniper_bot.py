@@ -1,8 +1,11 @@
-from typing import Dict, Optional, Tuple, Union
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Mapping, Optional, Tuple, Union
 
 import pandas as pd
 
-
+from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.pair_cache import load_liquid_pairs
 from crypto_bot.volatility_filter import calc_atr
@@ -11,9 +14,51 @@ DEFAULT_PAIRS = ["BTC/USD", "ETH/USD"]
 ALLOWED_PAIRS = load_liquid_pairs() or DEFAULT_PAIRS
 
 
+@dataclass
+class SniperBotConfig:
+    """Configuration for the sniper bot strategy."""
+
+    symbol: str = ""
+    breakout_pct: float = 0.05
+    volume_multiple: float = 1.5
+    max_history: int = 30
+    initial_window: int = 3
+    min_volume: float = 100.0
+    direction: str = "auto"
+    atr_window: int = 14
+    volume_window: int = 5
+    price_fallback: bool = True
+    fallback_atr_mult: float = 1.5
+    fallback_volume_mult: float = 1.2
+    atr_normalization: bool = True
+
+    @classmethod
+    def from_dict(cls, data: object) -> "SniperBotConfig":
+        params = extract_params(
+            data,
+            {
+                "symbol",
+                "breakout_pct",
+                "volume_multiple",
+                "max_history",
+                "initial_window",
+                "min_volume",
+                "direction",
+                "atr_window",
+                "volume_window",
+                "price_fallback",
+                "fallback_atr_mult",
+                "fallback_volume_mult",
+                "atr_normalization",
+            },
+            ("sniper_bot", "sniper"),
+        )
+        return apply_defaults(cls, params)
+
+
 def generate_signal(
     df: pd.DataFrame,
-    config: Optional[Dict[str, Union[float, int, str]]] = None,
+    config: Optional[SniperBotConfig | Mapping[str, Union[float, int, str]]] = None,
     *,
     breakout_pct: float = 0.05,
     volume_multiple: float = 1.5,
@@ -72,22 +117,24 @@ def generate_signal(
     Tuple[float, str, float, bool]
         Score between 0 and 1, trade direction, ATR value and event flag.
     """
-    symbol = config.get("symbol") if config else ""
+    config_provided = bool(config)
+    cfg = SniperBotConfig.from_dict(config)
+    symbol = cfg.symbol
     if symbol and ALLOWED_PAIRS and symbol not in ALLOWED_PAIRS:
         return 0.0, "none"
 
-    if config:
-        breakout_pct = config.get("breakout_pct", breakout_pct)
-        volume_multiple = config.get("volume_multiple", volume_multiple)
-        max_history = config.get("max_history", max_history)
-        initial_window = config.get("initial_window", initial_window)
-        min_volume = config.get("min_volume", min_volume)
-        direction = config.get("direction", direction)
-        atr_window = int(config.get("atr_window", atr_window))
-        volume_window = int(config.get("volume_window", volume_window))
-        price_fallback = config.get("price_fallback", price_fallback)
-        fallback_atr_mult = config.get("fallback_atr_mult", fallback_atr_mult)
-        fallback_volume_mult = config.get("fallback_volume_mult", fallback_volume_mult)
+    if config_provided:
+        breakout_pct = float(cfg.breakout_pct)
+        volume_multiple = float(cfg.volume_multiple)
+        max_history = int(cfg.max_history)
+        initial_window = int(cfg.initial_window)
+        min_volume = float(cfg.min_volume)
+        direction = cfg.direction
+        atr_window = int(cfg.atr_window)
+        volume_window = int(cfg.volume_window)
+        price_fallback = bool(cfg.price_fallback)
+        fallback_atr_mult = float(cfg.fallback_atr_mult)
+        fallback_volume_mult = float(cfg.fallback_volume_mult)
 
     if high_freq:
         max_history = min(max_history, 20)
@@ -100,7 +147,7 @@ def generate_signal(
     if direction == "auto" and price_change < 0:
         atr = calc_atr(df)
         score = 1.0
-        if config is None or config.get("atr_normalization", True):
+        if cfg.atr_normalization:
             score = normalize_score_by_volatility(df, score)
         return score, "short"
 
@@ -139,7 +186,7 @@ def generate_signal(
         price_score = min(abs(price_change) / breakout_pct, 1.0)
         vol_score = min(vol_ratio / volume_multiple, 1.0)
         score = (price_score + vol_score) / 2
-        if config is None or config.get("atr_normalization", True):
+        if cfg.atr_normalization:
             score = normalize_score_by_volatility(df, score)
         if direction not in {"auto", "long", "short"}:
             direction = "auto"
@@ -162,7 +209,7 @@ def generate_signal(
             and df["volume"].iloc[-1] > avg_vol * fallback_volume_mult
         ):
             score = 1.0
-            if config is None or config.get("atr_normalization", True):
+            if cfg.atr_normalization:
                 score = normalize_score_by_volatility(df, score)
             if direction not in {"auto", "long", "short"}:
                 direction = "auto"
