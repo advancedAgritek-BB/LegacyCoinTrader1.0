@@ -2,14 +2,18 @@ from __future__ import annotations
 
 """Simplified Solana sniping strategy."""
 
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import pandas as pd
 import ta
 
+from crypto_bot.fund_manager import auto_convert_funds
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.pyth_utils import get_pyth_price
 
-from crypto_bot.fund_manager import auto_convert_funds
+NAME = "sniper_solana"
+
+logger = setup_strategy_logger(NAME)
 
 
 class RugCheckAPI:
@@ -45,6 +49,7 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     """Return a signal score and direction based on ATR jumps."""
 
     if df is None or df.empty:
+        logger.debug("%s: received empty dataframe", NAME)
         return 0.0, "none"
 
     params = config or {}
@@ -58,9 +63,21 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     conf_pct = float(params.get("conf_pct", 0.0))
 
     if not is_trading or conf_pct > 0.5:
+        logger.debug(
+            "%s: trading disabled (is_trading=%s confidence=%.2f)",
+            NAME,
+            is_trading,
+            conf_pct,
+        )
         return 0.0, "none"
 
     if len(df) < atr_window + 1:
+        logger.debug(
+            "%s: insufficient history (have %d need %d)",
+            NAME,
+            len(df),
+            atr_window + 1,
+        )
         return 0.0, "none"
 
     # Use live price from Pyth if a token is provided
@@ -76,19 +93,41 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
         df["high"], df["low"], df["close"], window=atr_window
     )
     if atr.empty or pd.isna(atr.iloc[-1]):
+        logger.debug("%s: ATR calculation invalid", NAME)
         return 0.0, "none"
 
     price_change = df["close"].iloc[-1] - df["close"].iloc[-2]
     if abs(price_change) >= atr.iloc[-1] * jump_mult:
         direction = "long" if price_change > 0 else "short"
-        if token and RugCheckAPI.risk_score(token) >= rug_threshold:
+        if token:
+            rug_score = RugCheckAPI.risk_score(token)
+        else:
+            rug_score = 0.0
+        if token and rug_score >= rug_threshold:
+            logger.info(
+                "%s: rug risk %.2f exceeded threshold %.2f", NAME, rug_score, rug_threshold
+            )
             return 0.0, "none"
+        logger.info(
+            "%s: momentum spike %s price_change=%.4f atr=%.4f",
+            NAME,
+            direction,
+            price_change,
+            atr.iloc[-1],
+        )
         return 1.0, direction
 
     if entry_price is not None:
         if df["close"].iloc[-1] >= float(entry_price) * (1 + profit_target):
+            logger.info(
+                "%s: profit target reached close at %.4f entry %.4f",
+                NAME,
+                df["close"].iloc[-1],
+                float(entry_price),
+            )
             return 1.0, "close"
 
+    logger.debug("%s: no actionable signal", NAME)
     return 0.0, "none"
 
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import time
 import numpy as np
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from collections import deque
 
@@ -23,11 +23,13 @@ import pandas as pd
 import ta
 
 
-from crypto_bot.utils.logger import LOG_DIR, setup_logger
 from crypto_bot.utils.indicators import calculate_atr
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 
-logger = setup_logger(__name__, LOG_DIR / "market_making.log")
+NAME = "market_making_bot"
+
+logger = setup_strategy_logger(NAME)
 
 
 @dataclass
@@ -348,6 +350,7 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     This strategy works best in ranging/sideways markets with good liquidity.
     """
     if df.empty or len(df) < 20:
+        logger.debug("%s: insufficient data for regime detection", NAME)
         return 0.0, "none"
 
     # Calculate indicators for regime detection
@@ -376,18 +379,40 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     # Score based on market making suitability
     if trend_strength < 25 and price_vs_ma < 0.02:  # Less than 2% deviation from MA
         score = 0.8
+        logger.info(
+            "%s: favourable regime adx=%.2f price_vs_ma=%.4f",
+            NAME,
+            trend_strength,
+            price_vs_ma,
+        )
     elif trend_strength < 30 and price_vs_ma < 0.05:
         score = 0.6
+        logger.info(
+            "%s: moderate regime adx=%.2f price_vs_ma=%.4f",
+            NAME,
+            trend_strength,
+            price_vs_ma,
+        )
     else:
         score = 0.2
+        logger.debug(
+            "%s: weak regime adx=%.2f price_vs_ma=%.4f",
+            NAME,
+            trend_strength,
+            price_vs_ma,
+        )
 
     # Volume confirmation
     if "volume" in df.columns:
         vol_sma = df["volume"].rolling(20).mean()
         if df["volume"].iloc[-1] > vol_sma.iloc[-1]:
             score *= 1.2  # Boost score for high volume
+            logger.debug("%s: boosted score to %.2f on volume confirmation", NAME, score)
 
-    return min(score, 1.0), "market_making"
+    score = min(score, 1.0)
+    logger.info("%s: signal %.2f", NAME, score)
+
+    return score, "market_making"
 
 
 class regime_filter:

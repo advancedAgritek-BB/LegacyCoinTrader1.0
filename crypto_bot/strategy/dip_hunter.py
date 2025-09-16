@@ -1,22 +1,22 @@
 from typing import Optional, Tuple, Union
 
-import logging
-import pandas as pd
-
 import numpy as np
+import pandas as pd
 
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.indicators import calculate_atr, calculate_bollinger_bands, calculate_rsi
 from crypto_bot.utils import stats
-from crypto_bot.utils.volatility import normalize_score_by_volatility
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
-from crypto_bot.cooldown_manager import in_cooldown
-
-logger = logging.getLogger(__name__)
-
-ML_AVAILABLE = init_ml_or_warn()
+from crypto_bot.utils.volatility import normalize_score_by_volatility
+from crypto_bot.cooldown_manager import in_cooldown, mark_cooldown
 
 NAME = "dip_hunter"
+
+logger = setup_strategy_logger(NAME)
+score_logger = setup_strategy_logger(f"{NAME}.score")
+
+ML_AVAILABLE = init_ml_or_warn()
 if ML_AVAILABLE:
     MODEL = load_model("dip_hunter")
 else:  # pragma: no cover - fallback
@@ -57,6 +57,9 @@ def generate_signal(
     cooldown_enabled = bool(params.get("cooldown_enabled", False))
 
     if cooldown_enabled and symbol and in_cooldown(symbol, "buy"):
+        logger.info(
+            "%s: cooldown active for %s on %s", NAME, symbol, timeframe or "N/A"
+        )
         score_logger.info(
             "Signal for %s:%s -> %.3f, %s",
             symbol or "unknown",
@@ -86,12 +89,19 @@ def generate_signal(
     lookback = max(rsi_window, vol_window, adx_window, bb_window, dip_bars)
     recent = df.tail(required_bars)
     if len(recent) < required_bars:
+        logger.debug(
+            "%s: insufficient candles (have %d need %d)",
+            NAME,
+            len(recent),
+            required_bars,
+        )
         return 0.0, "none"
 
     rsi = calculate_rsi(recent["close"], window=rsi_window)
 
     # ADX requires at least twice the window length for a stable reading
     if len(recent) < 2 * adx_window:
+        logger.debug("%s: insufficient data for ADX window", NAME)
         return 0.0, "none"
 
     # Calculate ADX manually (simplified)
@@ -125,12 +135,16 @@ def generate_signal(
     latest = recent.iloc[-1]
 
     if len(recent) < dip_bars + 1:
+        logger.debug("%s: not enough bars to assess dip", NAME)
         return 0.0, "none"
     recent_returns = recent["close"].pct_change().iloc[-dip_bars:]
     dip_size = recent_returns.sum()
     is_dip = dip_size <= -dip_pct
 
     if cooldown_enabled and symbol and in_cooldown(symbol, "buy"):
+        logger.info(
+            "%s: cooldown triggered after calculations for %s", NAME, symbol
+        )
         score_logger.info(
             "Signal for %s:%s -> %.3f, %s",
             symbol or "unknown",
@@ -140,7 +154,16 @@ def generate_signal(
         )
         return 0.0, "none"
 
-    oversold = latest["rsi"] < rsi_oversold and latest["bb_pct"] < 0
+    bb_condition = latest["bb_pct"] < 0
+    if not bb_condition and is_dip and latest["bb_pct"] < 0.3:
+        logger.debug(
+            "%s: bb_pct %.2f still elevated, treating as oversold due to dip %.4f",
+            NAME,
+            latest["bb_pct"],
+            dip_size,
+        )
+        bb_condition = True
+    oversold = latest["rsi"] < rsi_oversold and bb_condition
     vol_spike = (
         latest["volume"] > latest["vol_ma"] * vol_mult if latest["vol_ma"] > 0 else False
     )
@@ -194,6 +217,14 @@ def generate_signal(
             score = normalize_score_by_volatility(df, score)
 
         score = max(0.0, min(score, 1.0))
+        logger.info(
+            "%s: long signal %.3f dip=%.4f oversold=%s vol_spike=%s",
+            NAME,
+            score,
+            dip_size,
+            oversold,
+            vol_spike,
+        )
         score_logger.info(
             "Signal for %s:%s -> %.3f, %s",
             symbol or "unknown",
@@ -204,6 +235,15 @@ def generate_signal(
         if cooldown_enabled and symbol:
             mark_cooldown(symbol, "buy")
         return score, "long"
+
+    logger.debug(
+        "%s: conditions not met dip=%s oversold=%s vol_spike=%s regime=%s",
+        NAME,
+        is_dip,
+        oversold,
+        vol_spike,
+        favorable_regime,
+    )
 
     return 0.0, "none"
 

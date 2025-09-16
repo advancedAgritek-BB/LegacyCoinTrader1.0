@@ -3,17 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Optional, Tuple
 
-import logging
+import numpy as np
 import pandas as pd
 
 from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.indicators import calculate_rsi
-from crypto_bot.utils.volatility import normalize_score_by_volatility
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
-import numpy as np
-
-logger = logging.getLogger(__name__)
+from crypto_bot.utils.volatility import normalize_score_by_volatility
 
 
 @dataclass
@@ -49,6 +47,8 @@ class MomentumBotConfig:
 
 NAME = "momentum_bot"
 
+logger = setup_strategy_logger(NAME)
+
 ML_AVAILABLE = init_ml_or_warn()
 MODEL: Optional[object]
 if ML_AVAILABLE:
@@ -74,6 +74,7 @@ def generate_signal(
     cfg = MomentumBotConfig.from_dict(config)
 
     if df is None or df.empty:
+        logger.debug("%s: received empty dataframe", NAME)
         return 0.0, "none"
 
     window = int(cfg.donchian_window)
@@ -87,6 +88,9 @@ def generate_signal(
 
     min_len = max(window, vol_window, macd_slow, rsi_window)
     if len(df) < min_len:
+        logger.debug(
+            "%s: insufficient history (have %d, need %d)", NAME, len(df), min_len
+        )
         return 0.0, "none"
 
     lookback = min(len(df), min_len)
@@ -142,11 +146,29 @@ def generate_signal(
         score = 0.8
         direction = "long"
         logger.info(
-            f"momentum_bot long signal: MACD={macd_val}, RSI={rsi_val}"
+            "%s: long setup macd=%.4f rsi=%.2f volume_z=%.2f",
+            NAME,
+            macd_val,
+            rsi_val,
+            volume_z,
         )
     elif short_cond and volume_z > vol_z_min:
         score = min(1.0, volume_z / 2)
         direction = "short"
+        logger.info(
+            "%s: short setup macd=%.4f rsi=%.2f volume_z=%.2f",
+            NAME,
+            macd_val,
+            rsi_val,
+            volume_z,
+        )
+    elif short_cond:
+        logger.debug(
+            "%s: short setup blocked by volume z-score %.2f < %.2f",
+            NAME,
+            volume_z,
+            vol_z_min,
+        )
 
     if score > 0:
         if MODEL is not None:
@@ -176,7 +198,8 @@ def generate_signal(
             score = normalize_score_by_volatility(recent, score)
 
     logger.info(
-        "RSI %.2f MACD %.5f score %.2f direction %s",
+        "%s: RSI %.2f MACD %.5f score %.2f direction %s",
+        NAME,
         float(latest.get("rsi", float("nan"))),
         float(latest.get("macd", float("nan"))),
         score,

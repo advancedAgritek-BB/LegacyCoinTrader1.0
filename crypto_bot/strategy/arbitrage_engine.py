@@ -21,9 +21,9 @@ from dataclasses import dataclass
 from collections import deque
 import heapq
 
-from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from crypto_bot.utils.logging import setup_strategy_logger
 
-logger = setup_logger(__name__, LOG_DIR / "arbitrage.log")
+logger = setup_strategy_logger("arbitrage_engine")
 
 
 @dataclass
@@ -186,6 +186,7 @@ class LatencyArbitrageEngine:
     def _find_cross_exchange_arb(self, symbol: str, prices: Dict[str, Dict]) -> Optional[ArbitrageOpportunity]:
         """Find cross-exchange arbitrage opportunity."""
         if len(prices) < 2:
+            logger.debug("cross_arb: insufficient price sources for %s", symbol)
             return None
 
         # Find best buy and sell prices
@@ -193,6 +194,7 @@ class LatencyArbitrageEngine:
         best_ask = min((p['ask'] for p in prices.values() if 'ask' in p), default=float('inf'))
 
         if best_bid >= best_ask:
+            logger.debug("cross_arb: negative spread for %s", symbol)
             return None
 
         # Calculate profit
@@ -200,6 +202,11 @@ class LatencyArbitrageEngine:
         profit_pct = spread / best_ask
 
         if profit_pct < self.config.min_profit_threshold:
+            logger.debug(
+                "cross_arb: profit %.4f below threshold %.4f",
+                profit_pct,
+                self.config.min_profit_threshold,
+            )
             return None
 
         # Find exchanges for buy and sell
@@ -216,7 +223,7 @@ class LatencyArbitrageEngine:
         fees = gross_profit * 0.002
         net_profit = gross_profit - fees
 
-        return ArbitrageOpportunity(
+        opportunity = ArbitrageOpportunity(
             opportunity_id=f"cross_{symbol}_{int(time.time()*1000)}",
             type="cross_exchange",
             symbols=[symbol],
@@ -230,6 +237,14 @@ class LatencyArbitrageEngine:
             execution_time_ms=0,
             timestamp=time.time()
         )
+        logger.info(
+            "cross_arb: %s buy on %s sell on %s profit_pct=%.4f",
+            symbol,
+            buy_exchange,
+            sell_exchange,
+            profit_pct,
+        )
+        return opportunity
 
     def _find_triangular_arb(self, exchange: str, triangle: List[str],
                                prices: Dict[str, Dict]) -> Optional[ArbitrageOpportunity]:
@@ -254,11 +269,16 @@ class LatencyArbitrageEngine:
             best_profit = max(profits)
 
             if best_profit < self.config.min_profit_threshold:
+                logger.debug(
+                    "tri_arb: best profit %.4f below threshold %.4f",
+                    best_profit,
+                    self.config.min_profit_threshold,
+                )
                 return None
 
             best_path = profits.index(best_profit)
 
-            return ArbitrageOpportunity(
+            opportunity = ArbitrageOpportunity(
                 opportunity_id=f"tri_{exchange}_{triangle[0]}_{int(time.time()*1000)}",
                 type="triangular",
                 symbols=triangle,
@@ -272,6 +292,14 @@ class LatencyArbitrageEngine:
                 execution_time_ms=0,
                 timestamp=time.time()
             )
+            logger.info(
+                "tri_arb: %s on %s path=%d profit_pct=%.4f",
+                triangle,
+                exchange,
+                best_path,
+                best_profit,
+            )
+            return opportunity
 
         except Exception as e:
             logger.error(f"Error calculating triangular arb: {e}")
@@ -285,6 +313,7 @@ class LatencyArbitrageEngine:
             asks = orderbook.get('asks', [])
 
             if not bids or not asks:
+                logger.debug("latency_arb: missing order book depth for %s", symbol)
                 return None
 
             # Look for large imbalances that suggest stale quotes
@@ -294,6 +323,7 @@ class LatencyArbitrageEngine:
             # Calculate imbalance ratio
             total_depth = bid_depth_10 + ask_depth_10
             if total_depth == 0:
+                logger.debug("latency_arb: zero depth for %s", symbol)
                 return None
 
             imbalance_ratio = (bid_depth_10 - ask_depth_10) / total_depth
@@ -308,7 +338,7 @@ class LatencyArbitrageEngine:
                 profit_pct = spread / ((best_bid + best_ask) / 2)
 
                 if profit_pct > self.config.min_profit_threshold:
-                    return ArbitrageOpportunity(
+                    opportunity = ArbitrageOpportunity(
                         opportunity_id=f"latency_{exchange}_{symbol}_{int(time.time()*1000)}",
                         type="latency",
                         symbols=[symbol],
@@ -322,6 +352,19 @@ class LatencyArbitrageEngine:
                         execution_time_ms=0,
                         timestamp=time.time()
                     )
+                    logger.info(
+                        "latency_arb: %s %s imbalance=%.2f profit_pct=%.4f",
+                        exchange,
+                        symbol,
+                        imbalance_ratio,
+                        profit_pct,
+                    )
+                    return opportunity
+                logger.debug(
+                    "latency_arb: profit %.4f below threshold %.4f",
+                    profit_pct,
+                    self.config.min_profit_threshold,
+                )
 
         except Exception as e:
             logger.error(f"Error in latency arbitrage: {e}")

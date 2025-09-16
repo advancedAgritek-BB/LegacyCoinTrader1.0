@@ -1,12 +1,14 @@
 from typing import Optional, Tuple
 
-import logging
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-logger = logging.getLogger(__name__)
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
+
 NAME = "lstm_bot"
+
+logger = setup_strategy_logger(NAME)
 
 ML_AVAILABLE = init_ml_or_warn()
 if ML_AVAILABLE:
@@ -27,6 +29,7 @@ def generate_signal(
         try:
             df = pd.DataFrame.from_dict(df)
         except Exception:
+            logger.warning("%s: failed to convert dictionary input to DataFrame", NAME)
             return 0.0, "none"
 
     if isinstance(symbol, dict) and timeframe is None:
@@ -38,9 +41,11 @@ def generate_signal(
     config = kwargs.get("config")
 
     if df is None or not isinstance(df, pd.DataFrame):
+        logger.debug("%s: invalid dataframe input", NAME)
         return 0.0, "none"
 
     if df.empty:
+        logger.debug("%s: received empty dataframe", NAME)
         return 0.0, "none"
 
     params = config or {}
@@ -49,6 +54,9 @@ def generate_signal(
     threshold = float(params.get("threshold_pct", 0.0))
 
     if len(df) < seq_len:
+        logger.debug(
+            "%s: insufficient history (have %d, need %d)", NAME, len(df), seq_len
+        )
         return 0.0, "none"
 
     score = 0.0
@@ -83,9 +91,12 @@ def generate_signal(
     direction = "none"
     if score > threshold:
         direction = "long"
+        logger.info("%s: long signal %.3f (threshold %.3f)", NAME, score, threshold)
     elif score < -threshold:
         direction = "short"
+        logger.info("%s: short signal %.3f (threshold %.3f)", NAME, score, threshold)
     else:
+        logger.debug("%s: score %.3f within threshold %.3f", NAME, score, threshold)
         score = 0.0
 
     return score, direction

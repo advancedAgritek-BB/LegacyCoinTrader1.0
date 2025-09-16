@@ -2,20 +2,20 @@
 
 from typing import Optional, Tuple
 
-import logging
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 from crypto_bot.utils import stats
 from crypto_bot.utils.indicator_cache import cache_series
-from crypto_bot.utils.volatility import normalize_score_by_volatility
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
-
-logger = logging.getLogger(__name__)
-
-ML_AVAILABLE = init_ml_or_warn()
+from crypto_bot.utils.volatility import normalize_score_by_volatility
 
 NAME = "stat_arb_bot"
+
+logger = setup_strategy_logger(NAME)
+
+ML_AVAILABLE = init_ml_or_warn()
 if ML_AVAILABLE:
     MODEL = load_model("stat_arb_bot")
 else:  # pragma: no cover - fallback
@@ -34,6 +34,7 @@ def _single_asset_signal(
 ) -> Tuple[float, str]:
     """Generate signal for single asset using mean reversion."""
     if df is None or df.empty or len(df) < 20:
+        logger.debug("%s: insufficient data for single asset signal", NAME)
         return 0.0, "none"
 
     config = kwargs.get("config", {})
@@ -46,20 +47,24 @@ def _single_asset_signal(
     zscore = (df["close"] - ma) / std
 
     if zscore.empty:
+        logger.debug("%s: z-score series empty", NAME)
         return 0.0, "none"
 
     latest_z = zscore.iloc[-1]
     if pd.isna(latest_z):
+        logger.debug("%s: latest z-score NaN", NAME)
         return 0.0, "none"
 
     # Generate signals based on z-score
     if latest_z < -z_threshold:
         # Price is below mean, potential long
         score = min(abs(latest_z) / z_threshold, 1.0)
+        logger.info("%s: single asset long z=%.2f", NAME, latest_z)
         return score, "long"
     elif latest_z > z_threshold:
         # Price is above mean, potential short
         score = min(latest_z / z_threshold, 1.0)
+        logger.info("%s: single asset short z=%.2f", NAME, latest_z)
         return score, "short"
 
     return 0.0, "none"
@@ -80,6 +85,7 @@ def generate_signal(
             try:
                 df_a = pd.DataFrame.from_dict(df_a)
             except Exception:
+                logger.warning("%s: failed to convert dict for df_a", NAME)
                 return 0.0, "none"
         return _single_asset_signal(df_a, symbol, timeframe, **kwargs)
 
@@ -88,11 +94,13 @@ def generate_signal(
         try:
             df_a = pd.DataFrame.from_dict(df_a)
         except Exception:
+            logger.warning("%s: failed to convert dict for df_a", NAME)
             return 0.0, "none"
     if isinstance(df_b, dict):
         try:
             df_b = pd.DataFrame.from_dict(df_b)
         except Exception:
+            logger.warning("%s: failed to convert dict for df_b", NAME)
             return 0.0, "none"
 
     if isinstance(symbol, dict) and timeframe is None:
@@ -105,9 +113,11 @@ def generate_signal(
 
     if (df_a is None or df_b is None or
         not isinstance(df_a, pd.DataFrame) or not isinstance(df_b, pd.DataFrame)):
+        logger.debug("%s: invalid dataframe inputs", NAME)
         return 0.0, "none"
 
     if df_a.empty or df_b.empty:
+        logger.debug("%s: empty dataframe inputs", NAME)
         return 0.0, "none"
 
     threshold = (
@@ -120,20 +130,30 @@ def generate_signal(
     )
 
     if len(df_a) < lookback or len(df_b) < lookback:
+        logger.debug(
+            "%s: insufficient history len_a=%d len_b=%d need=%d",
+            NAME,
+            len(df_a),
+            len(df_b),
+            lookback,
+        )
         return 0.0, "none"
 
     corr = df_a["close"].corr(df_b["close"])
     if pd.isna(corr) or corr < _CORRELATION_THRESHOLD:
+        logger.debug("%s: correlation %.2f below threshold", NAME, float(corr))
         return 0.0, "none"
 
     spread = df_a["close"] - df_b["close"]
     z = stats.zscore(spread, lookback)
     z = cache_series("stat_arb_z", df_a, z, lookback)
     if z.empty:
+        logger.debug("%s: spread z-score empty", NAME)
         return 0.0, "none"
 
     z_last = z.iloc[-1]
     if abs(z_last) <= threshold:
+        logger.debug("%s: |z| %.2f <= threshold %.2f", NAME, z_last, threshold)
         return 0.0, "none"
 
     direction = "long" if z_last < 0 else "short"
@@ -165,6 +185,8 @@ def generate_signal(
                 pass
         if config is None or config.get("atr_normalization", True):
             score = normalize_score_by_volatility(df_a, score)
+
+    logger.info("%s: signal %.2f direction %s", NAME, score, direction)
 
     return score, direction
 
