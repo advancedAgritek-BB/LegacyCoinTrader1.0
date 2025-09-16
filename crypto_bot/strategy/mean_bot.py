@@ -30,7 +30,7 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
         return 0.0, "none"
 
     params = config or {}
-    lookback_cfg = int(params.get("indicator_lookback", 14))
+    lookback_cfg = max(int(params.get("indicator_lookback", 14)), 1)
     rsi_overbought_pct = float(params.get("rsi_overbought_pct", 90))
     rsi_oversold_pct = float(params.get("rsi_oversold_pct", 10))
     adx_threshold = float(params.get("adx_threshold", 20))
@@ -41,9 +41,33 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     lookback = 14
     recent = df.iloc[-(lookback + 1) :]
 
-    # Calculate RSI manually to avoid ta library issues
-    rsi = recent["close"].rolling(14).mean()  # Simplified RSI calculation
-    rsi_z = (rsi - rsi.rolling(14).mean()) / rsi.rolling(14).std() if len(rsi.dropna()) > 14 else 0
+    # Calculate RSI using smoothed average gains and losses (Wilder's method)
+    close_delta = df["close"].diff()
+    gains = close_delta.clip(lower=0.0)
+    losses = -close_delta.clip(upper=0.0)
+
+    avg_gain = gains.ewm(alpha=1 / lookback_cfg, adjust=False, min_periods=lookback_cfg).mean()
+    avg_loss = losses.ewm(alpha=1 / lookback_cfg, adjust=False, min_periods=lookback_cfg).mean()
+    zero_loss = avg_loss == 0
+    zero_gain = avg_gain == 0
+
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    rsi_full = 100 - (100 / (1 + rs))
+    rsi_full = rsi_full.where(~(zero_loss & ~zero_gain), 100.0)
+    rsi_full = rsi_full.where(~(zero_gain & ~zero_loss), 0.0)
+    rsi_full = rsi_full.where(~(zero_gain & zero_loss), 50.0)
+    rsi_full = rsi_full.clip(lower=0, upper=100)
+
+    rsi_mean_full = rsi_full.rolling(lookback_cfg).mean()
+    rsi_std_full = rsi_full.rolling(lookback_cfg).std().replace(0, np.nan)
+    rsi_z_full = stats.zscore(rsi_full, lookback=lookback_cfg)
+
+    rsi = rsi_full.iloc[-(lookback + 1) :]
+    rsi_z = rsi_z_full.iloc[-(lookback + 1) :]
+    rsi_mean_recent = rsi_mean_full.iloc[-(lookback + 1) :]
+    rsi_std_recent = rsi_std_full.iloc[-(lookback + 1) :]
+    rsi_mean_last = rsi_mean_recent.iloc[-1] if len(rsi_mean_recent) else np.nan
+    rsi_std_last = rsi_std_recent.iloc[-1] if len(rsi_std_recent) else np.nan
 
     mean = recent["close"].rolling(14).mean()
     std = recent["close"].rolling(14).std()
@@ -149,11 +173,17 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     dynamic_overbought_pct = np.clip(rsi_overbought_pct - atr_pct * tp_mult, 51, 99)
     lower_thr = scipy_stats.norm.ppf(dynamic_oversold_pct / 100)
     upper_thr = scipy_stats.norm.ppf(dynamic_overbought_pct / 100)
+    if pd.isna(rsi_std_last) or rsi_std_last == 0 or pd.isna(rsi_mean_last):
+        lower_level = float(dynamic_oversold_pct)
+        upper_level = float(dynamic_overbought_pct)
+    else:
+        lower_level = float(np.clip(rsi_mean_last + lower_thr * rsi_std_last, 0, 100))
+        upper_level = float(np.clip(rsi_mean_last + upper_thr * rsi_std_last, 0, 100))
     oversold_cond = (
-        rsi_z_last < lower_thr if not pd.isna(rsi_z_last) else latest["rsi"] < 50
+        rsi_z_last < lower_thr if not pd.isna(rsi_z_last) else latest["rsi"] <= lower_level
     )
     overbought_cond = (
-        rsi_z_last > upper_thr if not pd.isna(rsi_z_last) else latest["rsi"] > 50
+        rsi_z_last > upper_thr if not pd.isna(rsi_z_last) else latest["rsi"] >= upper_level
     )
 
     if oversold_cond:
