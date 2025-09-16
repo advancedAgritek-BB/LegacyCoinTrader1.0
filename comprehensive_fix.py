@@ -7,14 +7,20 @@ Comprehensive fix for evaluation pipeline issues:
 4. Test the pipeline
 """
 
-import yaml
 import os
 from pathlib import Path
+
+import yaml
+
+from crypto_bot.utils.logger import LOG_DIR, setup_logger
+
+
+logger = setup_logger("comprehensive_fix", LOG_DIR / "comprehensive_fix.log")
 
 def apply_comprehensive_fix():
     """Apply comprehensive fix to resolve all evaluation pipeline issues."""
     
-    print("🔧 Applying comprehensive fix for evaluation pipeline...")
+    logger.info("🔧 Applying comprehensive fix for evaluation pipeline...")
     
     # Load current config
     config_path = Path("crypto_bot/config.yaml")
@@ -29,22 +35,22 @@ def apply_comprehensive_fix():
     ]
     
     config['symbols'] = supported_symbols
-    print(f"✅ Set symbols to {len(supported_symbols)} supported pairs")
+    logger.info(f"✅ Set symbols to {len(supported_symbols)} supported pairs")
     
     # 2. Disable symbol filtering fallbacks
     config['skip_symbol_filters'] = True
-    print("✅ Disabled symbol filtering fallbacks")
+    logger.info("✅ Disabled symbol filtering fallbacks")
     
     # 3. Disable Solana scanning
     if 'solana_scanner' in config:
         config['solana_scanner']['enabled'] = False
-        print("✅ Disabled Solana scanner")
+        logger.info("✅ Disabled Solana scanner")
     
     # 4. Set conservative settings
     config['symbol_batch_size'] = 5
     config['max_concurrent_ohlcv'] = 2
     config['symbol_refresh_minutes'] = 60  # Cache for 1 hour
-    print("✅ Set conservative batch and concurrency settings")
+    logger.info("✅ Set conservative batch and concurrency settings")
     
     # 5. Add strict validation
     symbol_validation = {
@@ -56,13 +62,13 @@ def apply_comprehensive_fix():
         'strict_mode': True
     }
     config['symbol_validation'] = symbol_validation
-    print("✅ Added strict symbol validation")
+    logger.info("✅ Added strict symbol validation")
     
     # 6. Ensure proper execution mode
     config['execution_mode'] = 'dry_run'
     config['mode'] = 'cex'
     config['testing_mode'] = True
-    print("✅ Set to dry run testing mode")
+    logger.info("✅ Set to dry run testing mode")
     
     # 7. Add pipeline stability
     pipeline_config = {
@@ -74,18 +80,18 @@ def apply_comprehensive_fix():
         'disable_complex_filters': True
     }
     config['pipeline_stability'] = pipeline_config
-    print("✅ Added pipeline stability configuration")
+    logger.info("✅ Added pipeline stability configuration")
     
     # 8. Disable problematic features
     config['use_websocket'] = False  # Use REST only for stability
     config['enhanced_backtesting'] = {'enabled': False}
-    print("✅ Disabled problematic features")
+    logger.info("✅ Disabled problematic features")
     
     # Save updated config
     with open(config_path, 'w') as f:
         yaml.dump(config, f, default_flow_style=False, indent=2)
     
-    print("✅ Configuration updated successfully")
+    logger.info("✅ Configuration updated successfully")
     
     # Create comprehensive restart script
     restart_script = """#!/bin/bash
@@ -124,7 +130,7 @@ fi
         f.write(restart_script)
     
     os.chmod("restart_comprehensive.sh", 0o755)
-    print("✅ Created comprehensive restart script: restart_comprehensive.sh")
+    logger.info("✅ Created comprehensive restart script: restart_comprehensive.sh")
     
     # Create test script
     test_script = """#!/usr/bin/env python3
@@ -175,19 +181,19 @@ if __name__ == "__main__":
         f.write(test_script)
     
     os.chmod("test_pipeline.py", 0o755)
-    print("✅ Created test script: test_pipeline.py")
+    logger.info("✅ Created test script: test_pipeline.py")
     
-    print("\n🎉 Comprehensive fix applied!")
-    print("📋 Changes made:")
-    print("   - Limited to 12 supported Kraken pairs")
-    print("   - Disabled symbol filtering fallbacks")
-    print("   - Disabled Solana scanner")
-    print("   - Set conservative batch size (5)")
-    print("   - Disabled WebSocket (REST only)")
-    print("   - Added strict validation")
-    print("   - Set to dry run mode")
-    print("\n🚀 Run './restart_comprehensive.sh' to restart")
-    print("🧪 Run './test_pipeline.py' to test after restart")
+    logger.info("🎉 Comprehensive fix applied!")
+    logger.info("📋 Changes made:")
+    logger.info("   - Limited to 12 supported Kraken pairs")
+    logger.info("   - Disabled symbol filtering fallbacks")
+    logger.info("   - Disabled Solana scanner")
+    logger.info("   - Set conservative batch size (5)")
+    logger.info("   - Disabled WebSocket (REST only)")
+    logger.info("   - Added strict validation")
+    logger.info("   - Set to dry run mode")
+    logger.info("🚀 Run './restart_comprehensive.sh' to restart")
+    logger.info("🧪 Run './test_pipeline.py' to test after restart")
 
 if __name__ == "__main__":
     apply_comprehensive_fix()
