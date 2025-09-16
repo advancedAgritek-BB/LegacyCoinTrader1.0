@@ -5,11 +5,135 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Mapping, List, Tuple, Dict, Optional
+import time
+from typing import Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+
+_JUPITER_TOKEN_LIST_URL = "https://token.jup.ag/all"
+_SYMBOL_TO_MINT_CACHE: Dict[str, str] = {}
+_SYMBOL_TO_MINT_MISS_TS: Dict[str, float] = {}
+_SYMBOL_TO_MINT_CACHE_TTL = 900  # seconds to wait before retrying unresolved symbols
+_STATIC_SYMBOL_TO_MINT: Dict[str, str] = {
+    "SOL": "So11111111111111111111111111111111111111112",
+    "WSOL": "So11111111111111111111111111111111111111112",
+    "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "USDT": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    "BONK": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "JUP": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+    "PYTH": "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3",
+    "ORCA": "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE",
+    "RAY": "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
+    "WIF": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+    "MSOL": "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",
+    "JTO": "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
+    "JLP": "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4",
+    "SAMO": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+}
+
+
+def _normalize_symbol(symbol: str) -> str:
+    """Normalize a token symbol for mapping lookups."""
+    return str(symbol or "").upper().strip()
+
+
+def _load_symbol_to_mint_overrides(cfg: Mapping[str, object]) -> Dict[str, str]:
+    """Extract custom symbol-to-mint overrides from the configuration."""
+    overrides = cfg.get("symbol_to_mint_map")
+    result: Dict[str, str] = {}
+    if isinstance(overrides, Mapping):
+        for symbol, mint in overrides.items():
+            normalized = _normalize_symbol(symbol)
+            if not normalized or not mint:
+                continue
+            result[normalized] = str(mint)
+    return result
+
+
+async def _fetch_symbol_mints_from_jupiter(symbols: Set[str]) -> Dict[str, str]:
+    """Fetch mint addresses for the provided symbols using Jupiter's token list."""
+    if not symbols:
+        return {}
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(_JUPITER_TOKEN_LIST_URL, timeout=15) as resp:
+                if resp.status != 200:
+                    logger.debug("Jupiter token list request failed with status %s", resp.status)
+                    return {}
+                data = await resp.json()
+    except Exception as exc:
+        logger.debug("Failed to fetch Jupiter token list: %s", exc)
+        return {}
+
+    if not isinstance(data, list):
+        logger.debug("Unexpected Jupiter token list payload: %s", type(data))
+        return {}
+
+    mapping: Dict[str, str] = {}
+    for entry in data:
+        if not isinstance(entry, Mapping):
+            continue
+        symbol_value = entry.get("symbol")
+        address = entry.get("address")
+        chain_id = entry.get("chainId")
+        if not symbol_value or not address or chain_id != 101:
+            continue
+        normalized = _normalize_symbol(symbol_value)
+        if normalized in symbols and normalized not in mapping:
+            mapping[normalized] = str(address)
+        if len(mapping) == len(symbols):
+            break
+
+    return mapping
+
+
+async def _get_symbol_to_mint_map(
+    cfg: Mapping[str, object],
+    symbols: Iterable[str],
+) -> Dict[str, str]:
+    """Resolve mint addresses for the provided symbols."""
+    normalized_symbols = {_normalize_symbol(symbol) for symbol in symbols if symbol}
+    mapping = dict(_STATIC_SYMBOL_TO_MINT)
+    mapping.update(_load_symbol_to_mint_overrides(cfg))
+
+    now = time.time()
+    remaining: List[str] = []
+    for symbol in normalized_symbols:
+        if symbol in mapping:
+            continue
+        cached = _SYMBOL_TO_MINT_CACHE.get(symbol)
+        if cached:
+            mapping[symbol] = cached
+            continue
+        miss_ts = _SYMBOL_TO_MINT_MISS_TS.get(symbol)
+        if miss_ts and now - miss_ts < _SYMBOL_TO_MINT_CACHE_TTL:
+            continue
+        remaining.append(symbol)
+
+    if remaining:
+        fetched = await _fetch_symbol_mints_from_jupiter(set(remaining))
+        resolved: Set[str] = set()
+        if fetched:
+            for symbol, mint in fetched.items():
+                mapping[symbol] = mint
+                _SYMBOL_TO_MINT_CACHE[symbol] = mint
+                resolved.add(symbol)
+
+        unresolved = set(remaining) - resolved
+        if unresolved:
+            miss_time = time.time()
+            for symbol in unresolved:
+                _SYMBOL_TO_MINT_MISS_TS[symbol] = miss_time
+            logger.debug(
+                "Missing Solana mint mapping for symbols: %s",
+                ", ".join(sorted(unresolved)),
+            )
+
+    return mapping
 
 
 async def get_solana_new_tokens(cfg: Mapping[str, object]) -> List[str]:
@@ -366,40 +490,52 @@ async def get_sentiment_enhanced_tokens(
         from crypto_bot.sentiment_filter import get_lunarcrush_client, SentimentDirection
         
         client = get_lunarcrush_client()
-        
-        # Get trending tokens with sentiment data
+
         trending_tokens = await client.get_trending_solana_tokens(limit=limit * 2)
-        
-        enhanced_results = []
+        if not trending_tokens:
+            logger.info("No trending Solana tokens returned by LunarCrush")
+            return []
+
+        symbol_to_mint = await _get_symbol_to_mint_map(cfg, (symbol for symbol, _ in trending_tokens))
+
+        enhanced_results: List[Tuple[str, Dict]] = []
+        seen_mints: Set[str] = set()
+
         for symbol, sentiment_data in trending_tokens:
-            # Filter for strong bullish sentiment
-            if (sentiment_data.sentiment_direction == SentimentDirection.BULLISH and
-                sentiment_data.galaxy_score >= min_galaxy_score and
-                sentiment_data.sentiment >= min_sentiment):
-                
-                # Try to get mint address if available (this would need token mapping)
-                mint_address = f"SOL_{symbol}_PLACEHOLDER"  # Placeholder for now
-                
-                sentiment_dict = {
-                    "symbol": symbol,
-                    "galaxy_score": sentiment_data.galaxy_score,
-                    "alt_rank": sentiment_data.alt_rank,
-                    "sentiment": sentiment_data.sentiment,
-                    "sentiment_direction": sentiment_data.sentiment_direction.value,
-                    "social_mentions": sentiment_data.social_mentions,
-                    "social_volume": sentiment_data.social_volume,
-                    "bullish_strength": sentiment_data.bullish_strength,
-                    "last_updated": sentiment_data.last_updated
-                }
-                
-                enhanced_results.append((mint_address, sentiment_dict))
-                
-                if len(enhanced_results) >= limit:
-                    break
-        
+            if (sentiment_data.sentiment_direction != SentimentDirection.BULLISH or
+                    sentiment_data.galaxy_score < min_galaxy_score or
+                    sentiment_data.sentiment < min_sentiment):
+                continue
+
+            mint_address = symbol_to_mint.get(_normalize_symbol(symbol))
+            if not mint_address:
+                logger.debug("Skipping %s due to missing Solana mint mapping", symbol)
+                continue
+
+            if mint_address in seen_mints:
+                continue
+
+            sentiment_dict = {
+                "symbol": symbol,
+                "galaxy_score": sentiment_data.galaxy_score,
+                "alt_rank": sentiment_data.alt_rank,
+                "sentiment": sentiment_data.sentiment,
+                "sentiment_direction": sentiment_data.sentiment_direction.value,
+                "social_mentions": sentiment_data.social_mentions,
+                "social_volume": sentiment_data.social_volume,
+                "bullish_strength": sentiment_data.bullish_strength,
+                "last_updated": sentiment_data.last_updated,
+            }
+
+            enhanced_results.append((mint_address, sentiment_dict))
+            seen_mints.add(mint_address)
+
+            if len(enhanced_results) >= limit:
+                break
+
         logger.info(f"Found {len(enhanced_results)} sentiment-enhanced Solana tokens")
         return enhanced_results
-        
+
     except Exception as exc:
         logger.error(f"Failed to get sentiment-enhanced tokens: {exc}")
         return []
