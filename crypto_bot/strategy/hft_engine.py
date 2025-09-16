@@ -6,9 +6,12 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Literal
 
-from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.execution.cex_executor import execute_trade_async
 
+
+STRATEGY_NAME = __name__.split(".")[-1]
+MODULE_LOGGER = setup_strategy_logger(STRATEGY_NAME)
 
 # Placeholder async generator patched in tests or by runtime code.  It yields
 # market snapshots consumed by :class:`HFTEngine`.  The default implementation
@@ -59,7 +62,7 @@ class HFTEngine:
         self.batch_summary_secs = tele_cfg.get("batch_summary_secs", 60)
         self.dry_run = bool(self.fees_cfg.get("dry_run", True))
 
-        self.logger = setup_logger(__name__, LOG_DIR / "hft_engine.log")
+        self.logger = MODULE_LOGGER
         self.notifier = _DummyNotifier(self.logger)
 
         # Active signals keyed by symbol.  Each entry is a mapping containing:
@@ -104,6 +107,11 @@ class HFTEngine:
                 if now - info["ts"] > sig.ttl_ms / 1000:
                     task.cancel()
                     self._suppress_counts["ttl_expired"] += 1
+                    self.logger.debug(
+                        "%s TTL expired for %s signal; cancelling execution.",
+                        STRATEGY_NAME,
+                        sig.symbol,
+                    )
                     del self._active[sym]
 
             for idx, strat in enumerate(self.strategies):
@@ -121,10 +129,24 @@ class HFTEngine:
                 current = self._active.get(sig.symbol)
                 if current and current["priority"] <= idx:
                     self._suppress_counts["lower_priority"] += 1
+                    self.logger.debug(
+                        "%s suppressed %s from %s due to higher priority signal.",
+                        STRATEGY_NAME,
+                        sig.symbol,
+                        strat_name,
+                    )
                     continue
                 if current:
                     current["task"].cancel()
                     self._suppress_counts["replaced"] += 1
+                    self.logger.info(
+                        "%s replacing active %s signal with %s (priority %d -> %d).",
+                        STRATEGY_NAME,
+                        sig.symbol,
+                        strat_name,
+                        current["priority"],
+                        idx,
+                    )
                     del self._active[sig.symbol]
 
                 task = asyncio.create_task(self._execute(sig))
@@ -135,6 +157,15 @@ class HFTEngine:
                     "signal": sig,
                 }
                 self._strategy_counts[strat_name] += 1
+                self.logger.info(
+                    "%s scheduled %s %s @ %.5f size %.4f (ttl=%sms).",
+                    STRATEGY_NAME,
+                    strat_name,
+                    sig.side,
+                    sig.price,
+                    sig.size,
+                    sig.ttl_ms,
+                )
 
             if now - self._last_summary >= self.batch_summary_secs:
                 if self._strategy_counts or self._suppress_counts:

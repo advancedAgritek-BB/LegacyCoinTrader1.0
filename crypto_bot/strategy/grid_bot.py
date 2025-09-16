@@ -13,12 +13,16 @@ import pandas as pd
 
 from crypto_bot import grid_state
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.volatility import normalize_score_by_volatility, atr_percent
 from crypto_bot.volatility_filter import calc_atr
 
 DYNAMIC_THRESHOLD = 1.5
 # from . import breakout_bot, micro_scalp_bot  # Removed circular import
 from crypto_bot.utils.regime_pnl_tracker import get_recent_win_rate
+
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 
 @dataclass
@@ -174,12 +178,37 @@ def generate_signal(
         win_rate = get_recent_win_rate(4, strategy="grid_bot")
         skip_cd = win_rate > 0.7
         if not skip_cd and grid_state.in_cooldown(symbol, cfg.cooldown_bars):
+            logger.info(
+                "%s cooldown active for %s; skipping signal.",
+                STRATEGY_NAME,
+                symbol,
+            )
             return 0.0, "none"
         if grid_state.active_leg_count(symbol) >= cfg.max_active_legs:
+            logger.info(
+                "%s active leg cap reached for %s (%d/%d).",
+                STRATEGY_NAME,
+                symbol,
+                grid_state.active_leg_count(symbol),
+                cfg.max_active_legs,
+            )
             return 0.0, "none"
+
+    logger.debug(
+        "%s evaluating grid for %s with %d candles.",
+        STRATEGY_NAME,
+        symbol or "<unknown>",
+        len(df) if df is not None else 0,
+    )
 
     min_len = max(20, cfg.volume_ma_window)
     if df is None or df.empty or len(df) < min_len:
+        logger.debug(
+            "%s insufficient data (len=%d, required=%d).",
+            STRATEGY_NAME,
+            0 if df is None else len(df),
+            min_len,
+        )
         return 0.0, "none"
 
     if (
@@ -192,6 +221,7 @@ def generate_signal(
             cfg.vol_zscore_threshold,
         )
     ):
+        logger.debug("%s volume filter rejected current data.", STRATEGY_NAME)
         return 0.0, "none"
 
     range_window = cfg.range_window
@@ -201,6 +231,7 @@ def generate_signal(
     recent_len = max(range_window, atr_period, volume_ma_window)
     recent = df.tail(recent_len)
     if recent.empty:
+        logger.debug("%s recent window empty; aborting.", STRATEGY_NAME)
         return 0.0, "none"
 
     range_slice = df.tail(range_window)
@@ -208,11 +239,18 @@ def generate_signal(
     low = range_slice["low"].min()
 
     if high == low:
+        logger.debug("%s range collapse detected; skipping.", STRATEGY_NAME)
         return 0.0, "none"
 
     price = recent["close"].iloc[-1]
     range_size = high - low
     if range_size < price * cfg.min_range_pct:
+        logger.debug(
+            "%s range %.4f below minimum %.4f of price.",
+            STRATEGY_NAME,
+            range_size,
+            price * cfg.min_range_pct,
+        )
         return 0.0, "none"
 
     # Calculate ATR manually
@@ -237,6 +275,7 @@ def generate_signal(
     low = range_slice["low"].min()
 
     if high == low:
+        logger.debug("%s range collapse detected after cache; skipping.", STRATEGY_NAME)
         return 0.0, "none"
 
     price = recent["close"].iloc[-1]
@@ -245,6 +284,12 @@ def generate_signal(
 
     range_pct = (high - low) / price
     if cfg.min_range_pct and range_pct < cfg.min_range_pct:
+        logger.debug(
+            "%s range pct %.4f below threshold %.4f.",
+            STRATEGY_NAME,
+            range_pct,
+            cfg.min_range_pct,
+        )
         return 0.0, "none"
     if "vwap" in recent.columns and not pd.isna(recent["vwap"].iloc[-1]):
         centre = recent["vwap"].iloc[-1]
@@ -282,6 +327,7 @@ def generate_signal(
             centre = (high + low) / 2
 
     if not grid_step:
+        logger.debug("%s computed zero grid step; aborting.", STRATEGY_NAME)
         return 0.0, "none"
 
     n = num_levels // 2
@@ -290,6 +336,11 @@ def generate_signal(
     breakout_range = (high - low) / 2
     breakout_threshold = breakout_range * cfg.breakout_mult
     if price > centre + breakout_threshold or price < centre - breakout_threshold:
+        logger.info(
+            "%s price outside grid bounds for %s; delegating to breakout bot.",
+            STRATEGY_NAME,
+            symbol or "<unknown>",
+        )
         result = breakout_bot.generate_signal(df, _as_dict(config), higher_df)
         # breakout_bot returns (score, direction, atr) when higher_df is None
         # or (score, direction) when higher_df is provided
@@ -297,6 +348,12 @@ def generate_signal(
             score, direction, _ = result
         else:
             score, direction = result
+        logger.info(
+            "%s breakout delegation produced %s signal with score %.3f.",
+            STRATEGY_NAME,
+            direction,
+            score,
+        )
         return score, direction
 
     lower_bound = levels[1]
@@ -312,26 +369,47 @@ def generate_signal(
                 higher_df=higher_df,
             )
             if scalp_dir != "none":
+                logger.info(
+                    "%s micro scalp delegation triggered %s signal (score %.3f).",
+                    STRATEGY_NAME,
+                    scalp_dir,
+                    scalp_score,
+                )
                 return scalp_score, scalp_dir
 
     if price <= lower_bound:
         if not is_in_trend(recent, cfg.trend_ema_fast, cfg.trend_ema_slow, "long"):
+            logger.debug("%s trend filter blocked long entry.", STRATEGY_NAME)
             return 0.0, "none"
         distance = centre - price
         score = min(distance / half_range, 1.0)
         if cfg.atr_normalization:
             score = normalize_score_by_volatility(df, score)
+        logger.info(
+            "%s generated long grid signal (score %.3f) for %s.",
+            STRATEGY_NAME,
+            score,
+            symbol or "<unknown>",
+        )
         return score, "long"
 
     if price >= upper_bound:
         if not is_in_trend(recent, cfg.trend_ema_fast, cfg.trend_ema_slow, "short"):
+            logger.debug("%s trend filter blocked short entry.", STRATEGY_NAME)
             return 0.0, "none"
         distance = price - centre
         score = min(distance / half_range, 1.0)
         if cfg.atr_normalization:
             score = normalize_score_by_volatility(df, score)
+        logger.info(
+            "%s generated short grid signal (score %.3f) for %s.",
+            STRATEGY_NAME,
+            score,
+            symbol or "<unknown>",
+        )
         return score, "short"
 
+    logger.debug("%s grid evaluation produced no actionable signal.", STRATEGY_NAME)
     return 0.0, "none"
 
 

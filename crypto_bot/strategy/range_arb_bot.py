@@ -3,7 +3,6 @@ regression."""
 
 from typing import Optional, Tuple
 
-import logging
 import warnings
 import numpy as np
 import pandas as pd
@@ -20,10 +19,12 @@ from scipy import stats
 from scipy.optimize import fmin_l_bfgs_b
 from crypto_bot.utils.stats import last_window_zscore
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 
-logger = logging.getLogger(__name__)
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 ML_AVAILABLE = init_ml_or_warn()
 NAME = "range_arb_bot"
@@ -116,6 +117,7 @@ def generate_signal(
     config = kwargs.get("config")
 
     if df.empty:
+        logger.debug("%s received empty dataframe; no signal.", STRATEGY_NAME)
         return 0.0, "none"
 
     params = config.get("range_arb_bot", {}) if config else {}
@@ -130,6 +132,12 @@ def generate_signal(
 
     lookback = max(atr_window, kr_window)
     if len(df) < lookback:
+        logger.debug(
+            "%s insufficient history (%d < %d).",
+            STRATEGY_NAME,
+            len(df),
+            lookback,
+        )
         return 0.0, "none"
 
     recent = df.iloc[-lookback:].copy()
@@ -161,17 +169,29 @@ def generate_signal(
         latest["atr_z"] >= vol_z_threshold
         or latest["vol_z"] >= vol_z_threshold
     ):
+        logger.debug(
+            "%s volatility z-scores above threshold; skipping.",
+            STRATEGY_NAME,
+        )
         return 0.0, "none"
 
     # Avoid volume spikes
     if latest["volume"] > latest["vol_ma"] * volume_mult:
+        logger.debug(
+            "%s volume spike detected (%.2f > %.2f); aborting.",
+            STRATEGY_NAME,
+            latest["volume"],
+            latest["vol_ma"] * volume_mult,
+        )
         return 0.0, "none"
 
     pred_price = kernel_regression(recent, kr_window)
     if np.isnan(pred_price):
+        logger.debug("%s kernel regression returned NaN; skipping.", STRATEGY_NAME)
         return 0.0, "none"
     z_val = last_window_zscore(recent["close"], lookback)
     if np.isnan(z_val):
+        logger.debug("%s z-score unavailable; no signal.", STRATEGY_NAME)
         return 0.0, "none"
     z_dev = z_val
 
@@ -212,6 +232,15 @@ def generate_signal(
         if atr_normalization:
             score = normalize_score_by_volatility(df, score)
 
+    if score > 0:
+        logger.info(
+            "%s generated %s range signal with score %.3f.",
+            STRATEGY_NAME,
+            direction,
+            score,
+        )
+    else:
+        logger.debug("%s conditions not met for range trade.", STRATEGY_NAME)
     return score, direction
 
 

@@ -3,9 +3,13 @@ from typing import Dict, Optional, Tuple, Union
 import pandas as pd
 
 
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.pair_cache import load_liquid_pairs
 from crypto_bot.volatility_filter import calc_atr
+
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 DEFAULT_PAIRS = ["BTC/USD", "ETH/USD"]
 ALLOWED_PAIRS = load_liquid_pairs() or DEFAULT_PAIRS
@@ -74,6 +78,11 @@ def generate_signal(
     """
     symbol = config.get("symbol") if config else ""
     if symbol and ALLOWED_PAIRS and symbol not in ALLOWED_PAIRS:
+        logger.debug(
+            "%s symbol %s not in allowed pairs; skipping.",
+            STRATEGY_NAME,
+            symbol,
+        )
         return 0.0, "none"
 
     if config:
@@ -94,6 +103,11 @@ def generate_signal(
         initial_window = max(1, initial_window // 2)
 
     if df is None or not isinstance(df, pd.DataFrame) or df.empty or len(df) < initial_window:
+        logger.debug(
+            "%s insufficient data for evaluation (len=%d).",
+            STRATEGY_NAME,
+            0 if df is None else len(df),
+        )
         return 0.0, "none"
 
     price_change = df["close"].iloc[-1] / df["close"].iloc[0] - 1
@@ -146,6 +160,13 @@ def generate_signal(
         trade_direction = direction
         if direction == "auto":
             trade_direction = "short" if price_change < 0 else "long"
+        logger.info(
+            "%s breakout signal %s score %.3f (symbol=%s).",
+            STRATEGY_NAME,
+            trade_direction,
+            score,
+            symbol or "<unknown>",
+        )
         return score, trade_direction
 
     trade_direction = direction
@@ -173,8 +194,16 @@ def generate_signal(
                     if df["close"].iloc[-1] < df["open"].iloc[-1]
                     else "long"
                 )
+            logger.info(
+                "%s fallback signal %s score %.3f (symbol=%s).",
+                STRATEGY_NAME,
+                trade_direction,
+                score,
+                symbol or "<unknown>",
+            )
             return score, trade_direction
 
+    logger.debug("%s produced no actionable signal for %s.", STRATEGY_NAME, symbol or "<unknown>")
     return 0.0, "none"
 
 

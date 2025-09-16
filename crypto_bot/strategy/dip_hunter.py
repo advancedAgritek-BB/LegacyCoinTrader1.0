@@ -1,6 +1,5 @@
 from typing import Optional, Tuple, Union
 
-import logging
 import pandas as pd
 
 import numpy as np
@@ -9,9 +8,12 @@ from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils import stats
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
-from crypto_bot.cooldown_manager import in_cooldown
+from crypto_bot.cooldown_manager import in_cooldown, mark_cooldown
+from crypto_bot.utils.logging import setup_strategy_logger
 
-logger = logging.getLogger(__name__)
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
+score_logger = logger
 
 ML_AVAILABLE = init_ml_or_warn()
 
@@ -56,7 +58,7 @@ def generate_signal(
     cooldown_enabled = bool(params.get("cooldown_enabled", False))
 
     if cooldown_enabled and symbol and in_cooldown(symbol, "buy"):
-        score_logger.info(
+        logger.info(
             "Signal for %s:%s -> %.3f, %s",
             symbol or "unknown",
             timeframe or "N/A",
@@ -85,6 +87,12 @@ def generate_signal(
     lookback = max(rsi_window, vol_window, adx_window, bb_window, dip_bars)
     recent = df.tail(required_bars)
     if len(recent) < required_bars:
+        logger.debug(
+            "%s requires %d candles but received %d; aborting.",
+            STRATEGY_NAME,
+            required_bars,
+            len(recent),
+        )
         return 0.0, "none"
 
     # Calculate RSI manually
@@ -96,6 +104,12 @@ def generate_signal(
 
     # ADX requires at least twice the window length for a stable reading
     if len(recent) < 2 * adx_window:
+        logger.debug(
+            "%s insufficient data for ADX window (%d < %d).",
+            STRATEGY_NAME,
+            len(recent),
+            2 * adx_window,
+        )
         return 0.0, "none"
 
     # Calculate ADX manually (simplified)
@@ -141,13 +155,19 @@ def generate_signal(
     latest = recent.iloc[-1]
 
     if len(recent) < dip_bars + 1:
+        logger.debug(
+            "%s requires %d dip bars but only %d available.",
+            STRATEGY_NAME,
+            dip_bars + 1,
+            len(recent),
+        )
         return 0.0, "none"
     recent_returns = recent["close"].pct_change().iloc[-dip_bars:]
     dip_size = recent_returns.sum()
     is_dip = dip_size <= -dip_pct
 
     if cooldown_enabled and symbol and in_cooldown(symbol, "buy"):
-        score_logger.info(
+        logger.info(
             "Signal for %s:%s -> %.3f, %s",
             symbol or "unknown",
             timeframe or "N/A",
@@ -221,6 +241,14 @@ def generate_signal(
             mark_cooldown(symbol, "buy")
         return score, "long"
 
+    logger.debug(
+        "%s conditions unmet (dip=%s, oversold=%s, vol_spike=%s, regime=%s).",
+        STRATEGY_NAME,
+        is_dip,
+        oversold,
+        vol_spike,
+        favorable_regime,
+    )
     return 0.0, "none"
 
 

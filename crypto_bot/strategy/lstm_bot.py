@@ -1,12 +1,13 @@
 from typing import Optional, Tuple
 
-import logging
 import pandas as pd
 import numpy as np
 
-logger = logging.getLogger(__name__)
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 NAME = "lstm_bot"
+STRATEGY_NAME = NAME
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 ML_AVAILABLE = init_ml_or_warn()
 if ML_AVAILABLE:
@@ -27,6 +28,7 @@ def generate_signal(
         try:
             df = pd.DataFrame.from_dict(df)
         except Exception:
+            logger.debug("%s failed to convert dict input to DataFrame.", STRATEGY_NAME)
             return 0.0, "none"
 
     if isinstance(symbol, dict) and timeframe is None:
@@ -38,9 +40,11 @@ def generate_signal(
     config = kwargs.get("config")
 
     if df is None or not isinstance(df, pd.DataFrame):
+        logger.debug("%s invalid dataframe provided; skipping.", STRATEGY_NAME)
         return 0.0, "none"
 
     if df.empty:
+        logger.debug("%s received empty dataframe; no signal.", STRATEGY_NAME)
         return 0.0, "none"
 
     params = config or {}
@@ -49,6 +53,12 @@ def generate_signal(
     threshold = float(params.get("threshold_pct", 0.0))
 
     if len(df) < seq_len:
+        logger.debug(
+            "%s insufficient history (%d < %d).",
+            STRATEGY_NAME,
+            len(df),
+            seq_len,
+        )
         return 0.0, "none"
 
     score = 0.0
@@ -87,6 +97,21 @@ def generate_signal(
         direction = "short"
     else:
         score = 0.0
+    if score > 0:
+        logger.info(
+            "%s generated %s signal (score %.3f, threshold %.3f).",
+            STRATEGY_NAME,
+            direction,
+            score,
+            threshold,
+        )
+    else:
+        logger.debug(
+            "%s produced no actionable signal (score %.3f, threshold %.3f).",
+            STRATEGY_NAME,
+            score,
+            threshold,
+        )
 
     return score, direction
 

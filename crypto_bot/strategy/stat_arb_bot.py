@@ -2,16 +2,17 @@
 
 from typing import Optional, Tuple
 
-import logging
 import pandas as pd
 import numpy as np
 
 from crypto_bot.utils import stats
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 
-logger = logging.getLogger(__name__)
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 ML_AVAILABLE = init_ml_or_warn()
 
@@ -34,6 +35,7 @@ def _single_asset_signal(
 ) -> Tuple[float, str]:
     """Generate signal for single asset using mean reversion."""
     if df is None or df.empty or len(df) < 20:
+        logger.debug("%s single-asset input insufficient; skipping.", STRATEGY_NAME)
         return 0.0, "none"
 
     config = kwargs.get("config", {})
@@ -46,22 +48,37 @@ def _single_asset_signal(
     zscore = (df["close"] - ma) / std
 
     if zscore.empty:
+        logger.debug("%s z-score series empty for single asset.", STRATEGY_NAME)
         return 0.0, "none"
 
     latest_z = zscore.iloc[-1]
     if pd.isna(latest_z):
+        logger.debug("%s latest z-score NaN; skipping.", STRATEGY_NAME)
         return 0.0, "none"
 
     # Generate signals based on z-score
     if latest_z < -z_threshold:
         # Price is below mean, potential long
         score = min(abs(latest_z) / z_threshold, 1.0)
+        logger.info(
+            "%s single-asset long signal (z=%.3f score %.3f).",
+            STRATEGY_NAME,
+            latest_z,
+            score,
+        )
         return score, "long"
     elif latest_z > z_threshold:
         # Price is above mean, potential short
         score = min(latest_z / z_threshold, 1.0)
+        logger.info(
+            "%s single-asset short signal (z=%.3f score %.3f).",
+            STRATEGY_NAME,
+            latest_z,
+            score,
+        )
         return score, "short"
 
+    logger.debug("%s single-asset signal neutral (z=%.3f).", STRATEGY_NAME, latest_z)
     return 0.0, "none"
 
 
@@ -80,6 +97,7 @@ def generate_signal(
             try:
                 df_a = pd.DataFrame.from_dict(df_a)
             except Exception:
+                logger.debug("%s failed to convert df_a dict; skipping.", STRATEGY_NAME)
                 return 0.0, "none"
         return _single_asset_signal(df_a, symbol, timeframe, **kwargs)
 
@@ -88,6 +106,7 @@ def generate_signal(
         try:
             df_a = pd.DataFrame.from_dict(df_a)
         except Exception:
+            logger.debug("%s failed to convert df_b dict; skipping.", STRATEGY_NAME)
             return 0.0, "none"
     if isinstance(df_b, dict):
         try:
@@ -105,9 +124,11 @@ def generate_signal(
 
     if (df_a is None or df_b is None or
         not isinstance(df_a, pd.DataFrame) or not isinstance(df_b, pd.DataFrame)):
+        logger.debug("%s invalid dataframe inputs; skipping pair signal.", STRATEGY_NAME)
         return 0.0, "none"
 
     if df_a.empty or df_b.empty:
+        logger.debug("%s empty dataframe inputs; skipping pair signal.", STRATEGY_NAME)
         return 0.0, "none"
 
     threshold = (
@@ -120,20 +141,33 @@ def generate_signal(
     )
 
     if len(df_a) < lookback or len(df_b) < lookback:
+        logger.debug(
+            "%s insufficient lookback for pair (%d/%d).",
+            STRATEGY_NAME,
+            min(len(df_a), len(df_b)),
+            lookback,
+        )
         return 0.0, "none"
 
     corr = df_a["close"].corr(df_b["close"])
     if pd.isna(corr) or corr < _CORRELATION_THRESHOLD:
+        logger.debug(
+            "%s correlation %.3f below threshold; no trade.",
+            STRATEGY_NAME,
+            corr,
+        )
         return 0.0, "none"
 
     spread = df_a["close"] - df_b["close"]
     z = stats.zscore(spread, lookback)
     z = cache_series("stat_arb_z", df_a, z, lookback)
     if z.empty:
+        logger.debug("%s z-score series empty for pair.", STRATEGY_NAME)
         return 0.0, "none"
 
     z_last = z.iloc[-1]
     if abs(z_last) <= threshold:
+        logger.debug("%s spread within threshold (z=%.3f).", STRATEGY_NAME, z_last)
         return 0.0, "none"
 
     direction = "long" if z_last < 0 else "short"
@@ -166,6 +200,16 @@ def generate_signal(
         if config is None or config.get("atr_normalization", True):
             score = normalize_score_by_volatility(df_a, score)
 
+    if score > 0:
+        logger.info(
+            "%s pair trade %s score %.3f (z=%.3f).",
+            STRATEGY_NAME,
+            direction,
+            score,
+            z_last,
+        )
+    else:
+        logger.debug("%s pair signal neutral after adjustments.", STRATEGY_NAME)
     return score, direction
 
 

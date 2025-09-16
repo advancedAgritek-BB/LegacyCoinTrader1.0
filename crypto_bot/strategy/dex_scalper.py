@@ -3,12 +3,16 @@ import pandas as pd
 from typing import Tuple, Optional
 import requests
 
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.pair_cache import load_liquid_pairs
 from crypto_bot.utils.gas_estimator import fetch_priority_fee_gwei
 
 ALLOWED_PAIRS = load_liquid_pairs() or []
+
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 
 def fetch_priority_fee_gwei(endpoint: Optional[str] = None) -> float:
@@ -67,12 +71,15 @@ def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
         try:
             df = pd.DataFrame.from_dict(df)
         except Exception:
+            logger.debug("%s failed to coerce dict to DataFrame; aborting.", STRATEGY_NAME)
             return 0.0, "none"
 
     if df is None or not isinstance(df, pd.DataFrame):
+        logger.debug("%s invalid dataframe provided; skipping signal.", STRATEGY_NAME)
         return 0.0, "none"
 
     if df.empty:
+        logger.debug("%s received empty dataframe; no signal.", STRATEGY_NAME)
         return 0.0, "none"
 
     params = config.get("dex_scalper", {}) if config else {}
@@ -84,9 +91,21 @@ def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
     if gas_threshold_gwei > 0:
         fee = fetch_priority_fee_gwei()
         if fee > gas_threshold_gwei:
+            logger.info(
+                "%s gas fee %.2f gwei exceeds threshold %.2f; skipping trade.",
+                STRATEGY_NAME,
+                fee,
+                gas_threshold_gwei,
+            )
             return 0.0, "none"
 
     if len(df) < slow_window:
+        logger.debug(
+            "%s insufficient history (%d < %d); no signal.",
+            STRATEGY_NAME,
+            len(df),
+            slow_window,
+        )
         return 0.0, "none"
 
     lookback = slow_window
@@ -109,22 +128,40 @@ def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
         or pd.isnull(latest["ema_fast"])
         or pd.isnull(latest["ema_slow"])
     ):
+        logger.debug("%s EMA data invalid; skipping.", STRATEGY_NAME)
         return 0.0, "none"
 
     momentum = latest["ema_fast"] - latest["ema_slow"]
     score = min(abs(momentum) / latest["close"], 1.0)
 
     if score < min_score:
+        logger.debug(
+            "%s momentum score %.3f below minimum %.3f.",
+            STRATEGY_NAME,
+            score,
+            min_score,
+        )
         return 0.0, "none"
 
     if momentum > 0:
         if config is None or config.get("atr_normalization", True):
             score = normalize_score_by_volatility(df, score)
+        logger.info(
+            "%s generated long momentum signal (score %.3f).",
+            STRATEGY_NAME,
+            score,
+        )
         return score, "long"
     elif momentum < 0:
         if config is None or config.get("atr_normalization", True):
             score = normalize_score_by_volatility(df, score)
+        logger.info(
+            "%s generated short momentum signal (score %.3f).",
+            STRATEGY_NAME,
+            score,
+        )
         return score, "short"
+    logger.debug("%s momentum near zero; no signal.", STRATEGY_NAME)
     return 0.0, "none"
 
 

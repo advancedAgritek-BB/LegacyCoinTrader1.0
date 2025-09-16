@@ -11,8 +11,12 @@ import numpy as np
 
 from dataclasses import dataclass
 
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.indicator_cache import cache_series
+
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 
 @dataclass
@@ -248,16 +252,24 @@ def generate_signal(
     
     # Validate data
     if df.empty or len(df) < ultra_config.ema_slow:
+        logger.debug(
+            "%s insufficient data (len=%d < %d).",
+            STRATEGY_NAME,
+            len(df),
+            ultra_config.ema_slow,
+        )
         return 0.0, "none"
-    
+
     required_columns = ['open', 'high', 'low', 'close', 'volume']
     if not all(col in df.columns for col in required_columns):
+        logger.debug("%s missing columns for scalping; skipping.", STRATEGY_NAME)
         return 0.0, "none"
     
     # Calculate indicators
     try:
         indicators = _calculate_ultra_fast_indicators(df, ultra_config)
     except Exception as e:
+        logger.warning("%s indicator calculation failed: %s", STRATEGY_NAME, e)
         return 0.0, "none"
     
     # Detect signals
@@ -266,6 +278,7 @@ def generate_signal(
             df, indicators, ultra_config
         )
     except Exception as e:
+        logger.warning("%s signal detection failed: %s", STRATEGY_NAME, e)
         return 0.0, "none"
     
     # Apply volatility normalization if enabled
@@ -280,6 +293,12 @@ def generate_signal(
     # Ensure signal score is within bounds
     signal_score = max(0.0, min(1.0, signal_score))
     
+    logger.info(
+        "%s ultra scalp score %.3f direction %s.",
+        STRATEGY_NAME,
+        signal_score,
+        direction,
+    )
     return signal_score, direction
 
 

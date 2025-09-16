@@ -7,9 +7,13 @@ from typing import Tuple, Optional
 import pandas as pd
 import ta
 
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.pyth_utils import get_pyth_price
 
 from crypto_bot.fund_manager import auto_convert_funds
+
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 
 class RugCheckAPI:
@@ -45,6 +49,7 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     """Return a signal score and direction based on ATR jumps."""
 
     if df is None or df.empty:
+        logger.debug("%s received empty dataframe; skipping.", STRATEGY_NAME)
         return 0.0, "none"
 
     params = config or {}
@@ -58,9 +63,11 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     conf_pct = float(params.get("conf_pct", 0.0))
 
     if not is_trading or conf_pct > 0.5:
+        logger.debug("%s trading disabled or low confidence; skipping.", STRATEGY_NAME)
         return 0.0, "none"
 
     if len(df) < atr_window + 1:
+        logger.debug("%s insufficient candles for ATR window.", STRATEGY_NAME)
         return 0.0, "none"
 
     # Use live price from Pyth if a token is provided
@@ -76,19 +83,29 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
         df["high"], df["low"], df["close"], window=atr_window
     )
     if atr.empty or pd.isna(atr.iloc[-1]):
+        logger.debug("%s ATR unavailable; skipping.", STRATEGY_NAME)
         return 0.0, "none"
 
     price_change = df["close"].iloc[-1] - df["close"].iloc[-2]
     if abs(price_change) >= atr.iloc[-1] * jump_mult:
         direction = "long" if price_change > 0 else "short"
         if token and RugCheckAPI.risk_score(token) >= rug_threshold:
+            logger.info("%s rug risk too high for %s; aborting.", STRATEGY_NAME, token)
             return 0.0, "none"
+        logger.info(
+            "%s generated %s signal (price jump %.4f).",
+            STRATEGY_NAME,
+            direction,
+            price_change,
+        )
         return 1.0, direction
 
     if entry_price is not None:
         if df["close"].iloc[-1] >= float(entry_price) * (1 + profit_target):
+            logger.info("%s profit target reached; closing position.", STRATEGY_NAME)
             return 1.0, "close"
 
+    logger.debug("%s no Solana signal generated.", STRATEGY_NAME)
     return 0.0, "none"
 
 

@@ -1,14 +1,14 @@
 """Meme wave bot strategy for detecting and trading meme coin pumps."""
 
-import logging
 from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
-
+from crypto_bot.utils.logging import setup_strategy_logger
 from ..sentiment_filter import get_lunarcrush_sentiment_boost, get_sentiment_score
 
-logger = logging.getLogger(__name__)
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 
 def generate_signal(
@@ -29,6 +29,10 @@ def generate_signal(
     Returns:
         Tuple of (signal_strength, signal_type)
     """
+    if df is None or df.empty:
+        logger.debug("%s received empty dataframe; no signal.", STRATEGY_NAME)
+        return 0.0, "none"
+
     config = kwargs.get("config", {})
     
     # Strategy parameters
@@ -73,10 +77,14 @@ def generate_signal(
         sentiment = 0.5  # Default neutral sentiment
     except Exception:
         sentiment = 0.5  # Default neutral sentiment
-    logger.info("Meme-wave sentiment: %.2f for query '%s'", sentiment, query)
+    logger.info("%s sentiment %.2f for query '%s'", STRATEGY_NAME, sentiment, query)
 
     # Check basic volume and sentiment conditions
     if avg_vol and recent_vol >= avg_vol * vol_threshold and sentiment >= sentiment_thr:
+        logger.info(
+            "%s meme volume+sentiment conditions met; issuing long signal.",
+            STRATEGY_NAME,
+        )
         return 1.0, "long"
 
     # Check for price spike
@@ -87,6 +95,7 @@ def generate_signal(
     )
 
     if not spike:
+        logger.debug("%s no price/volume spike detected.", STRATEGY_NAME)
         return 0.0, "none"
 
     # Check mempool conditions
@@ -119,12 +128,16 @@ def generate_signal(
         signal_strength = (vol_strength * 0.7) + (sentiment_strength * 0.3)
         
         logger.info(
-            f"Meme wave signal generated: strength={signal_strength:.2f}, "
-            f"vol_strength={vol_strength:.2f}, sentiment_strength={sentiment_strength:.2f}"
+            "%s meme wave signal: strength=%.2f vol=%.2f sentiment=%.2f",
+            STRATEGY_NAME,
+            signal_strength,
+            vol_strength,
+            sentiment_strength,
         )
-        
+
         return signal_strength, "long"
 
+    logger.debug("%s conditions unmet after spike filters.", STRATEGY_NAME)
     return 0.0, "none"
 
 

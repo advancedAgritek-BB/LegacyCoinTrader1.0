@@ -3,9 +3,12 @@ from typing import Optional, Tuple
 import pandas as pd
 import ta
 
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 
 NAME = "flash_crash_bot"
+STRATEGY_NAME = NAME
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 def generate_signal(
     df: pd.DataFrame,
@@ -22,6 +25,11 @@ def generate_signal(
         timeframe = None
     config = kwargs.get("config")
     if df is None or len(df) < 2:
+        logger.debug(
+            "%s requires at least 2 candles; received %d.",
+            STRATEGY_NAME,
+            0 if df is None else len(df),
+        )
         return 0.0, "none"
 
     params = config.get("flash_crash", {}) if config else {}
@@ -33,6 +41,9 @@ def generate_signal(
 
     lookback = max(vol_window, ema_window)
     recent = df.iloc[-(lookback + 1) :]
+    if len(recent) < 2:
+        logger.debug("%s insufficient data after slicing; no signal.", STRATEGY_NAME)
+        return 0.0, "none"
 
     vol_ma = recent["volume"].rolling(vol_window).mean()
     ema = recent["close"].ewm(span=ema_window, adjust=False).mean()
@@ -53,8 +64,23 @@ def generate_signal(
         if atr_norm:
             score = normalize_score_by_volatility(df, score)
         score = max(0.0, min(float(score), 1.0))
+        logger.info(
+            "%s generated long signal for %s (drop=%.4f, score %.3f).",
+            STRATEGY_NAME,
+            symbol or "<unknown>",
+            drop,
+            score,
+        )
         return score, "long"
 
+    logger.debug(
+        "%s conditions unmet (drop=%.4f vs %.4f, vol_ok=%s, ema_ok=%s).",
+        STRATEGY_NAME,
+        drop,
+        drop_pct,
+        vol_ok,
+        ema_ok,
+    )
     return 0.0, "none"
 
 

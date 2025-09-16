@@ -1,4 +1,3 @@
-import logging
 import math
 import random
 import time
@@ -6,7 +5,10 @@ import pandas as pd
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any, Literal
 
-logger = logging.getLogger(__name__)
+from crypto_bot.utils.logging import setup_strategy_logger
+
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 
 @dataclass
@@ -153,6 +155,11 @@ def generate_signal(
 ) -> Tuple[float, str]:
     """Maker spread signal generator for sideways markets."""
     if df.empty or len(df) < 20:
+        logger.debug(
+            "%s requires at least 20 candles; received %d.",
+            STRATEGY_NAME,
+            len(df),
+        )
         return 0.0, "none"
 
     # Simple spread-based signal for sideways markets
@@ -162,6 +169,11 @@ def generate_signal(
 
     # In sideways markets, we want low volatility
     if pd.isna(volatility) or volatility > 0.02:  # More than 2% daily volatility
+        logger.debug(
+            "%s volatility %.4f outside sideways threshold.",
+            STRATEGY_NAME,
+            volatility if not pd.isna(volatility) else float("nan"),
+        )
         return 0.0, "none"
 
     # Check if price is within a reasonable range (not trending strongly)
@@ -171,6 +183,11 @@ def generate_signal(
 
     # Price should be within 3% of 20-period moving average
     if deviation > 0.03:
+        logger.debug(
+            "%s price deviation %.4f exceeds limit.",
+            STRATEGY_NAME,
+            deviation,
+        )
         return 0.0, "none"
 
     # Generate a moderate confidence signal for maker spread
@@ -182,6 +199,12 @@ def generate_signal(
         if not pd.isna(vol_sma) and vol_sma > 0:
             score = min(score * 1.2, 0.8)  # Boost but cap at 0.8
 
+    logger.info(
+        "%s generated maker spread signal (score %.3f) for %s.",
+        STRATEGY_NAME,
+        score,
+        symbol or "<unknown>",
+    )
     return score, "maker_spread"
 
 

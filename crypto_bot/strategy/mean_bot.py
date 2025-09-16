@@ -18,6 +18,7 @@ except Exception:  # pragma: no cover - fallback
 
     scipy_stats = _FakeStats()
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils import stats
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
@@ -27,6 +28,11 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     """Score mean reversion opportunities using multiple indicators."""
 
     if len(df) < 50:
+        logger.debug(
+            "%s requires at least 50 candles; received %d.",
+            STRATEGY_NAME,
+            len(df),
+        )
         return 0.0, "none"
 
     params = config or {}
@@ -126,6 +132,7 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     if len(width_series) >= lookback:
         median_width = width_series.iloc[-lookback:].median()
         if width_series.iloc[-1] > median_width:
+            logger.debug("%s Keltner width expanding; skipping.", STRATEGY_NAME)
             return 0.0, "none"
 
     latest = df.iloc[-1]
@@ -135,9 +142,16 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
         or pd.isna(df["median_bw_20"].iloc[-1])
         or df["bb_width"].iloc[-1] >= df["median_bw_20"].iloc[-1]
     ):
+        logger.debug("%s Bollinger width too wide; no mean reversion.", STRATEGY_NAME)
         return 0.0, "none"
 
     if df["adx"].iloc[-1] > adx_threshold:
+        logger.debug(
+            "%s ADX %.2f above threshold %.2f; skipping.",
+            STRATEGY_NAME,
+            df["adx"].iloc[-1],
+            adx_threshold,
+        )
         return 0.0, "none"
 
     long_scores = []
@@ -192,6 +206,7 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
         score = short_score
         direction = "short"
     else:
+        logger.debug("%s mean reversion signals inconclusive.", STRATEGY_NAME)
         return 0.0, "none"
 
     if ml_enabled:
@@ -205,7 +220,14 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     if config is None or config.get("atr_normalization", True):
         score = normalize_score_by_volatility(df, score)
 
-    return float(max(0.0, min(score, 1.0))), direction
+    score = float(max(0.0, min(score, 1.0)))
+    logger.info(
+        "%s generated %s mean reversion signal (score %.3f).",
+        STRATEGY_NAME,
+        direction,
+        score,
+    )
+    return score, direction
 
 
 class regime_filter:
@@ -214,3 +236,5 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return regime == "mean-reverting"
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)

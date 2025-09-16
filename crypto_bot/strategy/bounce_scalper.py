@@ -27,10 +27,14 @@ except Exception:  # pragma: no cover - fallback
 import ta
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils import stats
+from crypto_bot.utils.logging import setup_strategy_logger
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.cooldown_manager import in_cooldown, mark_cooldown
 from crypto_bot.utils.regime_pnl_tracker import get_recent_win_rate
+
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 # Flag to bypass cooldown and win-rate filtering once
 FORCE_SIGNAL = False
@@ -40,6 +44,7 @@ def trigger_once() -> None:
     """Force the next call to :func:`generate_signal` to emit a signal."""
     global FORCE_SIGNAL
     FORCE_SIGNAL = True
+    logger.info("%s trigger invoked; forcing next signal emission.", STRATEGY_NAME)
 
 
 @dataclass
@@ -193,6 +198,7 @@ def generate_signal(
 ) -> Tuple[float, str]:
     """Identify short-term bounces with volume confirmation."""
     if df.empty:
+        logger.debug("%s received empty dataframe; no signal generated.", STRATEGY_NAME)
         return 0.0, "none"
 
     cfg_dict = _as_dict(config)
@@ -204,6 +210,15 @@ def generate_signal(
     force = FORCE_SIGNAL
     if FORCE_SIGNAL:
         FORCE_SIGNAL = False
+        logger.info("%s force flag consumed for symbol %s.", STRATEGY_NAME, symbol or "<unknown>")
+
+    logger.debug(
+        "%s evaluating symbol=%s candles=%d force=%s",
+        STRATEGY_NAME,
+        symbol or "<unknown>",
+        len(df),
+        force,
+    )
 
     if (
         cfg.cooldown_enabled
@@ -211,6 +226,11 @@ def generate_signal(
         and in_cooldown(symbol, strategy)
         and not force
     ):
+        logger.info(
+            "%s cooldown active for %s; skipping signal evaluation.",
+            STRATEGY_NAME,
+            symbol,
+        )
         return 0.0, "none"
 
     rsi_window = cfg.rsi_window
@@ -393,14 +413,57 @@ def generate_signal(
                 imbalance = bids / asks
                 if direction == "long" and imbalance < ratio:
                     if penalty:
-                        score *= max(0.0, 1 - penalty)
+                        adjusted = max(0.0, 1 - penalty)
+                        logger.info(
+                            "%s applying order book penalty %.2f to %s signal.",
+                            STRATEGY_NAME,
+                            penalty,
+                            direction,
+                        )
+                        score *= adjusted
                     else:
+                        logger.info(
+                            "%s blocked %s signal due to order book imbalance %.2f < %.2f.",
+                            STRATEGY_NAME,
+                            direction,
+                            imbalance,
+                            ratio,
+                        )
                         return 0.0, "none"
                 if direction == "short" and imbalance > ratio:
                     if penalty:
-                        score *= max(0.0, 1 - penalty)
+                        adjusted = max(0.0, 1 - penalty)
+                        logger.info(
+                            "%s applying order book penalty %.2f to %s signal.",
+                            STRATEGY_NAME,
+                            penalty,
+                            direction,
+                        )
+                        score *= adjusted
                     else:
+                        logger.info(
+                            "%s blocked %s signal due to order book imbalance %.2f > %.2f.",
+                            STRATEGY_NAME,
+                            direction,
+                            imbalance,
+                            ratio,
+                        )
                         return 0.0, "none"
+
+    if score > 0:
+        logger.info(
+            "%s generated %s signal with score %.3f for %s.",
+            STRATEGY_NAME,
+            direction,
+            score,
+            symbol or "<unknown>",
+        )
+    else:
+        logger.debug(
+            "%s produced no actionable signal for %s after evaluation.",
+            STRATEGY_NAME,
+            symbol or "<unknown>",
+        )
 
     return score, direction
 

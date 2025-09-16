@@ -23,10 +23,10 @@ import pandas as pd
 import ta
 
 
-from crypto_bot.utils.logger import LOG_DIR, setup_logger
-from crypto_bot.utils.volatility import normalize_score_by_volatility
+from crypto_bot.utils.logging import setup_strategy_logger
 
-logger = setup_logger(__name__, LOG_DIR / "market_making.log")
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 
 @dataclass
@@ -83,7 +83,9 @@ class MarketMakingBot:
 
     async def start_market_making(self, symbols: List[str]) -> None:
         """Start market making for given symbols."""
-        logger.info(f"Starting market making for {len(symbols)} symbols")
+        logger.info(
+            "%s starting market making for %d symbols.", STRATEGY_NAME, len(symbols)
+        )
 
         tasks = []
         for symbol in symbols:
@@ -96,7 +98,7 @@ class MarketMakingBot:
 
     async def _market_make_symbol(self, symbol: str) -> None:
         """Run market making loop for a single symbol."""
-        logger.info(f"Starting market making for {symbol}")
+        logger.info("%s starting market making for %s.", STRATEGY_NAME, symbol)
 
         while True:
             try:
@@ -189,6 +191,12 @@ class MarketMakingBot:
     def _calculate_volatility(self, symbol: str) -> float:
         """Calculate recent volatility."""
         if len(self.price_history[symbol]) < self.config.volatility_window:
+            logger.debug(
+                "%s insufficient history for volatility on %s (len=%d).",
+                STRATEGY_NAME,
+                symbol,
+                len(self.price_history[symbol]),
+            )
             return 0.01  # Default 1% volatility
 
         prices = list(self.price_history[symbol])
@@ -206,6 +214,12 @@ class MarketMakingBot:
         inventory = self.inventory.get(symbol, 0.0)
 
         if abs(inventory) < self.config.inventory_limit * 0.1:
+            logger.debug(
+                "%s inventory within neutral range for %s (%.2f).",
+                STRATEGY_NAME,
+                symbol,
+                inventory,
+            )
             return 0.0
 
         # Return skew between -1 and 1
@@ -219,6 +233,11 @@ class MarketMakingBot:
             asks = orderbook.get('asks', [])
 
             if not bids or not asks:
+                logger.debug(
+                    "%s no depth for %s; falling back to base quote size.",
+                    STRATEGY_NAME,
+                    symbol,
+                )
                 return self.config.quote_size_base
 
             # Calculate market depth at different levels
@@ -234,6 +253,11 @@ class MarketMakingBot:
             return min(quote_size, self.config.max_quote_size)
 
         except Exception:
+            logger.debug(
+                "%s failed to derive quote size for %s; using base size.",
+                STRATEGY_NAME,
+                symbol,
+            )
             return self.config.quote_size_base
 
     async def _place_quotes(self, quote: Quote) -> None:
@@ -327,7 +351,7 @@ class MarketMakingBot:
 
     async def stop(self) -> None:
         """Stop market making and cancel all quotes."""
-        logger.info("Stopping market making...")
+        logger.info("%s stopping market making...", STRATEGY_NAME)
 
         # Cancel all active quotes
         cancel_tasks = []
@@ -337,7 +361,7 @@ class MarketMakingBot:
         if cancel_tasks:
             await asyncio.gather(*cancel_tasks, return_exceptions=True)
 
-        logger.info("Market making stopped")
+        logger.info("%s market making stopped", STRATEGY_NAME)
 
 
 def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[float, str]:
@@ -347,6 +371,11 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     This strategy works best in ranging/sideways markets with good liquidity.
     """
     if df.empty or len(df) < 20:
+        logger.debug(
+            "%s regime detection requires 20 candles; received %d.",
+            STRATEGY_NAME,
+            len(df),
+        )
         return 0.0, "none"
 
     # Calculate indicators for regime detection
@@ -391,7 +420,24 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
         if df["volume"].iloc[-1] > vol_sma.iloc[-1]:
             score *= 1.2  # Boost score for high volume
 
-    return min(score, 1.0), "market_making"
+    final_score = min(score, 1.0)
+    if final_score > 0:
+        logger.info(
+            "%s regime score %.3f (trend=%.2f, price_dev=%.4f).",
+            STRATEGY_NAME,
+            final_score,
+            trend_strength,
+            price_vs_ma,
+        )
+    else:
+        logger.debug(
+            "%s regime evaluation yielded no signal (trend=%.2f, price_dev=%.4f).",
+            STRATEGY_NAME,
+            trend_strength,
+            price_vs_ma,
+        )
+
+    return final_score, "market_making"
 
 
 class regime_filter:

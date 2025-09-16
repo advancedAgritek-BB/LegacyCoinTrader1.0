@@ -6,8 +6,12 @@ import pandas as pd
 import ta
 
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.logging import setup_strategy_logger
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
+
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 
 def _wick_ratios(row: pd.Series) -> Tuple[float, float]:
@@ -84,6 +88,7 @@ def generate_signal(
         df = pd.concat([df, tick_data], ignore_index=True)
 
     if df.empty:
+        logger.debug("%s received empty dataframe; no signal.", STRATEGY_NAME)
         return 0.0, "none"
 
     if ticks is not None and not ticks.empty:
@@ -106,6 +111,10 @@ def generate_signal(
     if mempool_monitor and cfg.get("enabled"):
         threshold = cfg.get("suspicious_fee_threshold", 0.0)
         if mempool_monitor.is_suspicious(threshold):
+            logger.info(
+                "%s mempool flagged suspicious activity; skipping signal.",
+                STRATEGY_NAME,
+            )
             return 0.0, "none"
     fast_window = int(params.get("ema_fast", 2))
     slow_window = int(params.get("ema_slow", 5))
@@ -128,6 +137,12 @@ def generate_signal(
     trend_filter = bool(params.get("trend_filter", True))
 
     if len(df) < slow_window:
+        logger.debug(
+            "%s insufficient history (%d < %d).",
+            STRATEGY_NAME,
+            len(df),
+            slow_window,
+        )
         return 0.0, "none"
 
     lookback = max(slow_window, vol_window, atr_period)
@@ -153,10 +168,17 @@ def generate_signal(
     latest = df.iloc[-1]
     lower_wick_ratio, upper_wick_ratio = _wick_ratios(latest)
     if pd.isna(latest["ema_fast"]) or pd.isna(latest["ema_slow"]):
+        logger.debug("%s EMA values unavailable; aborting.", STRATEGY_NAME)
         return 0.0, "none"
 
     if min_atr_pct and "atr" in df.columns and latest["close"] > 0:
         if pd.isna(latest["atr"]) or latest["atr"] / latest["close"] < min_atr_pct:
+            logger.debug(
+                "%s ATR %.4f below minimum %.4f.",
+                STRATEGY_NAME,
+                latest.get("atr", float("nan")),
+                min_atr_pct,
+            )
             return 0.0, "none"
 
     if min_vol_z and "volume" in df.columns:
@@ -168,6 +190,12 @@ def generate_signal(
         vol_std = vol_std_series.iloc[-1]
         vol_z = (latest["volume"] - vol_mean) / vol_std if vol_std > 0 else float("-inf")
         if pd.isna(vol_z) or vol_z < min_vol_z:
+            logger.debug(
+                "%s volume z-score %.3f below threshold %.3f.",
+                STRATEGY_NAME,
+                vol_z,
+                min_vol_z,
+            )
             return 0.0, "none"
 
     trend_fast_val = None
@@ -182,17 +210,26 @@ def generate_signal(
         trend_fast_val = t_fast.iloc[-1]
         trend_slow_val = t_slow.iloc[-1]
         if pd.isna(trend_fast_val) or pd.isna(trend_slow_val):
+            logger.debug("%s trend EMA unavailable; skipping.", STRATEGY_NAME)
             return 0.0, "none"
 
     momentum = df["momentum"].iloc[-1]
     if momentum == 0:
+        logger.debug("%s momentum flat; no trade.", STRATEGY_NAME)
         return 0.0, "none"
 
     if min_momentum_pct and abs(momentum) / latest["close"] < min_momentum_pct:
+        logger.debug(
+            "%s momentum %.5f below minimum pct %.5f.",
+            STRATEGY_NAME,
+            abs(momentum) / max(latest["close"], 1e-12),
+            min_momentum_pct,
+        )
         return 0.0, "none"
 
     if confirm_bars > 0:
         if len(df) < confirm_bars:
+            logger.debug("%s insufficient bars for confirmation.", STRATEGY_NAME)
             return 0.0, "none"
         signs = (df["momentum"].iloc[-confirm_bars:].apply(lambda x: 1 if x > 0 else -1 if x < 0 else 0))
         if signs.abs().min() == 0 or not (signs == signs.iloc[-1]).all():
@@ -200,8 +237,10 @@ def generate_signal(
         if fresh_cross_only and len(df) >= confirm_bars + 1:
             prev_sign = 1 if df["momentum"].iloc[-confirm_bars - 1] > 0 else -1 if df["momentum"].iloc[-confirm_bars - 1] < 0 else 0
             if prev_sign == signs.iloc[-1]:
+                logger.debug("%s fresh cross filter rejected signal.", STRATEGY_NAME)
                 return 0.0, "none"
         elif fresh_cross_only and len(df) < confirm_bars + 1:
+            logger.debug("%s insufficient history for fresh cross.", STRATEGY_NAME)
             return 0.0, "none"
 
     score = min(abs(momentum) / latest["close"], 1.0)
@@ -211,8 +250,10 @@ def generate_signal(
     direction = "long" if momentum > 0 else "short"
 
     if direction == "long" and lower_wick_ratio < lower_wick_pct:
+        logger.debug("%s long wick filter failed (%.3f < %.3f).", STRATEGY_NAME, lower_wick_ratio, lower_wick_pct)
         return 0.0, "none"
     if direction == "short" and upper_wick_ratio < upper_wick_pct:
+        logger.debug("%s short wick filter failed (%.3f < %.3f).", STRATEGY_NAME, upper_wick_ratio, upper_wick_pct)
         return 0.0, "none"
 
     book_data = book or params.get("order_book")
@@ -224,6 +265,7 @@ def generate_signal(
             best_ask = asks_list[0][0]
             mid_price = (best_bid + best_ask) / 2
             if mid_price > 0 and (best_ask - best_bid) / mid_price > 0.003:
+                logger.debug("%s spread %.4f too wide; skipping.", STRATEGY_NAME, (best_ask - best_bid) / mid_price)
                 return 0.0, "none"
 
     if (
@@ -237,19 +279,45 @@ def generate_signal(
             imbalance = bids / asks
             if direction == "long" and imbalance < imbalance_ratio:
                 if imbalance_penalty > 0:
+                    logger.info(
+                        "%s applying imbalance penalty %.2f for long trade (%.2f).",
+                        STRATEGY_NAME,
+                        imbalance_penalty,
+                        imbalance,
+                    )
                     score *= imbalance_penalty
                 else:
+                    logger.info(
+                        "%s blocked long due to imbalance %.2f < %.2f.",
+                        STRATEGY_NAME,
+                        imbalance,
+                        imbalance_ratio,
+                    )
                     return 0.0, "none"
             if direction == "short" and imbalance > imbalance_ratio:
                 if imbalance_penalty > 0:
+                    logger.info(
+                        "%s applying imbalance penalty %.2f for short trade (%.2f).",
+                        STRATEGY_NAME,
+                        imbalance_penalty,
+                        imbalance,
+                    )
                     score *= imbalance_penalty
                 else:
+                    logger.info(
+                        "%s blocked short due to imbalance %.2f > %.2f.",
+                        STRATEGY_NAME,
+                        imbalance,
+                        imbalance_ratio,
+                    )
                     return 0.0, "none"
 
     if trend_filter and trend_fast_val is not None and trend_slow_val is not None:
         if direction == "long" and trend_fast_val <= trend_slow_val:
+            logger.debug("%s trend filter rejected long entry.", STRATEGY_NAME)
             return 0.0, "none"
         if direction == "short" and trend_fast_val >= trend_slow_val:
+            logger.debug("%s trend filter rejected short entry.", STRATEGY_NAME)
             return 0.0, "none"
 
     if mempool_monitor is not None:
@@ -260,6 +328,12 @@ def generate_signal(
         if fee is not None and fee < 5:
             score *= 1.2
 
+    logger.info(
+        "%s generated %s scalp signal with score %.3f.",
+        STRATEGY_NAME,
+        direction,
+        score,
+    )
     return score, direction
 
 

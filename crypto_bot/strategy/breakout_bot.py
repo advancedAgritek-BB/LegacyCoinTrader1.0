@@ -20,9 +20,10 @@ except Exception:  # pragma: no cover - fallback
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils import stats
-from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from crypto_bot.utils.logging import setup_strategy_logger
 
-logger = setup_logger(__name__, LOG_DIR / "breakout_bot.log")
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 
 def _squeeze(
@@ -89,6 +90,7 @@ def generate_signal(
         and direction is the trade direction.
     """
     if df is None or df.empty:
+        logger.debug("%s received empty dataframe; skipping signal.", STRATEGY_NAME)
         return 0.0, "none"
 
     cfg_all = config or {}
@@ -110,6 +112,12 @@ def generate_signal(
 
     lookback = max(bb_len, kc_len, donchian_window, vol_window, 14)
     if len(df) < lookback:
+        logger.debug(
+            "%s requires %d candles but received %d; aborting breakout check.",
+            STRATEGY_NAME,
+            lookback,
+            len(df),
+        )
         return 0.0, "none"
 
     recent = df.iloc[-(lookback + 1) :]
@@ -125,6 +133,7 @@ def generate_signal(
         squeeze_pct,
     )
     if pd.isna(squeeze.iloc[-1]) or not squeeze.iloc[-1]:
+        logger.debug("%s squeeze condition not met; no signal.", STRATEGY_NAME)
         return 0.0, "none"
 
     if higher_df is not None and not higher_df.empty:
@@ -204,6 +213,16 @@ def generate_signal(
 
     if score > 0 and (config is None or config.get("atr_normalization", True)):
         score = normalize_score_by_volatility(recent, score)
+
+    if score > 0:
+        logger.info(
+            "%s generated %s breakout signal with score %.3f.",
+            STRATEGY_NAME,
+            direction,
+            score,
+        )
+    else:
+        logger.debug("%s evaluation completed without actionable signal.", STRATEGY_NAME)
 
     return score, direction
 

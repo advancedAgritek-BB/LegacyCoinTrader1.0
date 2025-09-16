@@ -19,11 +19,12 @@ except Exception:  # pragma: no cover - fallback when scipy missing
     scipy_stats = _FakeStats()
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils import stats
-from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from crypto_bot.utils.logging import setup_strategy_logger
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 
-logger = setup_logger(__name__, LOG_DIR / "trend_bot.log")
+STRATEGY_NAME = __name__.split(".")[-1]
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 
 def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
@@ -33,12 +34,19 @@ def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
         try:
             df = pd.DataFrame.from_dict(df)
         except Exception:
+            logger.debug("%s failed to convert input dict; skipping.", STRATEGY_NAME)
             return 0.0, "none"
 
     if df is None or not isinstance(df, pd.DataFrame):
+        logger.debug("%s invalid dataframe provided; skipping.", STRATEGY_NAME)
         return 0.0, "none"
 
     if df.empty or len(df) < 50:
+        logger.debug(
+            "%s insufficient data for trend evaluation (len=%d).",
+            STRATEGY_NAME,
+            len(df),
+        )
         return 0.0, "none"
 
     df = df.copy()
@@ -214,18 +222,33 @@ def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
     if long_cond:
         score = min((latest["rsi"] - 50) / 50, 1.0)
         direction = "long"
+        logger.info(
+            "%s long signal with score %.3f (RSI %.2f).",
+            STRATEGY_NAME,
+            score,
+            latest["rsi"],
+        )
     elif short_cond:
         score = min((50 - latest["rsi"]) / 50, 1.0)
         direction = "short"
+        logger.info(
+            "%s short signal with score %.3f (RSI %.2f).",
+            STRATEGY_NAME,
+            score,
+            latest["rsi"],
+        )
     elif reversal_long:
         score = min((dynamic_oversold - latest["rsi"]) / dynamic_oversold, 1.0)
         direction = "long"
+        logger.info(
+            "%s reversal long signal score %.3f.", STRATEGY_NAME, score
+        )
     elif reversal_short:
         score = min((latest["rsi"] - dynamic_overbought) / (100 - dynamic_overbought), 1.0)
         direction = "short"
-    else:
-        # No signal conditions met
-        pass
+        logger.info(
+            "%s reversal short signal score %.3f.", STRATEGY_NAME, score
+        )
 
     if score > 0 and (config is None or config.get("atr_normalization", True)):
         score = normalize_score_by_volatility(df, score)
@@ -242,6 +265,16 @@ def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
                 score = max(0.0, min(score, 1.0))
             except Exception:
                 pass
+
+    if score > 0:
+        logger.info(
+            "%s final trend score %.3f direction %s.",
+            STRATEGY_NAME,
+            score,
+            direction,
+        )
+    else:
+        logger.debug("%s produced no trend signal.", STRATEGY_NAME)
 
     return score, direction
 

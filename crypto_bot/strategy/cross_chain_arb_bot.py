@@ -9,9 +9,12 @@ import pandas as pd
 
 from crypto_bot.execution.solana_mempool import SolanaMempoolMonitor
 from crypto_bot.solana import fetch_solana_prices
+from crypto_bot.utils.logging import setup_strategy_logger
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 
 NAME = "cross_chain_arb_bot"
+STRATEGY_NAME = NAME
+logger = setup_strategy_logger(STRATEGY_NAME)
 
 def _fetch_prices(symbols: List[str]) -> Dict[str, float]:
     """Return Solana prices synchronously."""
@@ -49,6 +52,11 @@ def generate_signal(
     mempool_cfg: Optional[Mapping[str, object]] = kwargs.get("mempool_cfg")
 
     if df is None or df.empty:
+        logger.debug(
+            "%s missing OHLCV data for %s; skipping arbitrage check.",
+            STRATEGY_NAME,
+            symbol or "<unknown>",
+        )
         return 0.0, "none"
 
     params = config.get("cross_chain_arb_bot", {})
@@ -62,6 +70,7 @@ def generate_signal(
     if symbol and not pair:
         pair = str(symbol)
     if not pair:
+        logger.debug("%s no trading pair configured; aborting signal.", STRATEGY_NAME)
         return 0.0, "none"
 
     cfg = mempool_cfg or config.get("mempool_monitor", {})
@@ -76,6 +85,11 @@ def generate_signal(
         except Exception:
             suspicious = False
         if suspicious:
+            logger.info(
+                "%s mempool risk triggered for %s; suppressing signal.",
+                STRATEGY_NAME,
+                pair,
+            )
             return 0.0, "none"
 
     try:
@@ -85,14 +99,30 @@ def generate_signal(
         prices = {}
     dex_price = prices.get(pair)
     if dex_price is None or dex_price <= 0:
+        logger.debug(
+            "%s no DEX price available for %s; skipping.", STRATEGY_NAME, pair
+        )
         return 0.0, "none"
 
     cex_price = float(df["close"].iloc[-1])
     if cex_price <= 0:
+        logger.debug(
+            "%s invalid CEX price %.4f for %s; skipping.",
+            STRATEGY_NAME,
+            cex_price,
+            pair,
+        )
         return 0.0, "none"
 
     diff = (dex_price - cex_price) / cex_price
     if abs(diff) < threshold:
+        logger.debug(
+            "%s spread %.4f below threshold %.4f for %s.",
+            STRATEGY_NAME,
+            diff,
+            threshold,
+            pair,
+        )
         return 0.0, "none"
 
     score = min(abs(diff), 1.0)
@@ -100,6 +130,14 @@ def generate_signal(
         score = normalize_score_by_volatility(df, score)
 
     direction = "long" if diff > 0 else "short"
+    logger.info(
+        "%s generated %s arbitrage signal for %s (spread %.4f, score %.3f).",
+        STRATEGY_NAME,
+        direction,
+        pair,
+        diff,
+        score,
+    )
     return score, direction
 
 
