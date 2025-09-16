@@ -343,12 +343,13 @@ def generate_signal(
         return 0.0, "none"
     
     # Apply volatility normalization if enabled
-    if 'atr_pct' in metadata:
+    if signal_score > 0 and metadata.get('atr_pct') is not None:
         try:
             signal_score = normalize_score_by_volatility(
-                signal_score, metadata['atr_pct']
+                df,
+                signal_score
             )
-        except:
+        except Exception:
             pass  # Continue without normalization if it fails
     
     # Ensure signal score is within bounds
