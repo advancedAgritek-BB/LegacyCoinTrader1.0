@@ -1,12 +1,13 @@
 # Production Configuration for LegacyCoinTrader
-# This file contains production-ready settings and optimizations
+# Canonical configuration consolidating all advanced settings.
+# This file now includes the enhanced parameters that previously lived in
+# production_config_enhanced.yaml.
 
 production:
   mode: true
   debug: false
   log_level: INFO
 
-# Environment Variables Template (copy to .env file)
 environment:
   KRAKEN_API_KEY: "your_kraken_api_key_here"
   KRAKEN_API_SECRET: "your_kraken_api_secret_here"
@@ -16,7 +17,6 @@ environment:
   FLASK_ENV: "production"
   PRODUCTION: "true"
 
-# Performance Optimizations
 performance:
   memory:
     max_memory_usage_pct: 80.0
@@ -24,35 +24,46 @@ performance:
     adaptive_cache_sizing: true
     gc_threshold: 0.7
     cache_size_limit_mb: 500
-
+    memory_threshold: 0.8
+    model_cleanup_interval: 300
+    enable_background_cleanup: true
+    aggressive_cleanup_threshold: 0.9
   concurrency:
     adaptive_concurrency: true
     min_concurrent_requests: 1
     max_concurrent_requests: 20
     response_time_threshold: 1.0
     success_rate_threshold: 0.8
-
+    parallel_processing: true
+    max_workers: 4
+    batch_size: 10
   rate_limiting:
     adaptive_rate_limiting: true
     base_request_delay: 1.0
     max_request_delay: 10.0
     error_backoff_multiplier: 2.0
     max_requests_per_minute: 30
-
   caching:
     adaptive_cache_ttl: true
     min_cache_ttl: 60
     max_cache_ttl: 21600  # 6 hours
     cache_hit_rate_threshold: 0.7
     cache_size_multiplier: 2.0
-
-  # OHLCV Fetcher Configuration
+    cache_enabled: true
+    cache_cleanup_interval: 600
+    max_cache_entries: 1000
+    cache_ttl_seconds: 3600
+    default_cache_ttl: 3600
   ohlcv_fetcher:
     use_enhanced_ohlcv_fetcher: true  # Use enhanced fetcher for better performance and reliability
     max_concurrent_ohlcv: 3  # Max concurrent CEX requests
     max_concurrent_dex_ohlcv: 10  # Max concurrent DEX requests
 
-# Symbol Validation Enhancements
+runtime:
+  execution_mode: "dry_run"
+  exchange: "kraken"
+  timeframe: "1h"
+
 symbol_validation:
   production_mode: true
   filter_invalid_symbols: true
@@ -62,7 +73,64 @@ symbol_validation:
   strict_mode: true
   validate_exchange_support: true
 
-# Risk Management
+watchlist:
+  symbols:
+    - "BTC/USD"
+    - "ETH/USD"
+    - "SOL/USD"
+    - "MATIC/USD"
+    - "ADA/USD"
+    - "DOT/USD"
+    - "LINK/USD"
+    - "UNI/USD"
+    - "AVAX/USD"
+    - "ATOM/USD"
+  strategies:
+    - name: "momentum"
+      enabled: true
+      weight: 0.4
+      parameters:
+        lookback_period: 20
+        momentum_threshold: 0.02
+    - name: "mean_reversion"
+      enabled: true
+      weight: 0.3
+      parameters:
+        lookback_period: 50
+        reversion_threshold: 0.05
+    - name: "volatility_breakout"
+      enabled: true
+      weight: 0.3
+      parameters:
+        volatility_period: 30
+        breakout_multiplier: 2.0
+  technical_indicators:
+    - "RSI"
+    - "MACD"
+    - "BB"
+    - "ATR"
+    - "EMA"
+    - "SMA"
+  indicator_settings:
+    rsi:
+      period: 14
+      overbought: 70
+      oversold: 30
+    macd:
+      fast: 12
+      slow: 26
+      signal: 9
+    bollinger_bands:
+      period: 20
+      stddev: 2
+    atr:
+      period: 14
+    ema_periods:
+      - 9
+      - 21
+      - 50
+      - 200
+
 risk:
   enable_partial_exits: true
   enable_trailing_stop: true
@@ -70,12 +138,19 @@ risk:
   max_positions: 10
   max_risk_per_trade: 0.05
   max_total_risk: 0.2
+  max_portfolio_risk: 0.2
   position_size_pct: 0.15
+  position_size_fraction: 0.02  # Legacy fractional position sizing option
   stop_loss_pct: 0.02
   take_profit_pct: 0.04
+  enhanced_targets:
+    stop_loss_pct: 0.05
+    take_profit_pct: 0.15
+  max_daily_loss: 0.10
+  max_daily_trades: 50
+  volatility_adjustment: true
   min_position_size_usd: 10
 
-# Circuit Breaker Configuration
 circuit_breaker:
   enabled: true
   failure_threshold: 5
@@ -87,7 +162,6 @@ circuit_breaker:
     - create_order
     - fetch_balance
 
-# Monitoring and Alerting
 monitoring:
   enable_performance_monitoring: true
   metrics_export_interval: 60
@@ -96,8 +170,14 @@ monitoring:
   error_rate_threshold: 5
   response_time_threshold: 2.0
   cache_hit_rate_threshold: 70
+  monitoring_enabled: true
+  metrics_collection_interval: 60
+  health_check_interval: 300
+  alert_thresholds:
+    memory_usage: 0.85
+    cpu_usage: 0.80
+    error_rate: 0.05
 
-# Error Handling
 error_handling:
   max_retries: 3
   retry_delay: 2.0
@@ -107,8 +187,30 @@ error_handling:
   fallback_data_sources: true
   graceful_degradation: true
   log_errors: true
+  base_delay: 1.0
+  max_delay: 60.0
+  jitter: true
+  circuit_breaker:
+    failure_threshold: 5
+    recovery_timeout: 60.0
+  recovery_actions:
+    network_retry:
+      enabled: true
+      priority: 1
+      max_retries: 3
+    rate_limit_wait:
+      enabled: true
+      priority: 2
+      wait_time: 60
+    data_fallback:
+      enabled: true
+      priority: 3
+      cache_ttl: 3600
+    exchange_fallback:
+      enabled: true
+      priority: 4
+      paper_trading_enabled: true
 
-# Database Integration (Optional)
 database:
   enabled: false
   host: "localhost"
@@ -120,7 +222,6 @@ database:
   max_connections: 10
   command_timeout: 30
 
-# Web Server Configuration
 web_server:
   host: "0.0.0.0"
   port: 8000
@@ -129,23 +230,30 @@ web_server:
   timeout: 120
   max_requests_per_worker: 1000
 
-# Logging Configuration
 logging:
   level: INFO
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   file_rotation: true
   max_file_size: 10485760  # 10MB
   backup_count: 5
+  log_file: "logs/bot.log"
+  log_max_size_mb: 100
+  log_backup_count: 5
+  log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"  # Alias for enhanced config compatibility
 
-# Security Settings
 security:
   api_key_required: true
   rate_limiting_enabled: true
   max_requests_per_minute: 60
   enable_cors: false
-  allowed_origins: ["localhost", "127.0.0.1"]
+  allowed_origins:
+    - "localhost"
+    - "127.0.0.1"
+  api_key_encryption: true
+  api_key_file: "config/api_keys.enc"
+  session_timeout: 3600
+  max_login_attempts: 3
 
-# Strategy Configuration
 strategy:
   evaluation_mode: mapped
   min_confidence_score: 0.001
@@ -154,3 +262,68 @@ strategy:
   regime_detection_enabled: true
   performance_tracking_enabled: true
   symbol_batch_size: 50
+
+machine_learning:
+  enabled: true
+  model_type: "ensemble"
+  features:
+    - "price_momentum"
+    - "volume_momentum"
+    - "volatility"
+    - "technical_indicators"
+    - "market_regime"
+  training_interval: 86400
+  prediction_threshold: 0.6
+  model_cleanup_interval: 3600
+
+data_management:
+  source: "kraken"
+  update_interval: 60
+  retention_days: 365
+  compression: true
+  backup_interval: 86400
+
+notifications:
+  enabled: true
+  telegram:
+    enabled: true
+    bot_token: ""
+    chat_id: ""
+  email:
+    enabled: false
+    smtp_server: ""
+    username: ""
+    password: ""
+
+websocket:
+  enabled: true
+  reconnect_interval: 5
+  max_retries: 10
+  timeout: 30
+  heartbeat_interval: 30
+
+api:
+  rate_limit: 10
+  timeout: 30
+  retry_attempts: 3
+  retry_delay: 1
+
+backtesting:
+  enabled: true
+  start_date: "2023-01-01"
+  end_date: "2024-01-01"
+  initial_balance: 10000
+  commission: 0.001
+
+development:
+  debug_mode: false
+  test_mode: false
+  profiling_enabled: false
+  coverage_enabled: false
+
+environment_overrides:
+  execution_mode: "BOT_EXECUTION_MODE"
+  log_level: "BOT_LOG_LEVEL"
+  telegram_bot_token: "TELEGRAM_BOT_TOKEN"
+  telegram_chat_id: "TELEGRAM_CHAT_ID"
+  api_key_file: "API_KEY_FILE"

@@ -107,6 +107,11 @@ performance:
   max_memory_usage_pct: 80.0
 ```
 
+### Production Configuration (`production_config.yaml`)
+- `production_config.yaml` is now the single source of truth for production deployments.
+- It consolidates the advanced memory, error-handling, and strategy settings that were previously stored in `production_config_enhanced.yaml`.
+- Tools such as `deploy_production.py` continue to load `production_config.yaml` by default, so update this file to tune production behaviour.
+
 ## 📈 Trading Strategies
 
 ### **Ultra-Fast Strategies**
