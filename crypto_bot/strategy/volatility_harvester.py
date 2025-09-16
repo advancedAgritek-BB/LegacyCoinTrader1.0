@@ -136,6 +136,16 @@ def _detect_volatility_signals(
     signal_strength = 0.0
     signal_direction = "none"
     signal_metadata = {}
+
+    # Precompute rolling comparisons for band/channel width checks
+    bb_width_series = indicators.get('bb_width')
+    kc_width_series = indicators.get('kc_width')
+    bb_width_mean_series = None
+    kc_width_mean_series = None
+    if bb_width_series is not None:
+        bb_width_mean_series = bb_width_series.rolling(window=20).mean()
+    if kc_width_series is not None:
+        kc_width_mean_series = kc_width_series.rolling(window=20).mean()
     
     # 1. ATR Volatility Detection (Primary Signal)
     if current['atr_pct'] > config.atr_threshold:
@@ -187,7 +197,13 @@ def _detect_volatility_signals(
             signal_metadata['volume_price_aligned'] = True
     
     # 5. Bollinger Band Volatility
-    if current['bb_width'] > current['bb_width'].rolling(window=20).mean().iloc[-1]:
+    if (
+        bb_width_series is not None
+        and bb_width_mean_series is not None
+        and not pd.isna(bb_width_series.iloc[-1])
+        and not pd.isna(bb_width_mean_series.iloc[-1])
+        and bb_width_series.iloc[-1] > bb_width_mean_series.iloc[-1]
+    ):
         signal_strength += 0.15
         signal_metadata['bb_expansion'] = True
         
@@ -202,7 +218,13 @@ def _detect_volatility_signals(
             signal_metadata['bb_signal'] = "near_upper_band"
     
     # 6. Keltner Channel Expansion
-    if current['kc_width'] > current['kc_width'].rolling(window=20).mean().iloc[-1]:
+    if (
+        kc_width_series is not None
+        and kc_width_mean_series is not None
+        and not pd.isna(kc_width_series.iloc[-1])
+        and not pd.isna(kc_width_mean_series.iloc[-1])
+        and kc_width_series.iloc[-1] > kc_width_mean_series.iloc[-1]
+    ):
         signal_strength += 0.1
         signal_metadata['kc_expansion'] = True
         
