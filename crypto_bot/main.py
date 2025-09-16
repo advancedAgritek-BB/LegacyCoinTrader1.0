@@ -2,7 +2,6 @@ import os
 import asyncio
 import contextlib
 import time
-import signal
 import warnings
 from pathlib import Path
 from datetime import datetime
@@ -21,7 +20,6 @@ import pandas as pd
 import numpy as np
 import yaml
 from dotenv import dotenv_values
-from pydantic import ValidationError
 from decimal import Decimal
 import sys
 import gc
@@ -37,11 +35,6 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 # All imports consolidated at the top
-from schema.scanner import (
-    ScannerConfig,
-    SolanaScannerConfig,
-    PythConfig,
-)
 from crypto_bot.utils.telegram import TelegramNotifier, send_test_message
 from crypto_bot.utils.trade_manager import create_trade
 from crypto_bot.utils.logger import (
@@ -85,6 +78,15 @@ from crypto_bot.paper_wallet import PaperWallet
 from crypto_bot.utils.strategy_utils import compute_strategy_weights
 from crypto_bot.auto_optimizer import optimize_strategies
 from crypto_bot.utils.telemetry import write_cycle_metrics
+from crypto_bot.balance_management import (
+    ensure_paper_wallet_sync,
+    fetch_balance,
+    get_paper_wallet_status,
+    notify_balance_change,
+    sync_paper_wallet_balance,
+    sync_paper_wallet_with_positions_log,
+    update_position_pnl,
+)
 from crypto_bot.enhanced_scan_integration import (
     get_enhanced_scan_integration,
     start_enhanced_scan_integration,
@@ -106,6 +108,20 @@ from crypto_bot.regime.regime_classifier import classify_regime_async
 from crypto_bot.volatility_filter import calc_atr
 from crypto_bot.solana.exit import monitor_price
 from crypto_bot.utils.memory_manager import get_memory_manager
+from crypto_bot.runtime_signals import (
+    check_existing_instance,
+    cleanup_pid_file,
+    install_signal_handlers,
+    write_pid_file,
+)
+from crypto_bot.startup_utils import (
+    CONFIG_PATH,
+    flatten_config,
+    load_config,
+    maybe_reload_config,
+    reload_config,
+    set_last_config_mtime,
+)
 # Backwards compatibility for tests - function defined later
 # Log monitoring setup will be done after logger is initialized
 # Memory management utilities
@@ -202,10 +218,7 @@ class MemoryManager:
 def _fix_symbol(sym: str) -> str:
     """Internal wrapper for tests to normalize symbols."""
     return fix_symbol(sym)
-CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
 ENV_PATH = Path(__file__).resolve().parent / ".env"
-# Track the modification time of the loaded configuration
-_LAST_CONFIG_MTIME = CONFIG_PATH.stat().st_mtime
 logger = setup_logger("bot", LOG_DIR / "bot.log", to_console=False)
 # Start continuous log monitoring in background (after logger is initialized)
 try:
@@ -323,722 +336,6 @@ def _closest_wall_distance(book: dict, entry: float, side: str) -> Optional[floa
     if not dists:
         return None
     return min(dists)
-def notify_balance_change(
-    notifier: Optional[TelegramNotifier],
-    previous: Optional[float],
-    new_balance: float,
-    enabled: bool,
-    is_paper_trading: bool = False,
-) -> float:
-    """Send a notification if the balance changed."""
-    if notifier and enabled and previous is not None and new_balance != previous:
-        prefix = "📄 Paper" if is_paper_trading else "💰 Live"
-        notifier.notify(f"{prefix} Balance changed: ${new_balance:.2f}")
-    return new_balance
-async def fetch_balance(exchange, paper_wallet, config):
-    """Return the latest wallet balance without logging."""
-    if config["execution_mode"] != "dry_run":
-        if asyncio.iscoroutinefunction(getattr(exchange, "fetch_balance", None)):
-            bal = await exchange.fetch_balance()
-        else:
-            bal = await asyncio.to_thread(exchange.fetch_balance_with_retry)
-        return bal["USDT"]["free"] if isinstance(bal["USDT"], dict) else bal["USDT"]
-    return paper_wallet.balance if paper_wallet else 0.0
-def sync_paper_wallet_balance(ctx):
-    """Ensure paper wallet balance is synchronized with context."""
-    if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
-        if abs(ctx.balance - ctx.paper_wallet.balance) > 0.01:  # Allow small floating point differences
-            logger.warning(
-                f"Balance mismatch detected: ctx.balance=${ctx.balance:.2f}, paper_wallet.balance=${ctx.paper_wallet.balance:.2f}"
-            )
-            ctx.balance = ctx.paper_wallet.balance
-            logger.info(f"Balance synchronized: ${ctx.balance:.2f}")
-            # Update risk manager equity with current balance
-            if hasattr(ctx, 'risk_manager'):
-                ctx.risk_manager.update_equity(ctx.balance)
-                logger.info(f"Risk manager equity updated to: ${ctx.balance:.2f}")
-        return ctx.paper_wallet.balance
-    return ctx.balance
-async def process_sell_requests(ctx, notifier=None):
-    """Process pending sell requests from the frontend dashboard."""
-    import json
-    from pathlib import Path
-    # Debug: Write to file immediately when function starts
-    with open('/tmp/sell_debug.log', 'a') as f:
-        f.write("process_sell_requests function called\n")
-    sell_requests_file = LOG_DIR / 'sell_requests.json'
-    if not sell_requests_file.exists():
-        return
-    try:
-        with open(sell_requests_file, 'r') as f:
-            sell_requests = json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
-        logger.warning("Could not read sell_requests.json file")
-        return
-    if not sell_requests:
-        return
-    logger.info(f"Processing {len(sell_requests)} sell request(s)")
-    for i, req in enumerate(sell_requests):
-        logger.info(
-                f"Sell request {i+1}: {req.get('symbol')} {req.get('amount')} @ {req.get('timestamp')}"
-            )
-    # Add debug statement at the beginning of processing
-    logger.info("=== STARTING SELL REQUEST PROCESSING ===")
-    print("=== STARTING SELL REQUEST PROCESSING ===")
-    # Write to a debug file
-    with open('/tmp/sell_debug.log', 'a') as f:
-        f.write("=== STARTING SELL REQUEST PROCESSING ===\n")
-    processed_requests = []
-    remaining_requests = []
-    for request in sell_requests:
-        symbol = request.get('symbol')
-        amount = request.get('amount', 0)
-        # Initialize position variables
-        has_position = False
-        position = None
-        position_id = None
-        # Check if we have an open position for this symbol
-        # In dry run mode, check paper wallet positions; otherwise check context positions
-        # Also check TradeManager positions for consistency
-        has_position = False
-        position = None
-        position_id = None
-        trade_manager_position = None
-        # First check TradeManager (source of truth for dashboard)
-        if hasattr(ctx, 'trade_manager') and ctx.trade_manager:
-            tm_positions = ctx.trade_manager.get_all_positions()
-            logger.info(f"TradeManager has {len(tm_positions)} positions")
-            for tm_pos in tm_positions:
-                logger.info(f"Checking TM position: {tm_pos.symbol} vs {symbol}")
-                if tm_pos.symbol == symbol:
-                    trade_manager_position = tm_pos
-                    has_position = True
-                    logger.info(
-                f"Found position in TradeManager: {symbol} {tm_pos.total_amount} @ {tm_pos.average_price}"
-            )
-                    break
-            if not trade_manager_position:
-                logger.info(f"No TradeManager position found for {symbol}")
-        if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
-            # Paper wallet stores positions by trade_id, need to search by symbol
-            for trade_id, pos in ctx.paper_wallet.positions.items():
-                if pos.get("symbol") == symbol:
-                    position = pos
-                    position_id = trade_id
-                    has_position = True
-                    logger.info(
-                f"Found position in paper wallet: {symbol} {pos.get('amount', pos.get('size', 0))} @ {pos.get('entry_price', 0)}"
-            )
-                    break
-            if not has_position:
-                # DEPRECATED: positions.log fallback - TradeManager should be the authoritative source
-                logger.warning(
-                f"No open position found for {symbol} in paper wallet - checking positions.log (DEPRECATED)"
-            )
-                logger.warning(
-                f"Consider using TradeManager as the single source of truth for position data"
-            )
-                # Try to find position in positions.log (keeping for backward compatibility)
-                positions_log = LOG_DIR / 'positions.log'
-                if positions_log.exists():
-                    try:
-                        with open(positions_log, 'r') as f:
-                            for line in f:
-                                if symbol in line and 'Active' in line:
-                                    # Parse the position line
-                                    parts = line.split()
-                                    for i, part in enumerate(parts):
-                                        if part == 'Active' and i + 3 < len(parts):
-                                            log_symbol = parts[i + 1]
-                                            if log_symbol == symbol:
-                                                side = parts[i + 2]
-                                                amount = float(parts[i + 3])
-                                                # Find entry price
-                                                for j in range(i + 4, len(parts)):
-                                                    if parts[j] == 'entry' and j + 1 < len(parts):
-                                                        entry_price = float(parts[j + 1])
-                                                        # Create the position in paper wallet
-                                                        logger.warning(
-                f"Found {symbol} position in DEPRECATED positions.log, adding to paper wallet: {amount} @ ${entry_price}"
-            )
-                                                        logger.warning(
-                f"This fallback should not be needed - verify TradeManager state"
-            )
-                                                        # Generate a trade ID
-                                                        import time
-                                                        trade_id = f"{symbol.lower().replace('/', '_')}_{int(time.time())}"
-                                                        # Add position to paper wallet
-                                                        ctx.paper_wallet.positions[trade_id] = {
-                                                            'symbol': symbol,
-                                                            'side': side,
-                                                            'amount': amount,
-                                                            'entry_price': entry_price,
-                                                            'entry_time': datetime.utcnow().isoformat(),
-                                                            'reserved': 0.0
-                                                        }
-                                                        # Update balance (deduct position value)
-                                                        position_value = amount * entry_price
-                                                        ctx.paper_wallet.balance -= position_value
-                                                        ctx.balance = ctx.paper_wallet.balance
-                                                        # Save updated state
-                                                        ctx.paper_wallet.save_state()
-                                                        logger.info(
-                f"Added {symbol} position to paper wallet from DEPRECATED source, new balance: ${ctx.paper_wallet.balance:.2f}"
-            )
-                                                        # Set position variables for processing
-                                                        position = ctx.paper_wallet.positions[trade_id]
-                                                        position_id = trade_id
-                                                        has_position = True
-                                                        break
-                                                break
-                                        if has_position:
-                                            break
-                                    if has_position:
-                                        break
-                    except Exception as e:
-                        logger.error(f"Error parsing DEPRECATED positions.log for {symbol}: {e}")
-                if not has_position:
-                    logger.warning(
-                f"No open position found for {symbol} in paper wallet - TradeManager should be the authoritative source"
-            )
-                    logger.warning(
-                f"Skipping sell request for {symbol} - position data inconsistency detected"
-            )
-                    continue
-        else:
-            has_position = symbol in ctx.positions
-            if has_position:
-                position = ctx.positions[symbol]
-            else:
-                logger.warning(
-                f"No open position found for {symbol} in context, skipping sell request"
-            )
-                continue
-        # Get current price for the symbol
-        try:
-            if hasattr(ctx, 'df_cache') and ctx.df_cache:
-                # df_cache is structured as {timeframe: {symbol: dataframe}}
-                # Try to find the symbol in any timeframe
-                df = None
-                for timeframe, symbol_cache in ctx.df_cache.items():
-                    if symbol in symbol_cache:
-                        df = symbol_cache[symbol]
-                        break
-                if df is not None and not df.empty:
-                    current_price = float(df.iloc[-1]['close'])
-                else:
-                    logger.warning(
-                f"No price data available for {symbol} in cache, trying to fetch current price..."
-            )
-                    # Fallback: try to fetch current price directly from exchange
-                    try:
-                        if hasattr(ctx.exchange, 'fetch_ticker'):
-                            # Check if fetch_ticker is async or sync
-                            if asyncio.iscoroutinefunction(ctx.exchange.fetch_ticker):
-                                ticker = await ctx.exchange.fetch_ticker(symbol)
-                            else:
-                                ticker = ctx.exchange.fetch_ticker(symbol)
-                            current_price = float(ticker.get('last', ticker.get('close', 0)))
-                            if current_price > 0:
-                                logger.info(f"Fetched current price for {symbol}: ${current_price}")
-                            else:
-                                logger.warning(f"Invalid price fetched for {symbol}, skipping sell request")
-                                remaining_requests.append(request)
-                                continue
-                        else:
-                            logger.warning(
-                f"No price data available for {symbol} and no exchange ticker method, skipping sell request"
-            )
-                            remaining_requests.append(request)
-                            continue
-                    except Exception as e:
-                        logger.error(f"Error fetching current price for {symbol}: {e}")
-                        remaining_requests.append(request)
-                        continue
-            else:
-                logger.warning(
-                f"No price cache available for {symbol}, trying to fetch current price..."
-            )
-                # Fallback: try to fetch current price directly from exchange
-                try:
-                    if hasattr(ctx.exchange, 'fetch_ticker'):
-                        # Check if fetch_ticker is async or sync
-                        if asyncio.iscoroutinefunction(ctx.exchange.fetch_ticker):
-                            ticker = await ctx.exchange.fetch_ticker(symbol)
-                        else:
-                            ticker = ctx.exchange.fetch_ticker(symbol)
-                        current_price = float(ticker.get('last', ticker.get('close', 0)))
-                        if current_price > 0:
-                            logger.info(f"Fetched current price for {symbol}: ${current_price}")
-                        else:
-                            logger.warning(f"Invalid price fetched for {symbol}, skipping sell request")
-                            remaining_requests.append(request)
-                            continue
-                    else:
-                        logger.warning(
-                f"No price cache available for {symbol} and no exchange ticker method, skipping sell request"
-            )
-                        remaining_requests.append(request)
-                        continue
-                except Exception as e:
-                    logger.error(f"Error fetching current price for {symbol}: {e}")
-                    remaining_requests.append(request)
-                    continue
-        except Exception as e:
-            logger.error(f"Error getting current price for {symbol}: {e}")
-            remaining_requests.append(request)
-            continue
-        # Process the sell based on position source (TradeManager takes priority)
-        # Always try TradeManager first if position was found
-        if trade_manager_position:
-            # TradeManager position - this is the preferred method for dashboard sells
-            try:
-                logger.info(
-                f"EXECUTING TradeManager sell processing: {symbol} {amount} @ ${current_price}"
-            )
-                # Ensure TradeManager is available in context
-                if not hasattr(ctx, 'trade_manager') or ctx.trade_manager is None:
-                    from crypto_bot.utils.trade_manager import get_trade_manager
-                    ctx.trade_manager = get_trade_manager()
-                    logger.info("Initialized TradeManager in context")
-                # For TradeManager, we need to create a trade to close the position
-                from crypto_bot.utils.trade_manager import create_trade
-                # Determine the correct side for closing the position
-                if trade_manager_position.side == 'long':
-                    # Close long position with sell
-                    closing_side = 'sell'
-                else:
-                    # Close short position with buy
-                    closing_side = 'buy'
-                # Create the closing trade
-                closing_trade = create_trade(
-                    symbol=symbol,
-                    side=closing_side,
-                    amount=Decimal(str(amount)),
-                    price=Decimal(str(current_price)),
-                    strategy='manual_close',
-                    exchange='kraken'
-                )
-                logger.info(
-                f"Created closing trade: {closing_trade.symbol} {closing_trade.side} {closing_trade.amount} @ {closing_trade.price}"
-            )
-                logger.info(
-                f"Position before close: {trade_manager_position.total_amount} @ {trade_manager_position.average_price}"
-            )
-                # Record the trade in TradeManager
-                trade_id = ctx.trade_manager.record_trade(closing_trade)
-                logger.info(f"TradeManager closing trade recorded with ID: {trade_id}")
-                # Sync positions if using TradeManager as source
-                if hasattr(ctx, 'sync_positions_from_trade_manager') and ctx.use_trade_manager_as_source:
-                    ctx.sync_positions_from_trade_manager()
-                # Force save state immediately after closing trade
-                ctx.trade_manager.save_state()
-                logger.info(f"TradeManager state saved after closing trade for {symbol}")
-                # Update price cache
-                ctx.trade_manager.price_cache[symbol] = Decimal(str(current_price))
-                # Log final position state
-                final_position = ctx.trade_manager.positions.get(symbol)
-                if final_position and final_position.is_open:
-                    logger.info(
-                f"Position {symbol} partially closed, remaining: {final_position.total_amount}"
-            )
-                else:
-                    logger.info(f"Position {symbol} fully closed")
-                # Get updated position info
-                updated_position = ctx.trade_manager.positions.get(symbol)
-                if updated_position and updated_position.is_open:
-                    logger.info(
-                f"Position partially closed: {symbol} remaining {updated_position.total_amount}"
-            )
-                else:
-                    logger.info(f"Position fully closed: {symbol}")
-                # Send Telegram notification
-                if notifier and ctx.config.get("telegram", {}).get("trade_updates", True) and notifier.enabled:
-                    pnl_emoji = "💰" if trade_manager_position.calculate_unrealized_pnl(Decimal(str(current_price)))[0] >= 0 else "📉"
-                    tm_sell_msg = f"📊 TradeManager Market Sell {pnl_emoji}\nSELL {amount} {symbol}\nPrice: ${current_price:.6f}\nTrade ID: {trade_id}"
-                    notifier.notify(tm_sell_msg)
-                # Mark as processed
-                processed_requests.append(request)
-                logger.info(
-                f"TradeManager closing request processed: {symbol} {amount} @ ${current_price}"
-            )
-            except Exception as e:
-                logger.error(f"Failed to process TradeManager closing for {symbol}: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                remaining_requests.append(request)
-                continue
-        # Skip paper wallet processing if we successfully processed with TradeManager
-        if trade_manager_position:
-            continue
-        # Fallback to paper wallet processing only if TradeManager failed
-        elif ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
-            # Paper trading mode - close position in paper wallet
-            try:
-                # Check position before closing
-                position_exists_before = position_id in ctx.paper_wallet.positions
-                position_amount_before = 0.0
-                if position_exists_before:
-                    pos_data = ctx.paper_wallet.positions[position_id]
-                    position_amount_before = pos_data.get("size", pos_data.get("amount", 0))
-                logger.info(
-                f"Attempting to close position: {symbol} (ID: {position_id}), requested amount: {amount}, available: {position_amount_before}"
-            )
-                # Close the position (paper wallet handles amount validation internally)
-                pnl = ctx.paper_wallet.close(position_id, amount, current_price)
-                ctx.balance = ctx.paper_wallet.balance
-                # Check position after closing
-                position_exists_after = position_id in ctx.paper_wallet.positions
-                position_amount_after = 0.0
-                if position_exists_after:
-                    pos_data = ctx.paper_wallet.positions[position_id]
-                    position_amount_after = pos_data.get("size", pos_data.get("amount", 0))
-                actual_closed_amount = position_amount_before - position_amount_after
-                logger.info(
-                f"Paper trade closed: {position['side']} {actual_closed_amount:.4f}/{amount:.4f} {symbol} @ ${current_price:.6f}, PnL: ${pnl:.2f}, balance: ${ctx.balance:.2f}"
-            )
-                # Log the sell trade to trades.csv (secondary logging - TradeManager is primary source)
-                if actual_closed_amount > 0:
-                    from crypto_bot.utils.trade_logger import log_trade
-                    sell_trade = {
-                        'symbol': symbol,
-                        'side': 'sell',  # Always sell to close position
-                        'amount': actual_closed_amount,
-                        'price': current_price,
-                        'timestamp': datetime.utcnow().isoformat(),
-                        'dry_run': True  # This was a paper trade
-                    }
-                    try:
-                        log_trade(sell_trade)
-                        logger.info(
-                f"Logged sell trade to CSV (secondary): {actual_closed_amount} {symbol} @ ${current_price:.6f}"
-            )
-                    except Exception as e:
-                        logger.error(f"Failed to log sell trade to CSV: {e}")
-                # Send Telegram notification
-                if notifier and ctx.config.get("telegram", {}).get("trade_updates", True) and notifier.enabled:
-                    pnl_emoji = "💰" if pnl >= 0 else "📉"
-                    close_type = "PARTIAL" if position_exists_after else "FULL"
-                    paper_sell_msg = f"📄 Paper Market Sell {pnl_emoji} ({close_type})\n{position['side'].upper()} {actual_closed_amount:.4f} {symbol}\nEntry: ${position['entry_price']:.6f}\nExit: ${current_price:.6f}\nPnL: ${pnl:.2f}\nBalance: ${ctx.balance:.2f}"
-                    notifier.notify(paper_sell_msg)
-                # Remove position from context/paper wallet if fully closed
-                if not position_exists_after:
-                    # Position fully closed
-                    if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
-                        # Remove from paper wallet
-                        if symbol in ctx.paper_wallet.positions:
-                            del ctx.paper_wallet.positions[symbol]
-                            logger.info(f"Removed closed position {symbol} from paper wallet")
-                    else:
-                        # Remove from context
-                        if symbol in ctx.positions:
-                            del ctx.positions[symbol]
-                            logger.info(f"Removed closed position {symbol} from context")
-                else:
-                    logger.info(
-                f"Position {symbol} partially closed, {position_amount_after:.4f} remaining"
-            )
-                # Always mark as processed since we attempted to close it
-                # The paper wallet handles amount validation, so if it returned a PnL, something was closed
-                processed_requests.append(request)
-                logger.info(
-                f"Marked sell request for {symbol} as processed (PnL: ${pnl:.2f})"
-            )
-            except Exception as e:
-                logger.error(f"Failed to close paper trade for {symbol}: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                remaining_requests.append(request)
-                continue
-        else:
-            # Live trading mode - this would need to be implemented for live orders
-            logger.warning(f"Live trading sell requests not yet implemented for {symbol}")
-            remaining_requests.append(request)
-            continue
-    # Update the sell requests file with remaining unprocessed requests
-    try:
-        logger.info(
-                f"Writing {len(remaining_requests)} remaining sell requests to file"
-            )
-        with open(sell_requests_file, 'w') as f:
-            json.dump(remaining_requests, f, indent=2)
-        # Verify the file was written correctly
-        if sell_requests_file.exists():
-            with open(sell_requests_file, 'r') as f:
-                verify_requests = json.load(f)
-            logger.info(f"Verified {len(verify_requests)} sell requests in file")
-        else:
-            logger.error("sell_requests.json file was not created!")
-        logger.info(
-                f"Processed {len(processed_requests)} sell requests, {len(remaining_requests)} remaining"
-            )
-    except Exception as e:
-        logger.error(f"Error updating sell_requests.json: {e}")
-        import traceback
-        logger.error(f"File write traceback: {traceback.format_exc()}")
-def update_position_pnl(ctx):
-    """Update PnL for all positions based on current market prices using TradeManager."""
-    if not ctx.trade_manager:
-        # Fallback to old method if TradeManager not available
-        _update_position_pnl_legacy(ctx)
-        return
-    # Get current prices for all open positions
-    for sym, pos in ctx.positions.items():
-        try:
-            # Fetch current price
-            current_price = None
-            if hasattr(ctx, 'df_cache') and sym in ctx.df_cache:
-                df = ctx.df_cache[sym]
-                if not df.empty:
-                    current_price = float(df.iloc[-1]['close'])
-            if current_price is not None:
-                # Update price in TradeManager
-                from decimal import Decimal
-                ctx.trade_manager.update_price(sym, Decimal(str(current_price)))
-                # Get updated position from TradeManager
-                position = ctx.trade_manager.get_position(sym)
-                if position:
-                    # Calculate unrealized PnL
-                    unrealized_pnl, unrealized_pct = position.calculate_unrealized_pnl(Decimal(str(current_price)))
-                    # Update position data for backward compatibility
-                    pos["pnl"] = float(unrealized_pnl)
-                    pos["highest_price"] = float(position.highest_price) if position.highest_price else current_price
-                    pos["lowest_price"] = float(position.lowest_price) if position.lowest_price else current_price
-                    pos["trailing_stop"] = float(position.stop_loss_price) if position.stop_loss_price else 0.0
-                    logger.debug(
-                f"Updated PnL for {sym}: ${unrealized_pnl:.2f} ({unrealized_pct:.2f}%) at price ${current_price:.6f}"
-            )
-                    # Check for exit conditions
-                    should_exit, exit_reason = position.should_exit(Decimal(str(current_price)))
-                    if should_exit:
-                        logger.info(f"Exit condition met for {sym}: {exit_reason}")
-        except Exception as e:
-            logger.warning(f"Failed to update PnL for {sym}: {e}")
-def _update_position_pnl_legacy(ctx):
-    """Legacy PnL calculation method for backward compatibility."""
-    if not ctx.config.get("execution_mode") == "dry_run" or not ctx.paper_wallet:
-        return
-    # Get current prices for all open positions
-    for sym, pos in ctx.positions.items():
-        try:
-            # Fetch current price
-            if hasattr(ctx, 'df_cache') and sym in ctx.df_cache:
-                df = ctx.df_cache[sym]
-                if not df.empty:
-                    current_price = float(df.iloc[-1]['close'])
-                    # Calculate unrealized PnL
-                    if ctx.paper_wallet and sym in ctx.paper_wallet.positions:
-                        unrealized_pnl = ctx.paper_wallet.unrealized(sym, current_price)
-                        pos["pnl"] = unrealized_pnl
-                        # Update highest/lowest price tracking for trailing stops
-                        if pos["side"] == "buy":
-                            pos["highest_price"] = max(pos.get("highest_price", current_price), current_price)
-                        else:  # short position
-                            pos["lowest_price"] = min(pos.get("lowest_price", current_price), current_price)
-                        logger.debug(
-                f"Updated PnL for {sym}: ${unrealized_pnl:.2f} at price ${current_price:.6f}"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to update PnL for {sym}: {e}")
-def validate_paper_wallet_consistency(ctx):
-    """Validate that paper wallet state is consistent and log any issues."""
-    if not ctx.config.get("execution_mode") == "dry_run" or not ctx.paper_wallet:
-        return True
-    try:
-        # Check balance consistency
-        balance_diff = abs(ctx.balance - ctx.paper_wallet.balance)
-        if balance_diff > 0.01:
-            logger.warning(
-                f"Balance inconsistency detected: ctx.balance=${ctx.balance:.2f}, paper_wallet.balance=${ctx.paper_wallet.balance:.2f}, diff=${balance_diff:.2f}"
-            )
-            return False
-        # Check for any negative balances (only if no open positions)
-        if ctx.paper_wallet.balance < 0 and len(ctx.paper_wallet.positions) == 0:
-            logger.error(
-                f"Negative paper wallet balance detected with no open positions: ${ctx.paper_wallet.balance:.2f}"
-            )
-            return False
-        elif ctx.paper_wallet.balance < 0:
-            logger.info(
-                f"Negative cash balance (${ctx.paper_wallet.balance:.2f}) is normal with {len(ctx.paper_wallet.positions)} open positions"
-            )
-        # Use enhanced wallet validation if available
-        if hasattr(ctx.paper_wallet, 'validate_wallet_state'):
-            if not ctx.paper_wallet.validate_wallet_state():
-                logger.warning("Paper wallet state validation failed")
-                return False
-        # Use new consistency validation if available
-        if hasattr(ctx, 'validate_position_consistency') and ctx.use_trade_manager_as_source:
-            if not ctx.validate_position_consistency():
-                logger.warning("Position system consistency check failed")
-                return False
-        else:
-            # Fallback to legacy consistency check
-            ctx_positions = len(ctx.positions)
-            wallet_positions = len(ctx.paper_wallet.positions)
-            if ctx_positions != wallet_positions:
-                logger.warning(
-                f"Position count mismatch: ctx.positions={ctx_positions}, paper_wallet.positions={wallet_positions}"
-            )
-                logger.warning("This indicates a desynchronization between trading context and paper wallet")
-                # Attempt auto-sync using the new utility
-                try:
-                    from crypto_bot.utils.wallet_sync_utility import auto_fix_wallet_sync
-                    logger.info("Attempting automatic wallet synchronization...")
-                    sync_success, sync_message = auto_fix_wallet_sync(ctx)
-                    if sync_success:
-                        logger.info(f"✅ Auto-sync successful: {sync_message}")
-                        # Re-validate after sync
-                        ctx_positions_after = len(ctx.positions)
-                        wallet_positions_after = len(ctx.paper_wallet.positions)
-                        if ctx_positions_after == wallet_positions_after:
-                            logger.info("✅ Position count mismatch resolved")
-                            return True
-                        else:
-                            logger.warning(
-                f"⚠️ Auto-sync completed but count mismatch persists: ctx={ctx_positions_after}, wallet={wallet_positions_after}"
-            )
-                            return False
-                    else:
-                        logger.error(f"❌ Auto-sync failed: {sync_message}")
-                        logger.warning("Consider enabling TradeManager as single source of truth to prevent this issue")
-                        return False
-                except Exception as e:
-                    logger.error(f"❌ Error during auto-sync attempt: {e}")
-                    logger.warning("Consider enabling TradeManager as single source of truth to prevent this issue")
-                    return False
-        logger.debug("Paper wallet consistency check passed")
-        return True
-    except Exception as e:
-        logger.error(f"Error during paper wallet consistency check: {e}")
-        return False
-def ensure_paper_wallet_sync(ctx):
-    """Ensure paper wallet is fully synchronized after all operations."""
-    if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
-        # Force synchronization
-        ctx.balance = ctx.paper_wallet.balance
-        logger.debug(f"Paper wallet balance synchronized: ${ctx.balance:.2f}")
-        # If using TradeManager as source, sync positions from TradeManager
-        if hasattr(ctx, 'sync_positions_from_trade_manager') and ctx.use_trade_manager_as_source:
-            ctx.sync_positions_from_trade_manager()
-            logger.debug("Positions synchronized from TradeManager")
-        # Validate consistency
-        if not validate_paper_wallet_consistency(ctx):
-            logger.warning("Paper wallet consistency issues detected - attempting recovery")
-            # Attempt recovery by forcing balance sync
-            ctx.balance = ctx.paper_wallet.balance
-        # Log current wallet status for monitoring
-        status = get_paper_wallet_status(ctx)
-        if status:
-            logger.info(
-                f"Paper wallet status: Balance=${status['balance']}, PnL=${status['realized_pnl']}, Win Rate={status['win_rate']}"
-            )
-        return ctx.paper_wallet.balance
-    return ctx.balance
-async def sync_paper_wallet_with_positions_log(ctx):
-    """
-    Enterprise-grade synchronization using SyncService.
-    Ensures data consistency across TradeManager, PaperWallet, and positions.log
-    using robust conflict resolution and comprehensive error handling.
-    """
-    if not ctx.config.get("execution_mode") == "dry_run" or not ctx.paper_wallet:
-        return
-    try:
-        # Initialize the enterprise sync service
-        from crypto_bot.sync_service import SyncService, ConflictResolution
-        sync_service = SyncService(LOG_DIR)
-        # Get positions.log path
-        positions_log = LOG_DIR / 'positions.log'
-        # Perform full synchronization
-        results = await sync_service.full_synchronization(
-            trade_manager=ctx.trade_manager,
-            paper_wallet=ctx.paper_wallet,
-            positions_log_path=positions_log,
-            conflict_resolution=ConflictResolution.TRADE_MANAGER_WINS
-        )
-        # Log results
-        log_to_tm = results.get('log_to_tm')
-        tm_to_pw = results.get('tm_to_pw')
-        if log_to_tm and log_to_tm.result.name == 'SUCCESS':
-            if log_to_tm.target_positions:
-                logger.info(
-                f"✅ Recovered {len(log_to_tm.target_positions)} positions from positions.log"
-            )
-            if log_to_tm.conflicts:
-                logger.warning(
-                f"⚠️ Resolved {len(log_to_tm.conflicts)} conflicts during recovery"
-            )
-        if tm_to_pw and tm_to_pw.result.name == 'SUCCESS':
-            logger.info(
-                f"✅ PaperWallet synchronized with TradeManager in {tm_to_pw.duration_ms:.1f}ms"
-            )
-        # Get health status
-        health = sync_service.get_health_status()
-        logger.info(f"🔄 Sync health: {health['overall_health']} | "
-                   f"Success rate: {health['metrics']['successful_syncs']}/{health['metrics']['total_syncs']}")
-    except Exception as e:
-        logger.error(f"❌ Enterprise synchronization failed: {e}")
-        # Fallback to basic logging for debugging
-        logger.info("Falling back to basic synchronization status logging")
-        try:
-            positions_log = LOG_DIR / 'positions.log'
-            if positions_log.exists():
-                with open(positions_log, 'r') as f:
-                    lines = f.readlines()
-                    active_positions = sum(1 for line in lines if 'Active' in line)
-                    logger.info(f"Found {active_positions} active positions in positions.log")
-        except Exception as fallback_error:
-            logger.error(f"Fallback logging also failed: {fallback_error}")
-def get_paper_wallet_status(ctx):
-    """Get comprehensive status of paper wallet for monitoring."""
-    if not ctx.config.get("execution_mode") == "dry_run" or not ctx.paper_wallet:
-        return None
-    summary = ctx.paper_wallet.get_position_summary()
-    # Calculate total unrealized PnL across all positions
-    total_unrealized_pnl = 0.0
-    for sym, pos_ctx in ctx.positions.items():
-        if sym in ctx.paper_wallet.positions and hasattr(ctx, 'df_cache') and sym in ctx.df_cache:
-            df = ctx.df_cache[sym]
-            if not df.empty:
-                current_price = float(df.iloc[-1]['close'])
-                unrealized = ctx.paper_wallet.unrealized(sym, current_price)
-                total_unrealized_pnl += unrealized
-    status = {
-        "balance": summary['balance'],
-        "initial_balance": summary['initial_balance'],
-        "realized_pnl": summary['realized_pnl'],
-        "unrealized_pnl": total_unrealized_pnl,
-        "total_pnl": summary['realized_pnl'] + total_unrealized_pnl,
-        "total_trades": summary['total_trades'],
-        "winning_trades": summary['winning_trades'],
-        "win_rate": summary['win_rate'],
-        "open_positions": summary['open_positions'],
-        "positions": {}
-    }
-    for pid, pos in summary['positions'].items():
-        # Get current unrealized PnL for this position
-        unrealized_pnl = 0.0
-        current_price = None
-        if pid in ctx.df_cache:
-            df = ctx.df_cache[pid]
-            if not df.empty:
-                current_price = float(df.iloc[-1]['close'])
-                unrealized_pnl = ctx.paper_wallet.unrealized(pid, current_price)
-        status['positions'][pid] = {
-            "symbol": pos.get("symbol", "Unknown"),
-            "side": pos["side"],
-            "size": pos["size"],
-            "entry_price": pos['entry_price'],
-            "current_price": current_price,
-            "unrealized_pnl": unrealized_pnl,
-            "reserved": pos.get('reserved', 0.0)
-        }
-    return status
-async def fetch_and_log_balance(exchange, paper_wallet, config):
-    """Return the latest wallet balance and log it."""
-    latest_balance = await fetch_balance(exchange, paper_wallet, config)
-    log_balance(float(latest_balance))
-    return latest_balance
 def _emit_timing(
     symbol_t: float,
     ohlcv_t: float,
@@ -1066,147 +363,6 @@ def _emit_timing(
             execution_latency,
             metrics_path,
         )
-def load_config() -> dict:
-    """Load YAML configuration for the bot."""
-    with open(CONFIG_PATH) as f:
-        logger.info("Loading config from %s", CONFIG_PATH)
-        data = yaml.safe_load(f) or {}
-    strat_dir = CONFIG_PATH.parent.parent / "config" / "strategies"
-    trend_file = strat_dir / "trend_bot.yaml"
-    if trend_file.exists():
-        with open(trend_file) as sf:
-            overrides = yaml.safe_load(sf) or {}
-        trend_cfg = data.get("trend", {})
-        if isinstance(trend_cfg, dict):
-            trend_cfg.update(overrides)
-        else:
-            trend_cfg = overrides
-        data["trend"] = trend_cfg
-    if "symbol" in data:
-        data["symbol"] = fix_symbol(data["symbol"])
-    if "symbols" in data:
-        data["symbols"] = [fix_symbol(s) for s in data.get("symbols", [])]
-    if "solana_symbols" in data:
-        data["solana_symbols"] = [fix_symbol(s) for s in data.get("solana_symbols", [])]
-    # Validate top-level config; on error, log and continue with loaded data
-    try:
-        if hasattr(ScannerConfig, "model_validate"):
-            ScannerConfig.model_validate(data)
-        else:  # pragma: no cover - for Pydantic < 2
-            ScannerConfig.parse_obj(data)
-    except ValidationError as exc:
-        logger.warning("Invalid configuration (non-fatal): %s", exc)
-    # Validate solana scanner section; on error, disable it and continue
-    try:
-        raw_scanner = data.get("solana_scanner", {}) or {}
-        if hasattr(SolanaScannerConfig, "model_validate"):
-            scanner = SolanaScannerConfig.model_validate(raw_scanner)
-        else:  # pragma: no cover - for Pydantic < 2
-            scanner = SolanaScannerConfig.parse_obj(raw_scanner)
-        data["solana_scanner"] = scanner.dict()
-    except ValidationError as exc:
-        logger.warning("Invalid configuration (solana_scanner), disabling scanner: %s", exc)
-        data["solana_scanner"] = {"enabled": False}
-    # Validate pyth section; on error, disable and continue
-    try:
-        raw_pyth = data.get("pyth", {}) or {}
-        if hasattr(PythConfig, "model_validate"):
-            pyth_cfg = PythConfig.model_validate(raw_pyth)
-        else:  # pragma: no cover - for Pydantic < 2
-            pyth_cfg = PythConfig.parse_obj(raw_pyth)
-        data["pyth"] = pyth_cfg.dict()
-    except ValidationError as exc:
-        logger.warning("Invalid configuration (pyth), disabling pyth: %s", exc)
-        data["pyth"] = {"enabled": False}
-    # Provide sensible fallback for max_open_trades if missing
-    if "max_open_trades" not in data:
-        rot_max = (data.get("risk") or {}).get("max_positions")
-        if isinstance(rot_max, int) and rot_max > 0:
-            data["max_open_trades"] = rot_max
-        else:
-            data["max_open_trades"] = 5
-    return data
-def maybe_reload_config(state: dict, config: dict) -> None:
-    """Reload configuration when ``state['reload']`` is set."""
-    if state.get("reload"):
-        new_cfg = load_config()
-        config.clear()
-        config.update(new_cfg)
-        state.pop("reload", None)
-def _flatten_config(data: dict, parent: str = "") -> dict:
-    """Flatten nested config keys to ENV_STYLE names."""
-    flat: dict[str, str] = {}
-    for key, value in data.items():
-        new_key = f"{parent}_{key}" if parent else key
-        if isinstance(value, dict):
-            flat.update(_flatten_config(value, new_key))
-        else:
-            flat[new_key.upper()] = value
-    return flat
-def reload_config(
-    config: dict,
-    ctx: BotContext,
-    risk_manager: RiskManager,
-    rotator: PortfolioRotator,
-    position_guard: OpenPositionGuard,
-    *,
-    force: bool = False,
-) -> None:
-    """Reload the YAML config and update dependent objects."""
-    global _LAST_CONFIG_MTIME
-    try:
-        mtime = CONFIG_PATH.stat().st_mtime
-    except OSError:
-        mtime = _LAST_CONFIG_MTIME
-    if not force and mtime == _LAST_CONFIG_MTIME:
-        return
-    new_config = load_config()
-    _LAST_CONFIG_MTIME = mtime
-    config.clear()
-    config.update(new_config)
-    ctx.config = config
-    rotator.config = config.get("portfolio_rotation", rotator.config)
-    position_guard.max_open_trades = config.get(
-        "max_open_trades", position_guard.max_open_trades
-    )
-    cooldown_configure(config.get("min_cooldown", 0))
-    market_loader_configure(
-        config.get("ohlcv_timeout", 120),
-        config.get("max_ohlcv_failures", 3),
-        config.get("max_ws_limit", 50),
-        config.get("telegram", {}).get("status_updates", True),
-        max_concurrent=config.get("max_concurrent_ohlcv"),
-    )
-    volume_ratio = 0.01 if config.get("testing_mode") else 1.0
-    risk_params = {**config.get("risk", {})}
-    risk_params.update(config.get("sentiment_filter", {}))
-    risk_params.update(config.get("volatility_filter", {}))
-    risk_params["symbol"] = config.get("symbol", "")
-    risk_params["trade_size_pct"] = config.get("trade_size_pct", 0.1)
-    risk_params["strategy_allocation"] = config.get("strategy_allocation", {})
-    risk_params["volume_threshold_ratio"] = config.get("risk", {}).get(
-        "volume_threshold_ratio", 0.1
-    )
-    risk_params["atr_period"] = config.get("risk", {}).get("atr_period", 14)
-    risk_params["stop_loss_atr_mult"] = config.get("risk", {}).get(
-        "stop_loss_atr_mult", 2.0
-    )
-    risk_params["take_profit_atr_mult"] = config.get("risk", {}).get(
-        "take_profit_atr_mult", 4.0
-    )
-    risk_params["volume_ratio"] = volume_ratio
-    # Filter out unknown fields that aren't in RiskConfig
-    valid_fields = {
-        'max_drawdown', 'stop_loss_pct', 'take_profit_pct', 'min_fng', 'min_sentiment',
-        'bull_fng', 'bull_sentiment', 'min_atr_pct', 'max_funding_rate', 'symbol',
-        'trade_size_pct', 'risk_pct', 'min_volume', 'volume_threshold_ratio',
-        'strategy_allocation', 'volume_ratio', 'atr_short_window', 'atr_long_window',
-        'max_volatility_factor', 'min_expected_value', 'default_expected_value',
-        'atr_period', 'stop_loss_atr_mult', 'take_profit_atr_mult', 'max_pair_drawdown',
-        'pair_drawdown_lookback'
-    }
-    filtered_risk_params = {k: v for k, v in risk_params.items() if k in valid_fields}
-    risk_manager.config = RiskConfig(**filtered_risk_params)
 async def _ws_ping_loop(exchange: object, interval: float) -> None:
     """Periodically send WebSocket ping messages."""
     try:
@@ -2436,9 +1592,8 @@ async def _main_impl() -> TelegramNotifier:
     if sol_syms:
         merged = list(dict.fromkeys((config.get("symbols") or []) + sol_syms))
         config["symbols"] = merged
-    global _LAST_CONFIG_MTIME
     try:
-        _LAST_CONFIG_MTIME = CONFIG_PATH.stat().st_mtime
+        set_last_config_mtime(CONFIG_PATH.stat().st_mtime)
     except OSError:
         pass
     metrics_path = (
@@ -2508,7 +1663,7 @@ async def _main_impl() -> TelegramNotifier:
     api_secret = secrets.get('API_SECRET')
     logger.info(f"API_KEY from .env: {'SET' if api_key else 'NOT SET'}")
     logger.info(f"API_SECRET from .env: {'SET' if api_secret else 'NOT SET'}")
-    flat_cfg = _flatten_config(config)
+    flat_cfg = flatten_config(config)
     for key, val in secrets.items():
         if key in flat_cfg:
             if flat_cfg[key] != val:
@@ -2707,15 +1862,7 @@ async def _main_impl() -> TelegramNotifier:
             last_balance = 0.0
             previous_balance = 0.0
         else:
-            if asyncio.iscoroutinefunction(getattr(exchange, "fetch_balance", None)):
-                bal = await exchange.fetch_balance()
-            else:
-                bal = await asyncio.to_thread(exchange.fetch_balance_with_retry)
-            init_bal = (
-                bal.get("USDT", {}).get("free", 0)
-                if isinstance(bal.get("USDT"), dict)
-                else bal.get("USDT", 0)
-            )
+            init_bal = await fetch_balance(exchange, None, config)
             log_balance(float(init_bal))
             last_balance = float(init_bal)
             previous_balance = float(init_bal)
@@ -3596,33 +2743,6 @@ async def _main_impl() -> TelegramNotifier:
                 pass
         WS_PING_TASKS.clear()
     return notifier
-def check_existing_instance(bot_pid_file: Path) -> bool:
-    """Check if another bot instance is already running."""
-    if not bot_pid_file.exists():
-        return False
-    try:
-        with open(bot_pid_file, 'r') as f:
-            pid_str = f.read().strip()
-        if not pid_str:
-            return False
-        pid = int(pid_str)
-        # Check if process is still running
-        os.kill(pid, 0)  # Signal 0 just checks if process exists
-        return True
-    except (ValueError, OSError):
-        # PID file contains invalid data or process doesn't exist
-        return False
-def write_pid_file(bot_pid_file: Path) -> None:
-    """Write current process PID to file."""
-    with open(bot_pid_file, 'w') as f:
-        f.write(str(os.getpid()))
-def cleanup_pid_file(bot_pid_file: Path) -> None:
-    """Remove PID file on shutdown."""
-    try:
-        if bot_pid_file.exists():
-            bot_pid_file.unlink()
-    except Exception:
-        pass  # Ignore cleanup errors
 async def main() -> None:
     """Entry point for running the trading bot with error handling."""
     bot_pid_file = Path("bot_pid.txt")
@@ -3637,12 +2757,7 @@ async def main() -> None:
     # Write our PID file
     write_pid_file(bot_pid_file)
     # Set up signal handlers for cleanup
-    def signal_handler(signum, frame):
-        logger.info("Received signal %d, shutting down...", signum)
-        cleanup_pid_file(bot_pid_file)
-        sys.exit(0)
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    install_signal_handlers(bot_pid_file)
     notifier: Union[TelegramNotifier, None] = None
     try:
         notifier = await _main_impl()
