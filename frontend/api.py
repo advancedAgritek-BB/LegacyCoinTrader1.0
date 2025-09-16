@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 import json
-import re
 from typing import TYPE_CHECKING, List, Optional
 
 from crypto_bot.utils.logger import LOG_DIR
@@ -21,7 +20,6 @@ def get_controller() -> "TradingBotController":
         CONTROLLER = TradingBotController()
     return CONTROLLER
 SIGNALS_FILE = LOG_DIR / "asset_scores.json"
-POSITIONS_FILE = LOG_DIR / "positions.log"
 PERFORMANCE_FILE = LOG_DIR / "strategy_performance.json"
 SCORES_FILE = LOG_DIR / "strategy_scores.json"
 
@@ -37,77 +35,17 @@ def live_signals() -> dict:
     return {}
 
 
-POS_PATTERN = re.compile(
-    r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
-    r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+) "
-    r"pnl \$(?P<pnl>[0-9.+-]+).*balance \$(?P<balance>[0-9.]+)"
-)
-
-
 @app.get("/positions")
 def positions() -> List[dict]:
-    """Return positions from TradeManager (single source of truth)."""
+    """Return open positions via the shared frontend helper."""
     try:
-        # Get positions from TradeManager (single source of truth)
-        from crypto_bot.utils.trade_manager import get_trade_manager
-        tm = get_trade_manager()
-        positions = tm.get_all_positions()
+        from frontend.app import get_open_positions
 
-        entries = []
-        for pos in positions:
-            if pos.is_open:  # Only return open positions
-                # Get current price for P&L calculation
-                try:
-                    import ccxt
-                    exchange = ccxt.kraken()
-                    ticker = exchange.fetch_ticker(pos.symbol)
-                    current_price = ticker['last']
-
-                    # Calculate P&L
-                    pnl, pnl_pct = pos.calculate_unrealized_pnl(current_price)
-
-                    # Calculate current value
-                    current_value = float(pos.total_amount) * current_price
-
-                    entries.append({
-                        "symbol": pos.symbol,
-                        "side": pos.side,
-                        "amount": float(pos.total_amount),
-                        "entry_price": float(pos.average_price),
-                        "current_price": current_price,
-                        "position_value": current_value,
-                        "pnl": float(pnl),
-                        "pnl_pct": float(pnl_pct),
-                        "balance": 0.0,  # Will be calculated separately
-                    })
-                except Exception as e:
-                    # Use cached price from TradeManager if available
-                    cached_price = float(tm.price_cache.get(pos.symbol, pos.average_price))
-
-                    # Calculate P&L with cached price
-                    pnl, pnl_pct = pos.calculate_unrealized_pnl(cached_price)
-                    current_value = float(pos.total_amount) * cached_price
-
-                    entries.append({
-                        "symbol": pos.symbol,
-                        "side": pos.side,
-                        "amount": float(pos.total_amount),
-                        "entry_price": float(pos.average_price),
-                        "current_price": cached_price,
-                        "position_value": current_value,
-                        "pnl": float(pnl),
-                        "pnl_pct": float(pnl_pct),
-                        "balance": 0.0,
-                    })
-
-        # Log position summary for debugging
+        entries = get_open_positions()
         print(f"Returning {len(entries)} open positions from TradeManager")
         return entries
-
-    except Exception as e:
-        print(f"Error getting positions from TradeManager: {e}")
-        # Return empty list instead of falling back to log file
-        # TradeManager is the single source of truth
+    except Exception as exc:
+        print(f"Error getting positions from TradeManager helper: {exc}")
         return []
 
 

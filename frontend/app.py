@@ -977,7 +977,6 @@ TRADE_FILE = LOG_DIR / "trades.csv"
 ERROR_FILE = LOG_DIR / "errors.log"
 CONFIG_FILE = Path("crypto_bot/config.yaml")
 REGIME_FILE = LOG_DIR / "regime_history.txt"
-POSITIONS_FILE = LOG_DIR / "positions.log"
 
 # Define project root for use in various functions
 project_root = Path(__file__).parent.parent
@@ -1213,20 +1212,36 @@ def get_paper_wallet_balance() -> float:
         return 10000.0
 
 
-def get_available_balance(open_positions: list) -> float:
-    """Calculate available balance (wallet balance minus value of open positions)."""
+def get_available_balance(
+    open_positions: list, wallet_balance: Optional[float] = None
+) -> float:
+    """Calculate available balance (wallet balance minus value of open positions).
+
+    Args:
+        open_positions: Iterable of open position dictionaries containing
+            ``current_price`` and ``amount`` fields.
+        wallet_balance: Optional precomputed wallet balance to avoid repeated
+            lookups. When ``None`` the function will query the paper wallet
+            balance directly.
+    """
+
     try:
-        # Get current wallet balance
-        total_balance = get_paper_wallet_balance()
+        # Use the provided wallet balance when available to keep calculations in
+        # sync with the TradeManager-backed helpers.
+        total_balance = (
+            wallet_balance
+            if wallet_balance is not None
+            else get_paper_wallet_balance()
+        )
 
         # Calculate value of open positions
         positions_value = 0.0
         for position in open_positions:
-            if position.get("current_price") and position.get("amount"):
+            current_price = position.get("current_price")
+            amount = position.get("amount")
+            if current_price and amount:
                 # Position value = current_price * amount
-                positions_value += (
-                    position["current_price"] * position["amount"]
-                )
+                positions_value += current_price * amount
 
         # Available balance = total balance - value of open positions
         available_balance = total_balance - positions_value
@@ -1238,6 +1253,8 @@ def get_available_balance(open_positions: list) -> float:
 
     except Exception as e:
         print(f"Error calculating available balance: {e}")
+        if wallet_balance is not None:
+            return wallet_balance
         return get_paper_wallet_balance()  # Fallback to total balance
 
 
@@ -1329,545 +1346,158 @@ def set_paper_wallet_balance(balance: float) -> None:
 
 
 def get_open_positions() -> list:
-    """Get open positions from TradeManager (single source of truth)."""
+    """Get open positions directly from TradeManager using live pricing."""
+
     try:
-        # Try to get positions from TradeManager first (highest priority)
         from crypto_bot.utils.trade_manager import get_trade_manager
 
         trade_manager = get_trade_manager()
+    except Exception as exc:  # pragma: no cover - trade manager availability
+        logger.error(
+            "Unable to access TradeManager for open positions: %s", exc
+        )
+        return []
 
+    try:
         positions = trade_manager.get_all_positions()
-        print(f"Found {len(positions)} positions in TradeManager")
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.error(
+            "Failed to retrieve open positions from TradeManager: %s", exc
+        )
+        return []
 
-        if positions:
-            # Convert Position objects to the expected format
-            result = []
-            for position in positions:
-                # Only include positions with non-zero amounts
-                if position.total_amount <= 0:
-                    continue
+    open_positions = []
 
-                # Get current price for unrealized P&L
-                current_price = trade_manager.price_cache.get(position.symbol)
-                print(
-                    f"Checking price cache for {position.symbol}: {current_price}"
+    for position in positions:
+        try:
+            if position.total_amount <= 0:
+                continue
+
+            symbol = getattr(position, "symbol", "")
+            if not symbol:
+                continue
+
+            if is_test_position(symbol):
+                logger.debug(
+                    "Skipping test position from TradeManager results: %s",
+                    symbol,
+                )
+                continue
+
+            amount_decimal = Decimal(str(position.total_amount))
+            entry_price_decimal = Decimal(str(position.average_price))
+
+            # Fetch the most up-to-date price for the symbol.
+            live_price_value = 0.0
+            try:
+                live_price_value = get_current_price_for_symbol(symbol)
+            except Exception as price_error:  # pragma: no cover - defensive
+                logger.warning(
+                    "Failed to fetch live price for %s: %s", symbol, price_error
                 )
 
-                if not current_price:
-                    # Try to fetch current price if not in cache
-                    try:
-                        print(
-                            f"No cached price for {position.symbol}, fetching from exchange..."
-                        )
-                        # Import and use the same exchange that the price monitor uses
-                        from crypto_bot.execution.cex_executor import (
-                            get_exchange,
-                        )
-
-                        # Use the same config loading logic
-                        config_path = (
-                            Path(__file__).parent.parent
-                            / "crypto_bot"
-                            / "config.yaml"
-                        )
-                        if config_path.exists():
-                            with open(config_path, "r") as f:
-                                config = yaml.safe_load(f) or {}
-                        else:
-                            config = {}
-
-                        exchange, _ = get_exchange(config)
-                        print(f"Exchange initialized: {exchange}")
-
-                        if hasattr(exchange, "fetch_ticker"):
-                            print(f"Fetching ticker for {position.symbol}...")
-                            ticker = exchange.fetch_ticker(position.symbol)
-                            print(
-                                f"Ticker response for {position.symbol}: {ticker}"
-                            )
-
-                            if ticker and ticker.get("last"):
-                                current_price = Decimal(str(ticker["last"]))
-                                # Update the cache with the fetched price
-                                trade_manager.update_price(
-                                    position.symbol, current_price
-                                )
-                                print(
-                                    f"✅ Successfully fetched and cached current price for {position.symbol}: ${current_price}"
-                                )
-                            else:
-                                print(
-                                    f"❌ Invalid ticker response for {position.symbol}: {ticker}"
-                                )
-                        else:
-                            print(
-                                f"❌ Exchange does not have fetch_ticker method: {exchange}"
-                            )
-                    except Exception as e:
-                        print(
-                            f"❌ Failed to fetch current price for {position.symbol}: {e}"
-                        )
-                        import traceback
-
-                        traceback.print_exc()
-
-                if current_price:
-                    unrealized_pnl, unrealized_pct = (
-                        position.calculate_unrealized_pnl(current_price)
+            if live_price_value and live_price_value > 0:
+                current_price_decimal = Decimal(str(live_price_value))
+                try:
+                    trade_manager.update_price(symbol, current_price_decimal)
+                except Exception as update_error:  # pragma: no cover
+                    logger.debug(
+                        "Unable to update TradeManager price for %s: %s",
+                        symbol,
+                        update_error,
                     )
-                    current_value = float(position.total_amount) * float(
-                        current_price
-                    )
+            else:
+                cached_price = trade_manager.price_cache.get(symbol)
+                if cached_price and Decimal(str(cached_price)) > 0:
+                    current_price_decimal = Decimal(str(cached_price))
                 else:
-                    # Use entry price as last resort fallback when current price is not available
-                    print(
-                        f"Using entry price as fallback for {position.symbol} (no current price available)"
-                    )
-                    current_price = position.average_price
-                    unrealized_pnl = Decimal("0")
-                    unrealized_pct = Decimal("0")
-                    current_value = float(position.total_amount) * float(
-                        position.average_price
-                    )
+                    current_price_decimal = entry_price_decimal
 
-                # Calculate additional fields for position cards
-                pnl_value = float(unrealized_pnl)
-                pnl_pct = float(unrealized_pct)
+            pnl_amount, pnl_pct = position.calculate_unrealized_pnl(
+                current_price_decimal
+            )
 
-                # Generate chart data bounds (will be used by JavaScript)
-                chart_min = (
-                    min(float(current_price), float(position.average_price))
-                    * 0.95
-                )  # 5% below minimum
-                chart_max = (
-                    max(float(current_price), float(position.average_price))
-                    * 1.05
-                )  # 5% above maximum
+            current_price_float = float(current_price_decimal)
+            entry_price_float = float(entry_price_decimal)
+            amount_float = float(amount_decimal)
+            current_value = amount_float * current_price_float
+            pnl_value = float(pnl_amount)
+            pnl_pct_float = float(pnl_pct)
 
-                # Calculate trend strength and R-squared based on P&L
-                trend_strength = (
-                    "strong"
-                    if abs(pnl_pct) > 2
-                    else "moderate" if abs(pnl_pct) > 1 else "weak"
-                )
-                r_squared = min(99.9, max(60.0, 70.0 + abs(pnl_pct) * 2))
+            chart_min = min(current_price_float, entry_price_float) * 0.95
+            chart_max = max(current_price_float, entry_price_float) * 1.05
 
-                pos_dict = {
-                    "symbol": position.symbol,
+            trend_strength = (
+                "strong"
+                if abs(pnl_pct_float) > 2
+                else "moderate"
+                if abs(pnl_pct_float) > 1
+                else "weak"
+            )
+            r_squared = min(99.9, max(60.0, 70.0 + abs(pnl_pct_float) * 2))
+
+            open_positions.append(
+                {
+                    "symbol": symbol,
                     "side": position.side,
-                    "size": float(
-                        position.total_amount
-                    ),  # Use 'size' for consistency with template
-                    "amount": float(
-                        position.total_amount
-                    ),  # Keep for backward compatibility
-                    "entry_price": float(position.average_price),
-                    "current_price": float(current_price),
+                    "size": amount_float,
+                    "amount": amount_float,
+                    "entry_price": entry_price_float,
+                    "current_price": current_price_float,
                     "current_value": current_value,
-                    "pnl": pnl_pct,  # PnL percentage (template expects this)
-                    "pnl_value": pnl_value,  # PnL dollar amount (template expects this)
-                    "pnl_percentage": pnl_pct,  # Keep for backward compatibility
+                    "position_value": current_value,
+                    "pnl": pnl_pct_float,
+                    "pnl_value": pnl_value,
+                    "pnl_percentage": pnl_pct_float,
                     "chart_min": chart_min,
                     "chart_max": chart_max,
                     "trend_strength": trend_strength,
                     "r_squared": r_squared,
                     "highest_price": (
                         float(position.highest_price)
-                        if position.highest_price
+                        if position.highest_price is not None
                         else None
                     ),
                     "lowest_price": (
                         float(position.lowest_price)
-                        if position.lowest_price
+                        if position.lowest_price is not None
                         else None
                     ),
                     "stop_loss_price": (
                         float(position.stop_loss_price)
-                        if position.stop_loss_price
+                        if position.stop_loss_price is not None
                         else None
                     ),
                     "take_profit_price": (
                         float(position.take_profit_price)
-                        if position.take_profit_price
+                        if position.take_profit_price is not None
+                        else None
+                    ),
+                    "stop_price": (
+                        float(position.stop_loss_price)
+                        if position.stop_loss_price is not None
                         else None
                     ),
                     "entry_time": (
                         position.entry_time.isoformat()
-                        if position.entry_time
+                        if getattr(position, "entry_time", None)
                         else None
                     ),
                 }
-                result.append(pos_dict)
-
-            # Filter out test positions
-            filtered_result = []
-            for pos in result:
-                if not is_test_position(pos["symbol"]):
-                    filtered_result.append(pos)
-                else:
-                    print(
-                        f"Filtering out test position from TradeManager result: {pos['symbol']}"
-                    )
-
-            print(
-                f"Returning {len(filtered_result)} active positions from TradeManager (filtered {len(result) - len(filtered_result)} test positions)"
             )
-            return filtered_result
 
-    except Exception as e:
-        print(f"Failed to get positions from TradeManager: {e}")
-
-    # Fallback to trade manager state file (second priority)
-    try:
-        state_file = Path("crypto_bot/logs/trade_manager_state.json")
-        if state_file.exists():
-            with open(state_file, "r") as f:
-                state = json.load(f)
-
-            positions = state.get("positions", {})
-            price_cache = state.get("price_cache", {})
-
-            result = []
-            for symbol, pos_data in positions.items():
-                # Skip test positions
-                if is_test_position(symbol):
-                    print(
-                        f"Filtering out test position from state file: {symbol}"
-                    )
-                    continue
-
-                if pos_data.get("total_amount", 0) > 0:  # Only open positions
-                    current_price = price_cache.get(
-                        symbol, pos_data.get("average_price", 0)
-                    )
-
-                    # Calculate PnL
-                    amount = pos_data["total_amount"]
-                    avg_price = pos_data["average_price"]
-                    side = pos_data["side"]
-
-                    if side == "long":
-                        pnl = (current_price - avg_price) * amount
-                    else:  # short
-                        pnl = (avg_price - current_price) * amount
-
-                    pnl_pct = (
-                        (pnl / (avg_price * amount)) * 100
-                        if avg_price > 0
-                        else 0
-                    )
-
-                    # Calculate current value
-                    current_value = float(amount) * float(current_price)
-
-                    # Calculate additional fields for position cards
-                    pnl_value = float(pnl)
-                    pnl_pct = float(pnl_pct)
-
-                    # Generate chart data bounds (will be used by JavaScript)
-                    chart_min = (
-                        min(float(current_price), float(avg_price)) * 0.95
-                    )  # 5% below minimum
-                    chart_max = (
-                        max(float(current_price), float(avg_price)) * 1.05
-                    )  # 5% above maximum
-
-                    # Calculate trend strength and R-squared based on P&L
-                    trend_strength = (
-                        "strong"
-                        if abs(pnl_pct) > 2
-                        else "moderate" if abs(pnl_pct) > 1 else "weak"
-                    )
-                    r_squared = min(99.9, max(60.0, 70.0 + abs(pnl_pct) * 2))
-
-                    position_data = {
-                        "symbol": symbol,
-                        "side": side,
-                        "size": float(
-                            amount
-                        ),  # Use 'size' for consistency with template
-                        "amount": float(
-                            amount
-                        ),  # Keep for backward compatibility
-                        "entry_price": float(avg_price),
-                        "current_price": float(current_price),
-                        "current_value": current_value,
-                        "pnl": pnl_pct,  # PnL percentage (template expects this)
-                        "pnl_value": pnl_value,  # PnL dollar amount (template expects this)
-                        "pnl_percentage": pnl_pct,  # Keep for backward compatibility
-                        "chart_min": chart_min,
-                        "chart_max": chart_max,
-                        "trend_strength": trend_strength,
-                        "r_squared": r_squared,
-                        "entry_time": pos_data.get("entry_time", ""),
-                    }
-                    result.append(position_data)
-
-            print(f"Returning {len(result)} positions from state file")
-            return result
-
-    except Exception as e:
-        print(f"Failed to get positions from state file: {e}")
-
-    # Final fallback to log parsing (lowest priority)
-    print("Falling back to log parsing for positions")
-    return get_open_positions_from_log()
-
-
-def get_open_positions_from_log() -> list:
-    """Parse open positions from positions.log file (legacy method)."""
-    import re
-    from datetime import datetime, timedelta
-
-    if not POSITIONS_FILE.exists():
-        return []
-
-    positions = []
-    # Updated regex pattern to handle more position formats
-    pos_patterns = [
-        # Pattern 1: Standard format with pnl calculation
-        re.compile(
-            r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
-            r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+) "
-            r"pnl \$?(?P<pnl>[0-9.+-]+).*balance \$?(?P<balance>[0-9.]+)"
-        ),
-        # Pattern 2: Format without pnl calculation
-        re.compile(
-            r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
-            r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+)"
-        ),
-        # Pattern 3: Alternative format
-        re.compile(
-            r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
-            r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+) "
-            r"pnl \$?(?P<pnl>[0-9.+-]+)"
-        ),
-    ]
-
-    try:
-        with open(POSITIONS_FILE) as f:
-            lines = f.readlines()
-
-        # Only process recent lines (last 24 hours)
-        cutoff_time = datetime.now() - timedelta(hours=24)
-        recent_positions = []
-
-        for line in lines:
-            # Extract timestamp from the beginning of the line
-            timestamp_match = re.match(
-                r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})", line
+        except Exception as pos_error:  # pragma: no cover - defensive guard
+            logger.warning(
+                "Skipping position %s due to processing error: %s",
+                getattr(position, "symbol", "unknown"),
+                pos_error,
             )
-            if timestamp_match:
-                try:
-                    timestamp_str = timestamp_match.group(1)
-                    line_timestamp = datetime.strptime(
-                        timestamp_str, "%Y-%m-%d %H:%M:%S,%f"
-                    )
+            continue
 
-                    # Only include positions from the last 24 hours
-                    if line_timestamp >= cutoff_time:
-                        # Try each pattern
-                        position_data = None
-                        for pattern in pos_patterns:
-                            match = pattern.search(line)
-                            if match:
-                                # Check if this is a real position (not just a balance update)
-                                symbol = match.group("symbol")
-                                side = match.group("side")
-                                amount = float(match.group("amount"))
-
-                                # Filter out positions with zero amounts or very small amounts
-                                if amount > 0.0001:  # Minimum threshold
-                                    entry_price = float(match.group("entry"))
-
-                                    # Get LIVE current price instead of cached price
-                                    current_price = (
-                                        get_current_price_for_symbol(symbol)
-                                    )
-                                    if current_price <= 0:
-                                        # For unknown tokens, use entry price to show 0 PnL
-                                        # This is better than using stale cached prices
-                                        print(
-                                            f"No live price available for {symbol}, using entry price for 0 PnL"
-                                        )
-                                        current_price = entry_price
-
-                                    # Calculate PnL if not provided
-                                    if (
-                                        "pnl" in match.groupdict()
-                                        and match.group("pnl")
-                                    ):
-                                        pnl = float(match.group("pnl"))
-                                    else:
-                                        # Calculate PnL manually
-                                        if side == "buy":
-                                            pnl = (
-                                                current_price - entry_price
-                                            ) * amount
-                                        else:  # sell/short
-                                            pnl = (
-                                                entry_price - current_price
-                                            ) * amount
-
-                                    # Get balance if available
-                                    balance = 0.0
-                                    if (
-                                        "balance" in match.groupdict()
-                                        and match.group("balance")
-                                    ):
-                                        balance = float(match.group("balance"))
-
-                                    # Calculate current value
-                                    current_value = amount * current_price
-
-                                    # Calculate PnL percentage
-                                    pnl_pct = (
-                                        (pnl / (entry_price * amount)) * 100
-                                        if entry_price > 0
-                                        else 0
-                                    )
-
-                                    # Calculate additional fields for position cards
-                                    pnl_value = float(pnl)
-
-                                    # Generate chart data bounds (will be used by JavaScript)
-                                    chart_min = (
-                                        min(
-                                            float(current_price),
-                                            float(entry_price),
-                                        )
-                                        * 0.95
-                                    )  # 5% below minimum
-                                    chart_max = (
-                                        max(
-                                            float(current_price),
-                                            float(entry_price),
-                                        )
-                                        * 1.05
-                                    )  # 5% above maximum
-
-                                    # Calculate trend strength and R-squared based on P&L
-                                    trend_strength = (
-                                        "strong"
-                                        if abs(pnl_pct) > 2
-                                        else (
-                                            "moderate"
-                                            if abs(pnl_pct) > 1
-                                            else "weak"
-                                        )
-                                    )
-                                    r_squared = min(
-                                        99.9,
-                                        max(60.0, 70.0 + abs(pnl_pct) * 2),
-                                    )
-
-                                    position_data = {
-                                        "symbol": symbol,
-                                        "side": side,
-                                        "size": float(
-                                            amount
-                                        ),  # Use 'size' for consistency with template
-                                        "amount": amount,  # Keep for backward compatibility
-                                        "entry_price": entry_price,
-                                        "current_price": current_price,
-                                        "current_value": current_value,
-                                        "pnl": pnl_pct,  # PnL percentage (template expects this)
-                                        "pnl_value": pnl_value,  # PnL dollar amount (template expects this)
-                                        "pnl_percentage": pnl_pct,  # Keep for backward compatibility
-                                        "chart_min": chart_min,
-                                        "chart_max": chart_max,
-                                        "trend_strength": trend_strength,
-                                        "r_squared": r_squared,
-                                        "balance": balance,
-                                        "timestamp": timestamp_str,
-                                    }
-                                    break
-
-                        if position_data:
-                            recent_positions.append(position_data)
-
-                except ValueError as e:
-                    print(
-                        f"Error parsing timestamp in line: {line.strip()}, error: {e}"
-                    )
-                    continue
-
-        # Remove duplicates based on symbol and side, keeping the most recent
-        seen = set()
-        unique_positions = []
-        for pos in reversed(
-            recent_positions
-        ):  # Process in reverse to keep most recent
-            key = f"{pos['symbol']}_{pos['side']}"
-            if key not in seen:
-                seen.add(key)
-                unique_positions.append(pos)
-
-        # Filter out test positions
-        filtered_positions = []
-        for pos in unique_positions:
-            if not is_test_position(pos["symbol"]):
-                filtered_positions.append(pos)
-            else:
-                print(
-                    f"Filtering out test position from log parsing: {pos['symbol']}"
-                )
-
-        # Return positions in chronological order
-        return list(reversed(filtered_positions))
-
-    except Exception as e:
-        print(f"Error parsing positions from log: {e}")
-        return []
-
-    return []
-
-
-def clear_old_positions() -> None:
-    """Clear old position entries from the positions.log file."""
-    if not POSITIONS_FILE.exists():
-        return
-
-    try:
-        import re
-        from datetime import datetime, timedelta
-
-        # Read all lines
-        with open(POSITIONS_FILE, "r") as f:
-            lines = f.readlines()
-
-        # Keep only lines from the last 24 hours
-        cutoff_time = datetime.now() - timedelta(hours=24)
-        recent_lines = []
-
-        for line in lines:
-            # Extract timestamp from the beginning of the line
-            timestamp_match = re.match(
-                r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})", line
-            )
-            if timestamp_match:
-                try:
-                    timestamp_str = timestamp_match.group(1)
-                    line_timestamp = datetime.strptime(
-                        timestamp_str, "%Y-%m-%d %H:%M:%S,%f"
-                    )
-
-                    # Keep lines from the last 24 hours
-                    if line_timestamp >= cutoff_time:
-                        recent_lines.append(line)
-                except ValueError:
-                    # Keep lines that don't have valid timestamps (they might be important)
-                    recent_lines.append(line)
-            else:
-                # Keep lines without timestamps
-                recent_lines.append(line)
-
-        # Write back the filtered lines
-        with open(POSITIONS_FILE, "w") as f:
-            f.writelines(recent_lines)
-
-    except Exception as e:
-        print(f"Error clearing old positions: {e}")
+    logger.info(
+        "Returning %d active positions from TradeManager", len(open_positions)
+    )
+    return open_positions
 
 
 def get_uptime() -> str:
@@ -2236,204 +1866,17 @@ def api_debug_positions():
 def api_open_positions():
     """Return open positions data for the dashboard."""
     try:
-        logger.info("API: Starting open positions request")
+        positions = get_open_positions()
+        logger.info(
+            "API: Returning %d open positions from TradeManager", len(positions)
+        )
+        return jsonify(positions)
+    except Exception as exc:
+        logger.error(
+            "Failed to get open positions for API: %s", exc
+        )
+        return jsonify([])
 
-        # Load TradeManager state directly from the resolved LOG_DIR to avoid CWD issues
-        import json
-        state_file = LOG_DIR / "trade_manager_state.json"
-        logger.info(f"API: Checking state file at {state_file.resolve()}")
-
-        if state_file.exists():
-            logger.info("API: State file exists, loading data")
-            with open(state_file, "r") as f:
-                state = json.load(f)
-
-            # Get positions from state file
-            positions = state.get("positions", {})
-            price_cache = state.get("price_cache", {})
-            logger.info(f"API: Found {len(positions)} positions in state file")
-            logger.info(f"API: Found {len(price_cache)} prices in cache")
-
-            open_positions = []
-            for symbol, pos_data in positions.items():
-                logger.info(f"API: Processing position {symbol}: {pos_data}")
-
-                # Skip test positions
-                if is_test_position(symbol):
-                    logger.warning(
-                        f"Filtering out test position in API: {symbol}"
-                    )
-                    continue
-
-                if pos_data.get("total_amount", 0) > 0:  # Open position
-                    # Try to get current price from cache first
-                    current_price = price_cache.get(symbol, 0)
-
-                    # If no cached price or price is stale, try to fetch current price on-demand
-                    if not current_price or current_price == 0 or current_price == pos_data.get("average_price", 0):
-                        try:
-                            # Use shared price fetcher alias for robustness  
-                            fresh_price = get_current_price_for_symbol(symbol)
-                            if fresh_price and fresh_price > 0:
-                                current_price = fresh_price
-                                logger.debug(
-                                    f"Fetched fresh current price for {symbol}: ${current_price}"
-                                )
-                                # Update the TradeManager cache with fresh price
-                                try:
-                                    from crypto_bot.utils.trade_manager import get_trade_manager
-                                    tm = get_trade_manager()
-                                    tm.update_price(symbol, current_price)
-                                except Exception as cache_update_error:
-                                    logger.warning(f"Failed to update price cache for {symbol}: {cache_update_error}")
-                            else:
-                                logger.warning(f"No valid fresh price received for {symbol}")
-                        except Exception as price_error:
-                            logger.warning(
-                                f"Failed to fetch current price for {symbol}: {price_error}"
-                            )
-                            # Try to get from TradeManager cache as fallback
-                            try:
-                                from crypto_bot.utils.trade_manager import get_trade_manager
-                                tm = get_trade_manager()
-                                cached_price = tm.price_cache.get(symbol)
-                                if cached_price and float(cached_price) > 0:
-                                    current_price = float(cached_price)
-                                    logger.debug(f"Using TradeManager cached price for {symbol}: ${current_price}")
-                                else:
-                                    current_price = pos_data.get("average_price", 0)
-                                    logger.warning(f"No valid price available for {symbol}, using entry price as fallback")
-                            except Exception as tm_error:
-                                logger.error(f"Failed to get TradeManager price for {symbol}: {tm_error}")
-                                current_price = pos_data.get("average_price", 0)
-
-                    # Calculate PnL
-                    amount = pos_data["total_amount"]
-                    avg_price = pos_data["average_price"]
-                    side = pos_data["side"]
-
-                    if side == "long":
-                        pnl = (current_price - avg_price) * amount
-                    else:  # short
-                        pnl = (avg_price - current_price) * amount
-
-                    pnl_pct = (
-                        (pnl / (avg_price * amount)) * 100
-                        if avg_price > 0
-                        else 0
-                    )
-
-                    position_data = {
-                        "symbol": symbol,
-                        "side": side,
-                        "size": float(amount),  # Add size for template consistency
-                        "amount": float(amount),
-                        "entry_price": float(avg_price),
-                        "current_price": float(current_price),
-                        "current_value": (
-                            float(current_price * amount)
-                            if current_price
-                            else 0.0
-                        ),
-                        "pnl": float(pnl_pct),  # Template expects percentage here
-                        "pnl_value": float(pnl),  # Template expects dollar amount here
-                        "pnl_percentage": float(pnl_pct),  # Keep for backward compatibility
-                        "entry_time": pos_data.get("entry_time", ""),
-                        "position_value": (
-                            float(current_price * amount)
-                            if current_price
-                            else 0.0
-                        ),
-                        # Add missing fields for template
-                        "r_squared": min(99.9, max(60.0, 70.0 + abs(pnl_pct) * 2)),
-                        # Include stop loss/trailing stop price for chart line
-                        "stop_price": (
-                            float(pos_data.get("stop_loss_price"))
-                            if pos_data.get("stop_loss_price") is not None
-                            else None
-                        ),
-                    }
-                    open_positions.append(position_data)
-                    logger.info(f"API: Added position {symbol} to response")
-
-            # Cross-check against CSV-derived open trades to eliminate stale entries
-            try:
-                from crypto_bot.utils.open_trades import get_open_trades
-                csv_opens = get_open_trades(TRADE_FILE)
-                csv_symbols = {o.get("symbol") for o in csv_opens}
-                filtered_positions = [p for p in open_positions if p.get("symbol") in csv_symbols] if csv_symbols else open_positions
-                logger.info(
-                    f"API: Returning {len(filtered_positions)} positions after CSV cross-check (state had {len(open_positions)})"
-                )
-                return jsonify(filtered_positions)
-            except Exception as _csv_check_err:
-                logger.warning(f"API: CSV cross-check failed: {_csv_check_err}")
-                logger.info(
-                    f"API: Returning {len(open_positions)} open positions from state file"
-                )
-                return jsonify(open_positions)
-        else:
-            logger.warning(
-                "API: State file does not exist, using legacy method"
-            )
-            # Fallback to legacy method
-            open_positions = get_open_positions()
-            logger.info(
-                f"API: Returning {len(open_positions)} positions from legacy method"
-            )
-            return jsonify(open_positions)
-
-    except Exception as e:
-        logger.error(f"Failed to get open positions for API: {e}")
-        # Try legacy method as final fallback
-        try:
-            open_positions = get_open_positions()
-            logger.warning(
-                f"API: Using legacy fallback, returning {len(open_positions)} positions"
-            )
-            return jsonify(open_positions)
-        except Exception as fallback_error:
-            logger.error(f"API: Legacy fallback also failed: {fallback_error}")
-            return jsonify({"error": str(fallback_error)}), 500
-
-
-def fetch_current_price_for_symbol(symbol):
-    """Fetch current price for a symbol using available exchanges."""
-    import ccxt
-
-    # Try multiple exchanges in order
-    exchanges_to_try = [
-        ('kraken', ccxt.kraken()),
-        ('binance', ccxt.binance()),
-        ('coinbase', ccxt.coinbase()),
-        ('bitstamp', ccxt.bitstamp()),
-    ]
-
-    for exchange_name, exchange in exchanges_to_try:
-        try:
-            ticker = exchange.fetch_ticker(symbol)
-            price = ticker.get("last", 0)
-            if price and price > 0:
-                logger.debug(f"Successfully fetched price for {symbol} from {exchange_name}: ${price}")
-                return price
-        except Exception as e:
-            logger.debug(f"{exchange_name} failed for {symbol}: {e}")
-            continue
-
-    # If all exchanges fail, try to get price from TradeManager cache as last resort
-    try:
-        from crypto_bot.utils.trade_manager import get_trade_manager
-        tm = get_trade_manager()
-        cached_price = tm.price_cache.get(symbol)
-        if cached_price:
-            logger.debug(f"Using cached price for {symbol}: ${cached_price}")
-            return float(cached_price)
-    except Exception as e:
-        logger.debug(f"Failed to get cached price for {symbol}: {e}")
-
-    # Return 0 if all methods fail
-    logger.warning(f"All price fetching methods failed for {symbol}")
-    return 0
 
 
 @app.route("/api/wallet-pnl")
@@ -2910,335 +2353,76 @@ def dashboard():
                 for strategy, weight in weights_data.items()
             }
 
-    # Get paper wallet balance (always show wallet balance)
-    # Calculate correct balance from state file
+    # Get paper wallet balance using TradeManager helper
+    paper_wallet_balance = calculate_wallet_balance_from_trade_manager()
+    logger.info(
+        "Dashboard: TradeManager wallet balance: $%.2f", paper_wallet_balance
+    )
+
     try:
-        import json
-        state_file = LOG_DIR / "trade_manager_state.json"
-        if state_file.exists():
-            with open(state_file, "r") as f:
-                state = json.load(f)
-
-            # Calculate total P&L from state file
-            positions = state.get("positions", {})
-            stats = state.get("statistics", {})
-            price_cache = state.get("price_cache", {})
-
-            total_unrealized_pnl = 0.0
-            for symbol, pos_data in positions.items():
-                if pos_data.get("total_amount", 0) > 0:  # Open position
-                    current_price = price_cache.get(
-                        symbol, pos_data.get("average_price", 0)
-                    )
-                    if current_price and pos_data.get("average_price"):
-                        amount = pos_data["total_amount"]
-                        avg_price = pos_data["average_price"]
-                        side = pos_data["side"]
-
-                        if side == "long":
-                            pnl = (current_price - avg_price) * amount
-                        else:  # short
-                            pnl = (avg_price - current_price) * amount
-
-                        total_unrealized_pnl += pnl
-
-            realized_pnl = float(stats.get("total_realized_pnl", 0))
-            total_pnl = realized_pnl + total_unrealized_pnl
-
-            # Calculate correct wallet balance
-            paper_wallet_balance = 10000.0 + total_pnl
-            logger.info(
-                f"Dashboard: Calculated wallet balance from state file: ${paper_wallet_balance:.2f}"
-            )
-        else:
-            # If no state file, try TradeManager first, then CSV as fallback
-            try:
-                paper_wallet_balance = (
-                    calculate_wallet_balance_from_trade_manager()
-                )
-                logger.info(
-                    f"Dashboard: Using TradeManager wallet balance: ${paper_wallet_balance:.2f}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to get balance from TradeManager, falling back to CSV: {e}"
-                )
-                paper_wallet_balance = calculate_wallet_balance_from_csv()
-                logger.info(
-                    f"Dashboard: Using CSV fallback wallet balance: ${paper_wallet_balance:.2f}"
-                )
-    except Exception as e:
-        logger.warning(
-            f"Failed to calculate paper wallet balance from state file: {e}"
-        )
-        # Try TradeManager first, then CSV as final fallback
-        try:
-            paper_wallet_balance = (
-                calculate_wallet_balance_from_trade_manager()
-            )
-            logger.info(
-                f"Dashboard: Using TradeManager fallback wallet balance: ${paper_wallet_balance:.2f}"
-            )
-        except Exception as tm_e:
-            logger.warning(
-                f"Failed to get balance from TradeManager, using CSV as final fallback: {tm_e}"
-            )
-            paper_wallet_balance = calculate_wallet_balance_from_csv()
-            logger.info(
-                f"Dashboard: Using CSV final fallback wallet balance: ${paper_wallet_balance:.2f}"
-            )
-
-    # Get open positions from TradeManager (single source of truth)
-    try:
-        # Load TradeManager state directly from LOG_DIR to bypass CWD issues
-        import json
-        state_file = LOG_DIR / "trade_manager_state.json"
-        if state_file.exists():
-            with open(state_file, "r") as f:
-                state = json.load(f)
-
-            # Get positions from state file
-            positions = state.get("positions", {})
-            price_cache = state.get("price_cache", {})
-
-            open_positions = []
-            # Collect all symbols that need fresh prices
-            symbols_to_fetch = []
-            for symbol, pos_data in positions.items():
-                if pos_data.get("total_amount", 0) > 0:  # Open position
-                    current_price = price_cache.get(symbol, 0)
-                    # If no cached price or price is stale, mark for fetching
-                    if (
-                        not current_price
-                        or current_price == 0
-                        or current_price == pos_data.get("average_price", 0)
-                    ):
-                        symbols_to_fetch.append(symbol)
-
-            # Fetch prices for all symbols that need them, robustly per symbol
-            fresh_prices = {}
-            if symbols_to_fetch:
-                logger.info(
-                    f"Fetching prices for {len(symbols_to_fetch)} symbols"
-                )
-                for sym in symbols_to_fetch:
-                    try:
-                        price_val = fetch_current_price_for_symbol(sym)
-                        if price_val and price_val > 0:
-                            fresh_prices[sym] = price_val
-                            logger.debug(
-                                f"Fetched fresh price for {sym}: ${price_val}"
-                            )
-                    except Exception as e:
-                        logger.debug(f"Failed to fetch price for {sym}: {e}")
-                logger.info(f"Fetched {len(fresh_prices)} fresh prices")
-
-            # Process positions with batched prices
-            for symbol, pos_data in positions.items():
-                if pos_data.get("total_amount", 0) > 0:  # Open position
-                    # Try to get current price from cache first
-                    current_price = price_cache.get(symbol, 0)
-
-                    # If no cached price or price is stale, use fresh price from batch
-                    if (
-                        not current_price
-                        or current_price == 0
-                        or current_price == pos_data.get("average_price", 0)
-                    ):
-                        fresh_price = fresh_prices.get(symbol)
-                        if fresh_price and fresh_price > 0:
-                            current_price = fresh_price
-                            logger.info(
-                                f"Using fresh price for {symbol}: ${current_price}"
-                            )
-                        else:
-                            current_price = pos_data.get("average_price", 0)
-                            logger.warning(
-                                f"No fresh price available for {symbol}, using entry price"
-                            )
-
-                    # Calculate PnL
-                    amount = pos_data["total_amount"]
-                    avg_price = pos_data["average_price"]
-                    side = pos_data["side"]
-
-                    if side == "long":
-                        pnl = (current_price - avg_price) * amount
-                    else:  # short
-                        pnl = (avg_price - current_price) * amount
-
-                    pnl_pct = (
-                        (pnl / (avg_price * amount)) * 100
-                        if avg_price > 0
-                        else 0
-                    )
-
-                    # Calculate additional fields for position cards
-                    current_value = (
-                        float(current_price * amount) if current_price else 0.0
-                    )
-                    pnl_value = float(pnl)
-
-                    # Generate chart data bounds (will be used by JavaScript)
-                    chart_min = (
-                        min(current_price, avg_price) * 0.95
-                    )  # 5% below minimum
-                    chart_max = (
-                        max(current_price, avg_price) * 1.05
-                    )  # 5% above maximum
-
-                    # Calculate trend strength and R-squared based on P&L
-                    trend_strength = (
-                        "strong"
-                        if abs(pnl_pct) > 2
-                        else "moderate" if abs(pnl_pct) > 1 else "weak"
-                    )
-                    r_squared = min(99.9, max(60.0, 70.0 + abs(pnl_pct) * 2))
-
-                    position_data = {
-                        "symbol": symbol,
-                        "side": side,
-                        "size": float(
-                            amount
-                        ),  # Use 'size' for consistency with template
-                        "entry_price": float(avg_price),
-                        "current_price": float(current_price),
-                        "pnl": float(pnl_pct),  # PnL percentage
-                        "pnl_value": pnl_value,  # PnL dollar amount
-                        "current_value": current_value,
-                        "entry_time": pos_data.get("entry_time", ""),
-                        "position_value": current_value,  # Keep for backward compatibility
-                        "chart_min": chart_min,
-                        "chart_max": chart_max,
-                        "trend_strength": trend_strength,
-                        "r_squared": r_squared,
-                        # Include stop loss/trailing stop price for chart line
-                        "stop_price": (
-                            float(pos_data.get("stop_loss_price"))
-                            if pos_data.get("stop_loss_price") is not None
-                            else None
-                        ),
-                    }
-                    open_positions.append(position_data)
-
-            # Cross-check against CSV-derived open trades to eliminate stale entries
-            try:
-                from crypto_bot.utils.open_trades import get_open_trades
-                csv_opens = get_open_trades(TRADE_FILE)
-                csv_symbols = {o.get("symbol") for o in csv_opens}
-                if csv_symbols:
-                    before = len(open_positions)
-                    open_positions = [p for p in open_positions if p.get("symbol") in csv_symbols]
-                    logger.info(
-                        f"Dashboard: CSV cross-check filtered positions from {before} to {len(open_positions)}"
-                    )
-            except Exception as _csv_err:
-                logger.warning(f"Dashboard: CSV cross-check failed: {_csv_err}")
-
-            logger.info(f"Dashboard: Loaded {len(open_positions)} positions from state file")
-        else:
-            open_positions = get_open_positions()
-    except Exception as e:
-        logger.warning(
-            f"Failed to get positions from state file for dashboard: {e}, falling back to legacy method"
-        )
         open_positions = get_open_positions()
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.warning(
+            "Dashboard: Failed to fetch open positions from TradeManager: %s",
+            exc,
+        )
+        open_positions = []
 
     # Deduplicate positions to prevent duplicate cards
     open_positions = deduplicate_positions(open_positions)
     logger.info(
-        f"Dashboard: After deduplication, {len(open_positions)} unique positions"
+        "Dashboard: After deduplication, %d unique positions", len(open_positions)
     )
-
-    # Calculate available balance (wallet balance minus value of open positions)
-    available_balance = get_available_balance(open_positions)
 
     # Calculate open position balance (value of all open positions)
     open_position_balance = 0.0
     try:
         for position in open_positions:
-            # Use position_value if available (from API), otherwise calculate it
-            if (
-                "position_value" in position
-                and position["position_value"] is not None
-            ):
-                open_position_balance += position["position_value"]
-            elif position.get("current_price") and position.get("amount"):
-                # Position value = current_price * amount (fallback calculation)
-                open_position_balance += (
-                    position["current_price"] * position["amount"]
-                )
-    except Exception as e:
-        logger.warning(f"Failed to calculate open position balance: {e}")
+            value = position.get("position_value")
+            if value is None:
+                current_price = position.get("current_price")
+                amount = position.get("amount")
+                if current_price and amount:
+                    value = current_price * amount
+            if value:
+                open_position_balance += float(value)
+    except Exception as exc:
+        logger.warning(f"Failed to calculate open position balance: {exc}")
         open_position_balance = 0.0
 
-    # Calculate total PnL using state file if available
+    # Calculate available balance using the TradeManager-derived wallet balance
+    available_balance = get_available_balance(
+        open_positions, paper_wallet_balance
+    )
+
+    total_pnl = paper_wallet_balance - 10000.0
+    realized_pnl = total_pnl
+    unrealized_pnl = 0.0
+
     try:
-        # Load TradeManager state directly from file to bypass singleton issues
-        import json
-        from pathlib import Path
+        from crypto_bot.utils.trade_manager import get_trade_manager
 
-        state_file = Path("crypto_bot/logs/trade_manager_state.json")
-        if state_file.exists():
-            with open(state_file, "r") as f:
-                state = json.load(f)
-
-            # Calculate P&L from state file data
-            positions = state.get("positions", {})
-            stats = state.get("statistics", {})
-            price_cache = state.get("price_cache", {})
-
-            total_unrealized_pnl = 0.0
-            for symbol, pos_data in positions.items():
-                if pos_data.get("total_amount", 0) > 0:  # Open position
-                    current_price = price_cache.get(
-                        symbol, pos_data.get("average_price", 0)
-                    )
-                    if current_price and pos_data.get("average_price"):
-                        amount = pos_data["total_amount"]
-                        avg_price = pos_data["average_price"]
-                        side = pos_data["side"]
-
-                        if side == "long":
-                            pnl = (current_price - avg_price) * amount
-                        else:  # short
-                            pnl = (avg_price - current_price) * amount
-
-                        total_unrealized_pnl += pnl
-
-            realized_pnl = float(stats.get("total_realized_pnl", 0))
-
-            # Calculate P&L from balance to ensure consistency
-            calculated_pnl = paper_wallet_balance - 10000.0
-
-            pnl_data = {
-                "total_pnl": calculated_pnl,
-                "realized_pnl": realized_pnl,
-                "unrealized_pnl": calculated_pnl - realized_pnl,
-                "initial_balance": 10000.0,
-                "balance": paper_wallet_balance,
-            }
-            initial_balance = 10000.0
-            total_pnl = calculated_pnl  # Use the calculated P&L
-            logger.info(f"Dashboard P&L from state file: ${total_pnl:.2f}")
-            print(f"DEBUG: P&L calculated as ${total_pnl:.2f}")
-        else:
-            # Fallback to legacy calculation
-            pnl_data = calculate_wallet_pnl()
-            total_pnl = float(pnl_data.get("total_pnl", 0.0) or 0.0)
-            initial_balance = float(
-                pnl_data.get("initial_balance", 10000.0) or 10000.0
-            )
-    except Exception as e:
+        summary = get_trade_manager().get_portfolio_summary()
+        realized_pnl = float(summary.get("total_realized_pnl", realized_pnl))
+        unrealized_pnl = float(
+            summary.get("total_unrealized_pnl", unrealized_pnl)
+        )
+        total_pnl = float(summary.get("total_pnl", total_pnl))
+    except Exception as exc:  # pragma: no cover - defensive guard
         logger.warning(
-            f"Failed to get dashboard P&L from state file: {e}, falling back to legacy calculation"
+            "Dashboard: Failed to load TradeManager summary: %s", exc
         )
-        # Fallback to legacy calculation
-        pnl_data = calculate_wallet_pnl()
-        total_pnl = float(pnl_data.get("total_pnl", 0.0) or 0.0)
-        initial_balance = float(
-            pnl_data.get("initial_balance", 10000.0) or 10000.0
-        )
+        unrealized_pnl = total_pnl - realized_pnl
+
+    initial_balance = 10000.0
+
+    pnl_data = {
+        "total_pnl": total_pnl,
+        "realized_pnl": realized_pnl,
+        "unrealized_pnl": total_pnl - realized_pnl,
+        "initial_balance": initial_balance,
+        "balance": paper_wallet_balance,
+    }
 
     # Get recent regimes
     regimes = utils.get_recent_regimes(REGIME_FILE)
@@ -4444,13 +3628,10 @@ def api_live_signals():
 def api_positions():
     """Return positions data (alias for /api/open-positions)."""
     try:
-        # Simply redirect to the existing open-positions endpoint
-        from flask import redirect, url_for
-
-        return redirect(url_for("api_open_positions"))
-    except Exception as e:
-        logger.error(f"Error in api_positions: {e}")
-        return jsonify({"error": str(e)}), 500
+        return api_open_positions()
+    except Exception as exc:
+        logger.error(f"Error in api_positions: {exc}")
+        return jsonify([])
 
 
 @app.route("/api/balance")
