@@ -27,7 +27,7 @@ def generate_signal(
     price_fallback: bool = True,
     fallback_atr_mult: float = 1.5,
     fallback_volume_mult: float = 1.2,
-) -> Union[Tuple[float, str, float, bool], Tuple[float, str, float, bool]]:
+) -> Tuple[float, str]:
     """Detect pumps for newly listed tokens using early price and volume action.
 
     Parameters
@@ -69,12 +69,27 @@ def generate_signal(
 
     Returns
     -------
-    Tuple[float, str, float, bool]
-        Score between 0 and 1, trade direction, ATR value and event flag.
+    Tuple[float, str]
+        Score between 0 and 1 and the trade direction. ATR and event
+        information are stored on ``generate_signal.last_metadata`` and, when
+        ``config`` is provided, also under the ``_sniper_metadata`` key inside
+        that dictionary.
     """
+    metadata: Dict[str, Union[float, bool]] = {"atr": 0.0, "event": False}
+
+    def _update_metadata(atr_value: Optional[float], event_flag: bool) -> None:
+        safe_atr = float(atr_value) if atr_value is not None else 0.0
+        metadata["atr"] = safe_atr
+        metadata["event"] = bool(event_flag)
+        generate_signal.last_metadata = dict(metadata)
+        if config is not None:
+            config.setdefault("_sniper_metadata", {}).update(metadata)
+
+    _update_metadata(0.0, False)
+
     symbol = config.get("symbol") if config else ""
     if symbol and ALLOWED_PAIRS and symbol not in ALLOWED_PAIRS:
-        return 0.0, "none", 0.0, False
+        return 0.0, "none"
 
     if config:
         breakout_pct = config.get("breakout_pct", breakout_pct)
@@ -94,15 +109,18 @@ def generate_signal(
         initial_window = max(1, initial_window // 2)
 
     if len(df) < initial_window:
-        return 0.0, "none", 0.0, False
+        return 0.0, "none"
 
     price_change = df["close"].iloc[-1] / df["close"].iloc[0] - 1
+    atr = 0.0
+    event = False
     if direction == "auto" and price_change < 0:
         atr = calc_atr(df)
         score = 1.0
         if config is None or config.get("atr_normalization", True):
             score = normalize_score_by_volatility(df, score)
-        return score, "short", atr, False
+        _update_metadata(atr, False)
+        return score, "short"
 
     base_volume = df["volume"].iloc[:initial_window].mean()
     vol_ratio = df["volume"].iloc[-1] / base_volume if base_volume > 0 else 0
@@ -123,13 +141,13 @@ def generate_signal(
         prev_vol = df["volume"].iloc[:-1]
     avg_vol = prev_vol.mean() if not prev_vol.empty else 0.0
     body = abs(df["close"].iloc[-1] - df["open"].iloc[-1])
-    event = False
     if atr > 0 and avg_vol > 0:
         if body >= 2 * atr and df["volume"].iloc[-1] >= 2 * avg_vol:
             event = True
 
     if df["volume"].iloc[-1] < min_volume:
-        return 0.0, "none", atr, event
+        _update_metadata(atr, event)
+        return 0.0, "none"
 
     if (
         len(df) <= max_history
@@ -146,7 +164,8 @@ def generate_signal(
         trade_direction = direction
         if direction == "auto":
             trade_direction = "short" if price_change < 0 else "long"
-        return score, trade_direction, atr, event
+        _update_metadata(atr, event)
+        return score, trade_direction
 
     trade_direction = direction
     score = 0.0
@@ -173,9 +192,14 @@ def generate_signal(
                     if df["close"].iloc[-1] < df["open"].iloc[-1]
                     else "long"
                 )
+            _update_metadata(atr, event)
             return score, trade_direction
 
+    _update_metadata(atr, event)
     return 0.0, "none"
+
+
+generate_signal.last_metadata = {"atr": 0.0, "event": False}
 
 
 class regime_filter:

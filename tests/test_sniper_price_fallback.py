@@ -20,10 +20,11 @@ def make_df():
 
 def test_price_fallback_long_signal():
     df = make_df()
-    score, direction, atr, event = sniper_bot.generate_signal(
+    score, direction = sniper_bot.generate_signal(
         df, {"price_fallback": True}
     )
+    metadata = getattr(sniper_bot.generate_signal, "last_metadata", {})
     assert direction == "long"
     assert score > 0
-    assert atr > 0
-    assert event
+    assert metadata["atr"] > 0
+    assert metadata["event"]
