@@ -9,7 +9,7 @@ from typing import Optional, Tuple, Dict, Any
 import pandas as pd
 import numpy as np
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.indicator_cache import cache_series
@@ -242,9 +242,21 @@ def generate_signal(
     # Create configuration
     if config is None:
         config = {}
-    
-    # Merge with defaults
-    ultra_config = UltraScalpConfig(**{**UltraScalpConfig().__dict__, **config})
+
+    strategy_config: Dict[str, Any] = {}
+    if isinstance(config, dict):
+        raw_cfg = config.get("ultra_scalp_bot")
+        if isinstance(raw_cfg, dict):
+            strategy_config = raw_cfg
+        else:
+            strategy_config = config
+
+    allowed_fields = {field.name for field in fields(UltraScalpConfig)}
+    sanitized_config = {
+        key: value for key, value in strategy_config.items() if key in allowed_fields
+    }
+
+    ultra_config = UltraScalpConfig(**sanitized_config)
     
     # Validate data
     if df.empty or len(df) < ultra_config.ema_slow:

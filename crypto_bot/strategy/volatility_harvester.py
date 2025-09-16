@@ -9,7 +9,7 @@ from typing import Optional, Tuple, Dict, Any
 import pandas as pd
 import numpy as np
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.indicator_cache import cache_series
@@ -316,9 +316,21 @@ def generate_signal(
     # Create configuration
     if config is None:
         config = {}
-    
-    # Merge with defaults
-    volatility_config = VolatilityHarvesterConfig(**{**VolatilityHarvesterConfig().__dict__, **config})
+
+    strategy_config: Dict[str, Any] = {}
+    if isinstance(config, dict):
+        raw_cfg = config.get("volatility_harvester")
+        if isinstance(raw_cfg, dict):
+            strategy_config = raw_cfg
+        else:
+            strategy_config = config
+
+    allowed_fields = {field.name for field in fields(VolatilityHarvesterConfig)}
+    sanitized_config = {
+        key: value for key, value in strategy_config.items() if key in allowed_fields
+    }
+
+    volatility_config = VolatilityHarvesterConfig(**sanitized_config)
     
     # Validate data
     if df.empty or len(df) < volatility_config.atr_window:
