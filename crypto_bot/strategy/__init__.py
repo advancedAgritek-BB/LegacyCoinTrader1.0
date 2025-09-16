@@ -3,15 +3,31 @@
 from __future__ import annotations
 
 import importlib
+from typing import Optional
+
+from .base import (
+    FunctionStrategy,
+    ModuleStrategyAdapter,
+    StrategyBase,
+    StrategyCallable,
+    StrategyProtocol,
+    ensure_strategy,
+)
 
 
-def _optional_import(name: str):
+def _optional_import(name: str) -> Optional[StrategyProtocol]:
     """Import ``name`` from this package, returning ``None`` on failure."""
 
     try:  # pragma: no cover - optional dependencies
-        return importlib.import_module(f".{name}", __name__)
+        module = importlib.import_module(f".{name}", __name__)
     except Exception as e:  # pragma: no cover - ignore any import errors
         print(f"Warning: Failed to import {name}: {e}")
+        return None
+
+    try:
+        return ensure_strategy(name, module)
+    except Exception as e:  # pragma: no cover - keep optional loading resilient
+        print(f"Warning: Failed to adapt strategy {name}: {e}")
         return None
 
 
@@ -44,47 +60,55 @@ momentum_exploiter = _optional_import("momentum_exploiter")
 volatility_harvester = _optional_import("volatility_harvester")
 
 try:  # Export Solana sniper strategy if available
-    sniper_solana = importlib.import_module("crypto_bot.strategies.sniper_solana")
+    _sniper_module = importlib.import_module("crypto_bot.strategies.sniper_solana")
+    sniper_solana = ensure_strategy("sniper_solana", _sniper_module)
 except Exception as e:  # pragma: no cover - optional during tests
     print(f"Warning: Failed to import sniper_solana: {e}")
     sniper_solana = None
 try:
-    solana_scalping = importlib.import_module("crypto_bot.solana.scalping")
+    _solana_scalping_module = importlib.import_module("crypto_bot.solana.scalping")
+    solana_scalping = ensure_strategy("solana_scalping", _solana_scalping_module)
 except Exception as e:  # pragma: no cover - optional during tests
     print(f"Warning: Failed to import solana_scalping: {e}")
     solana_scalping = None
 
+_EXPORTED_STRATEGIES = [
+    # Core strategies
+    "bounce_scalper",
+    "breakout_bot",
+    "dex_scalper",
+    "dca_bot",
+    "grid_bot",
+    "mean_bot",
+    "micro_scalp_bot",
+    "sniper_bot",
+    "trend_bot",
+    "sniper_solana",
+    "solana_scalping",
+    # New strategies
+    "cross_chain_arb_bot",
+    "dip_hunter",
+    "flash_crash_bot",
+    "hft_engine",
+    "lstm_bot",
+    "maker_spread",
+    "momentum_bot",
+    "range_arb_bot",
+    "stat_arb_bot",
+    "meme_wave_bot",
+    # Ultra-aggressive strategies
+    "ultra_scalp_bot",
+    "momentum_exploiter",
+    "volatility_harvester",
+]
+
 __all__ = [
-    name
-    for name in [
-        # Core strategies
-        "bounce_scalper",
-        "breakout_bot",
-        "dex_scalper",
-        "dca_bot",
-        "grid_bot",
-        "mean_bot",
-        "micro_scalp_bot",
-        "sniper_bot",
-        "trend_bot",
-        "sniper_solana",
-        "solana_scalping",
-        # New strategies
-        "cross_chain_arb_bot",
-        "dip_hunter",
-        "flash_crash_bot",
-        "hft_engine",
-        "lstm_bot",
-        "maker_spread",
-        "momentum_bot",
-        "range_arb_bot",
-        "stat_arb_bot",
-        "meme_wave_bot",
-        # Ultra-aggressive strategies
-        "ultra_scalp_bot",
-        "momentum_exploiter",
-        "volatility_harvester",
-    ]
-    if globals().get(name) is not None
+    "StrategyBase",
+    "StrategyProtocol",
+    "StrategyCallable",
+    "FunctionStrategy",
+    "ModuleStrategyAdapter",
+    "ensure_strategy",
+    *[name for name in _EXPORTED_STRATEGIES if globals().get(name) is not None],
 ]
 

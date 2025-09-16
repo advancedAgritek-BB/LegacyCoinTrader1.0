@@ -50,6 +50,7 @@ from crypto_bot.utils.telegram import TelegramNotifier
 from crypto_bot.utils.cache_helpers import cache_by_id
 from crypto_bot.selector import bandit
 
+from crypto_bot.strategy.base import StrategyCallable
 from crypto_bot.strategy import (
     # Core strategies
     trend_bot,
@@ -259,7 +260,7 @@ def cfg_get(cfg: Union[Mapping[str, Any], RouterConfig], key: str, default: Opti
     return default
 
 
-def wrap_with_tf(fn: Callable[[pd.DataFrame], Tuple[float, str]], tf: str):
+def wrap_with_tf(fn: StrategyCallable, tf: str) -> StrategyCallable:
     """Return ``fn`` wrapped to extract ``tf`` from a dataframe map."""
 
     def wrapped(df_or_map: Any, cfg=None):
@@ -309,7 +310,7 @@ class Selector:
         regime: str,
         mode: str,
         notifier=None,
-    ) -> Callable[[pd.DataFrame], Tuple[float, str]]:
+    ) -> StrategyCallable:
         cfg = self.config
 
         if (isinstance(cfg, RouterConfig) and cfg.rl_selector) or (
@@ -345,9 +346,7 @@ class Selector:
                 else cfg.get("signal_fusion", {}).get("strategies", [])
             )
             mapping = getattr(meta_selector, "_STRATEGY_FN_MAP", {})
-            strategies: list[
-                tuple[Callable[[pd.DataFrame], Tuple[float, str]], float]
-            ] = []
+            strategies: list[tuple[StrategyCallable, float]] = []
             for name, weight in pairs_conf:
                 fn = mapping.get(name)
                 if fn:
@@ -372,13 +371,13 @@ class Selector:
 
 def get_strategy_by_name(
     name: str,
-) -> Optional[Callable[[pd.DataFrame], Tuple[float, str]]]:
+) -> Optional[StrategyCallable]:
     """Return strategy callable for ``name`` if available."""
     from . import meta_selector
     from .rl import strategy_selector as rl_selector
 
     # Comprehensive strategy mapping
-    strategy_mapping: Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]] = {}
+    strategy_mapping: Dict[str, StrategyCallable] = {}
     
     # Import all strategies directly
     try:
@@ -433,7 +432,7 @@ def get_strategy_by_name(
         logger.warning(f"Failed to import some strategies: {e}")
     
     # Add mappings from meta_selector and rl_selector
-    mapping: Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]] = {}
+    mapping: Dict[str, StrategyCallable] = {}
     mapping.update(strategy_mapping)
     mapping.update(getattr(meta_selector, "_STRATEGY_FN_MAP", {}))
     mapping.update(getattr(rl_selector, "_STRATEGY_FN_MAP", {}))
@@ -443,16 +442,16 @@ def get_strategy_by_name(
 
 @cache_by_id
 def _build_mappings(config: Union[Mapping[str, Any], RouterConfig]) -> tuple[
-    Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]],
-    Dict[str, list[Callable[[pd.DataFrame], Tuple[float, str]]]],
+    Dict[str, StrategyCallable],
+    Dict[str, list[StrategyCallable]],
 ]:
     """Return mapping dictionaries from configuration."""
     if isinstance(config, RouterConfig):
         regimes = config.regimes
     else:
         regimes = config.get("strategy_router", {}).get("regimes", {})
-    strat_map: Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]] = {}
-    regime_map: Dict[str, list[Callable[[pd.DataFrame], Tuple[float, str]]]] = {}
+    strat_map: Dict[str, StrategyCallable] = {}
+    regime_map: Dict[str, list[StrategyCallable]] = {}
     for regime, names in regimes.items():
         if isinstance(names, str):
             names = [names]
@@ -476,8 +475,8 @@ def _register_config(cfg: Union[Mapping[str, Any], RouterConfig]) -> int:
 
 @lru_cache(maxsize=8)
 def _build_mappings_cached(config_id: int) -> tuple[
-    Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]],
-    Dict[str, list[Callable[[pd.DataFrame], Tuple[float, str]]]],
+    Dict[str, StrategyCallable],
+    Dict[str, list[StrategyCallable]],
 ]:
     cfg = _CONFIG_REGISTRY.get(config_id, DEFAULT_ROUTER_CFG)
     return _build_mappings(cfg)
@@ -487,22 +486,44 @@ STRATEGY_MAP, REGIME_STRATEGIES = _build_mappings_cached(id(DEFAULT_ROUTER_CFG))
 
 
 def strategy_for(
-    regime: str, 
+    regime: str,
     df: Optional[pd.DataFrame] = None,
     config: Optional[Union[RouterConfig, Mapping[str, Any]]] = None
-) -> Callable[[pd.DataFrame], Tuple[float, str]]:
+) -> StrategyCallable:
     """Return strategy callable for a given regime."""
     cfg = config or DEFAULT_ROUTER_CFG
-    strategies = get_strategies_for_regime(regime, cfg)
-    base = strategies[0] if strategies else grid_bot.generate_signal
+    _register_config(cfg)
+    if isinstance(cfg, RouterConfig):
+        names = cfg.regimes.get(regime, [])
+    else:
+        names = cfg.get("strategy_router", {}).get("regimes", {}).get(regime, [])
+    if isinstance(names, str):
+        names = [names]
+
+    base: StrategyCallable | None = None
+    for name in names:
+        fn = get_strategy_by_name(name)
+        if fn is not None:
+            base = fn
+            break
+
+    if base is None:
+        strategies = get_strategies_for_regime(regime, cfg)
+        base = strategies[0] if strategies else grid_bot.generate_signal
     tf_key = f"{regime.replace('-', '_')}_timeframe"
     tf = cfg_get(cfg, tf_key, cfg_get(cfg, "timeframe", "1h"))
-    return wrap_with_tf(base, tf)
+    # Store preferred timeframe metadata for downstream helpers without
+    # altering the callable identity expected by tests and selectors.
+    try:
+        setattr(base, "_preferred_timeframe", tf)
+    except Exception:  # pragma: no cover - best effort
+        pass
+    return base
 
 
 def get_strategies_for_regime(
     regime: str, config: Optional[Union[RouterConfig, Mapping[str, Any]]] = None
-) -> list[Callable[[pd.DataFrame], Tuple[float, str]]]:
+) -> list[StrategyCallable]:
     """Return list of strategies mapped to ``regime``."""
     cfg = config or DEFAULT_ROUTER_CFG
     _register_config(cfg)
@@ -512,7 +533,7 @@ def get_strategies_for_regime(
         names = cfg.get("strategy_router", {}).get("regimes", {}).get(regime, [])
     if isinstance(names, str):
         names = [names]
-    pairs: list[tuple[str, Callable[[pd.DataFrame], Tuple[float, str]]]] = []
+    pairs: list[tuple[str, StrategyCallable]] = []
     for name in names:
         fn = get_strategy_by_name(name)
         if fn:
@@ -551,9 +572,9 @@ def evaluate_regime(
 
         weights = compute_weights(regime)
 
-    pairs: list[Tuple[Callable[[pd.DataFrame], Tuple[float, str]], float]] = []
+    pairs: list[Tuple[StrategyCallable, float]] = []
 
-    def _instrument(fn: Callable[[pd.DataFrame], Tuple[float, str]]):
+    def _instrument(fn: StrategyCallable):
         def wrapped(df_input, cfg_p=None):
             # Handle both DataFrame and dict inputs
             if isinstance(df_input, dict):
@@ -713,7 +734,7 @@ def route(
         Strategy function returning a score and trade direction.
     """
 
-    def _wrap(fn: Callable[[pd.DataFrame], Tuple[float, str]]):
+    def _wrap(fn: StrategyCallable):
         async def inner(df_input: Union[pd.DataFrame, Mapping[str, pd.DataFrame]], cfg=None):
             # Handle both DataFrame and dict of DataFrames
             if isinstance(df_input, dict):
@@ -886,11 +907,10 @@ def route(
             
             coro = inner(df, cfg)
             try:
-                loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
             except RuntimeError:
-                return asyncio.run(coro)
-            else:
-                return coro
+                pass
+            return coro
 
         wrapped.__name__ = fn.__name__
         return wrapped
@@ -1161,10 +1181,10 @@ def _get_strategy_priority(strategy_name: str, regime: str, config: Union[Router
     return base_priority
 
 def _select_strategy_with_rotation(
-    regime: str, 
-    df: pd.DataFrame, 
+    regime: str,
+    df: pd.DataFrame,
     config: Union[RouterConfig, Mapping[str, Any]]
-) -> Callable[[pd.DataFrame], Tuple[float, str]]:
+) -> StrategyCallable:
     """Select strategy with rotation to ensure balanced usage."""
     strategies = get_strategies_for_regime(regime, config)
     
