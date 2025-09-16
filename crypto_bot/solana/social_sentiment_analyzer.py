@@ -9,14 +9,14 @@ and sentiment sources.
 import asyncio
 import logging
 import time
-import json
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Set
 from collections import defaultdict, deque
 import numpy as np
 import aiohttp
 import re
-from urllib.parse import quote
+
+from crypto_bot.sentiment_filter import SentimentData, get_lunarcrush_client
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +194,7 @@ class SocialSentimentAnalyzer:
             # LunarCrush analysis
             lunarcrush_data = await self._get_lunarcrush_data(token_symbol)
             if lunarcrush_data:
-                lunarcrush_signals = self._process_lunarcrush_data(lunarcrush_data)
+                lunarcrush_signals = self._process_lunarcrush_data(lunarcrush_data, token_symbol)
                 all_signals.extend(lunarcrush_signals)
                 
             # Telegram analysis
@@ -274,53 +274,61 @@ class SocialSentimentAnalyzer:
             
         return signals
         
-    async def _get_lunarcrush_data(self, token_symbol: str) -> Optional[Dict]:
-        """Get data from LunarCrush API."""
+    async def _get_lunarcrush_data(self, token_symbol: str) -> Optional[SentimentData]:
+        """Get data from LunarCrush client."""
         try:
             if not self.lunarcrush_api_key:
                 return None
-                
+
             if not self._check_rate_limit("lunarcrush"):
                 return None
-                
-            url = f"https://api.lunarcrush.com/v2/assets/{token_symbol}"
-            headers = {"Authorization": f"Bearer {self.lunarcrush_api_key}"}
-            
-            async with self.session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    self._record_api_call("lunarcrush")
-                    return data.get("data", [{}])[0] if data.get("data") else None
-                    
+
+            client = get_lunarcrush_client()
+            data = await client.get_sentiment(token_symbol)
+            self._record_api_call("lunarcrush")
+            return data
+
         except Exception as exc:
             logger.debug(f"LunarCrush API call failed: {exc}")
-            
+
         return None
-        
-    def _process_lunarcrush_data(self, data: Dict) -> List[SocialSignal]:
+
+    def _process_lunarcrush_data(self, data: SentimentData, token_symbol: str) -> List[SocialSignal]:
         """Process LunarCrush data into social signals."""
         signals = []
-        
+
         try:
-            # Create aggregate signal from LunarCrush metrics
-            sentiment_score = (data.get("sentiment", 3) - 3) / 2  # Convert 1-5 scale to -1 to 1
-            galaxy_score = data.get("galaxy_score", 50) / 100  # Convert to 0-1 scale
-            
+            sentiment_score = max(-1.0, min(1.0, (data.sentiment * 2) - 1))
+            influence_score = min(data.galaxy_score / 100.0, 1.0) if data.galaxy_score else 0.0
+            social_activity = data.social_volume + data.social_mentions
+            engagement_score = min(social_activity / 2000.0, 1.0) if social_activity else 0.0
+
             signal = SocialSignal(
                 platform="lunarcrush",
-                content=f"LunarCrush metrics: sentiment={data.get('sentiment', 0)}, galaxy_score={data.get('galaxy_score', 0)}",
+                content=(
+                    "LunarCrush metrics: "
+                    f"galaxy_score={data.galaxy_score:.2f}, "
+                    f"sentiment={data.sentiment:.2f}, "
+                    f"social_mentions={data.social_mentions}, "
+                    f"social_volume={data.social_volume:.2f}"
+                ),
                 author="lunarcrush_aggregate",
                 timestamp=time.time(),
                 sentiment_score=sentiment_score,
-                influence_score=galaxy_score,
-                engagement_score=min(data.get("social_volume", 0) / 1000, 1.0),
+                influence_score=influence_score,
+                engagement_score=engagement_score,
                 confidence=0.8,
-                keywords=["lunarcrush", "aggregate"],
-                token_mentions=[data.get("symbol", "")]
+                keywords=[
+                    "lunarcrush",
+                    data.sentiment_direction.value,
+                    f"mentions:{data.social_mentions}",
+                    f"volume:{int(data.social_volume)}"
+                ],
+                token_mentions=[token_symbol]
             )
-            
+
             signals.append(signal)
-            
+
         except Exception as exc:
             logger.debug(f"LunarCrush data processing failed: {exc}")
             
