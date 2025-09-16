@@ -20,6 +20,7 @@ from scipy import stats
 from scipy.optimize import fmin_l_bfgs_b
 from crypto_bot.utils.stats import last_window_zscore
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.indicators import calculate_atr
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 
@@ -134,12 +135,7 @@ def generate_signal(
 
     recent = df.iloc[-lookback:].copy()
 
-    # Calculate ATR manually
-    high_low = recent["high"] - recent["low"]
-    high_close = (recent["high"] - recent["close"].shift(1)).abs()
-    low_close = (recent["low"] - recent["close"].shift(1)).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    atr = tr.rolling(window=atr_window).mean()
+    atr = calculate_atr(recent, window=atr_window)
     vol_ma = recent["volume"].rolling(kr_window).mean()
     atr_z = pd.Series(stats.zscore(atr), index=atr.index)
     vol_z = pd.Series(stats.zscore(recent["volume"]), index=recent.index)

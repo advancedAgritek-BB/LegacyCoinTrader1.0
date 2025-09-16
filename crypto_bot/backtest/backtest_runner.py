@@ -23,6 +23,12 @@ from numpy.random import default_rng, Generator
 
 import ta
 
+from crypto_bot.utils.indicators import (
+    calculate_atr,
+    calculate_bollinger_bands,
+    calculate_rsi,
+)
+
 from crypto_bot.regime.regime_classifier import CONFIG, classify_regime
 from crypto_bot.signals.signal_scoring import evaluate
 from crypto_bot.strategy_router import strategy_for
@@ -230,19 +236,9 @@ class BacktestRunner:
         df["ema_fast"] = df["close"].ewm(span=cfg["ema_fast"], adjust=False).mean()
         df["ema_slow"] = df["close"].ewm(span=cfg["ema_slow"], adjust=False).mean()
 
-        # Calculate RSI manually
-        delta = df["close"].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=cfg["indicator_window"]).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=cfg["indicator_window"]).mean()
-        rs = gain / loss
-        df["rsi"] = 100 - (100 / (1 + rs))
+        df["rsi"] = calculate_rsi(df["close"], window=cfg["indicator_window"])
 
-        # Calculate ATR manually
-        high_low = df["high"] - df["low"]
-        high_close = (df["high"] - df["close"].shift(1)).abs()
-        low_close = (df["low"] - df["close"].shift(1)).abs()
-        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-        df["atr"] = tr.rolling(window=cfg["indicator_window"]).mean()
+        df["atr"] = calculate_atr(df, window=cfg["indicator_window"])
 
         # Calculate ADX manually (simplified version)
         dm_plus = ((df["high"] - df["high"].shift(1)).where((df["high"] - df["high"].shift(1)) > (df["low"].shift(1) - df["low"]), 0))
@@ -254,11 +250,11 @@ class BacktestRunner:
         df["adx"] = dx.rolling(window=cfg["indicator_window"]).mean()
         df["normalized_range"] = (df["high"] - df["low"]) / df["atr"]
 
-        # Calculate Bollinger Bands manually to avoid ta library issues
-        ma = df["close"].rolling(cfg["bb_window"]).mean()
-        std = df["close"].rolling(cfg["bb_window"]).std()
-        upper = ma + (std * 2)
-        lower = ma - (std * 2)
+        # Calculate Bollinger Bands using shared helper
+        bb = calculate_bollinger_bands(df["close"], window=cfg["bb_window"], num_std=2)
+        ma = bb.middle
+        upper = bb.upper
+        lower = bb.lower
         df["bb_width"] = (upper - lower) / ma
 
         df["volume_ma"] = df["volume"].rolling(cfg["ma_window"]).mean()

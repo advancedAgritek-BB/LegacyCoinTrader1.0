@@ -13,6 +13,7 @@ import pandas as pd
 
 from crypto_bot import grid_state
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.indicators import calculate_atr
 from crypto_bot.utils.volatility import normalize_score_by_volatility, atr_percent
 from crypto_bot.volatility_filter import calc_atr
 
@@ -215,12 +216,7 @@ def generate_signal(
     if range_size < price * cfg.min_range_pct:
         return 0.0, "none"
 
-    # Calculate ATR manually
-    high_low = recent["high"] - recent["low"]
-    high_close = (recent["high"] - recent["close"].shift(1)).abs()
-    low_close = (recent["low"] - recent["close"].shift(1)).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    atr_series = tr.rolling(window=atr_period).mean()
+    atr_series = calculate_atr(recent, window=atr_period)
     vwap_series = compute_vwap(recent, volume_ma_window)
 
     lookback = len(recent)

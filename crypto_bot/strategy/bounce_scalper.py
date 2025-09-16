@@ -26,6 +26,7 @@ except Exception:  # pragma: no cover - fallback
 # Import technical analysis functions
 import ta
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.indicators import calculate_atr, calculate_rsi
 from crypto_bot.utils import stats
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
@@ -229,12 +230,7 @@ def generate_signal(
 
     df = df.copy()
 
-    # Calculate RSI manually
-    delta = df["close"].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=rsi_window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_window).mean()
-    rs = gain / loss
-    df["rsi"] = 100 - (100 / (1 + rs))
+    df["rsi"] = calculate_rsi(df["close"], window=rsi_window)
 
     df["rsi_z"] = stats.zscore(df["rsi"], cfg.lookback)
     df["vol_ma"] = df["volume"].rolling(window=vol_window).mean()
@@ -243,13 +239,8 @@ def generate_signal(
     # Calculate EMA manually
     df["ema"] = df["close"].ewm(span=ema_window, adjust=False).mean()
 
-    # Calculate ATR manually
-    atr_window_used = min(atr_window, len(df))
-    high_low = df["high"] - df["low"]
-    high_close = (df["high"] - df["close"].shift(1)).abs()
-    low_close = (df["low"] - df["close"].shift(1)).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    df["atr"] = tr.rolling(window=atr_window_used).mean()
+    atr_window_used = max(1, min(atr_window, len(df)))
+    df["atr"] = calculate_atr(df, window=atr_window_used)
 
     latest = df.iloc[-1]
     prev_close = df["close"].iloc[-2]
@@ -276,12 +267,7 @@ def generate_signal(
 
     recent = df.iloc[-(lookback + 1) :]
 
-    # Calculate RSI manually for recent data
-    delta_recent = recent["close"].diff()
-    gain_recent = (delta_recent.where(delta_recent > 0, 0)).rolling(window=rsi_window).mean()
-    loss_recent = (-delta_recent.where(delta_recent < 0, 0)).rolling(window=rsi_window).mean()
-    rs_recent = gain_recent / loss_recent
-    rsi_series = 100 - (100 / (1 + rs_recent))
+    rsi_series = calculate_rsi(recent["close"], window=rsi_window)
 
     vol_ma = recent["volume"].rolling(window=vol_window).mean()
     rsi_series = cache_series("rsi", df, rsi_series, lookback)

@@ -8,6 +8,7 @@ import pandas as pd
 
 from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.indicators import calculate_rsi
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 import numpy as np
@@ -94,12 +95,7 @@ def generate_signal(
     dc_low = recent["low"].rolling(window).min().shift(1)
     vol_ma = recent["volume"].rolling(vol_window).mean()
     vol_std = recent["volume"].rolling(vol_window).std()
-    # Calculate RSI manually
-    delta = recent["close"].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=rsi_window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_window).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
+    rsi = calculate_rsi(recent["close"], window=rsi_window)
 
     # Calculate MACD manually
     ema_fast = recent["close"].ewm(span=macd_fast, adjust=False).mean()

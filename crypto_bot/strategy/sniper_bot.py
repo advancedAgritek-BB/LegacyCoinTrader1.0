@@ -8,6 +8,7 @@ import pandas as pd
 from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.pair_cache import load_liquid_pairs
+from crypto_bot.utils.indicators import calculate_atr
 from crypto_bot.volatility_filter import calc_atr
 
 DEFAULT_PAIRS = ["BTC/USD", "ETH/USD"]
@@ -156,12 +157,7 @@ def generate_signal(
 
     atr_window = min(atr_window, len(df))
 
-    # Calculate ATR manually
-    high_low = df["high"] - df["low"]
-    high_close = (df["high"] - df["close"].shift(1)).abs()
-    low_close = (df["low"] - df["close"].shift(1)).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    atr_series = tr.rolling(window=atr_window).mean()
+    atr_series = calculate_atr(df, window=atr_window)
     atr = float(atr_series.iloc[-1]) if len(atr_series) and not pd.isna(atr_series.iloc[-1]) else 0.0
 
     if len(df) > volume_window:

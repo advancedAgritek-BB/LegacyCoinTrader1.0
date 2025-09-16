@@ -12,6 +12,7 @@ import yaml
 from .pattern_detector import detect_patterns
 from crypto_bot.utils.pattern_logger import log_patterns
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from crypto_bot.utils.indicators import calculate_atr, calculate_rsi
 
 
 CONFIG_PATH = Path(__file__).with_name("regime_config.yaml")
@@ -85,13 +86,8 @@ def adaptive_thresholds(cfg: dict, df: Optional[pd.DataFrame], symbol: Optional[
     baseline = cfg.get("atr_baseline")
     if baseline:
         try:
-            # Calculate ATR manually
-            high_low = df["high"] - df["low"]
-            high_close = (df["high"] - df["close"].shift(1)).abs()
-            low_close = (df["low"] - df["close"].shift(1)).abs()
-            tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-            atr = tr.rolling(window=cfg.get("indicator_window", 14)).mean()
-            avg_atr = float(atr.mean())
+            atr = calculate_atr(df, window=cfg.get("indicator_window", 14))
+            avg_atr = float(atr.dropna().mean())
             factor = avg_atr / float(baseline) if baseline else 1.0
             out["adx_trending_min"] = cfg["adx_trending_min"] * factor
             out["normalized_range_volatility_min"] = cfg[
@@ -192,26 +188,14 @@ def _classify_core(
             dm_plus = ((high_diff > low_diff) & (high_diff > 0)) * high_diff
             dm_minus = ((low_diff > high_diff) & (low_diff > 0)) * (-low_diff)
 
-            tr = pd.concat([
-                df["high"] - df["low"],
-                (df["high"] - df["close"].shift(1)).abs(),
-                (df["low"] - df["close"].shift(1)).abs()
-            ], axis=1).max(axis=1)
-
-            atr = tr.rolling(window=cfg["indicator_window"]).mean()
+            atr = calculate_atr(df, window=cfg["indicator_window"])
             di_plus = 100 * (dm_plus.rolling(window=cfg["indicator_window"]).mean() / atr)
             di_minus = 100 * (dm_minus.rolling(window=cfg["indicator_window"]).mean() / atr)
             dx = 100 * ((di_plus - di_minus).abs() / (di_plus + di_minus))
             df["adx"] = dx.rolling(window=cfg["indicator_window"]).mean()
 
-            # Calculate RSI manually
-            delta = df["close"].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=cfg["indicator_window"]).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=cfg["indicator_window"]).mean()
-            rs = gain / loss
-            df["rsi"] = 100 - (100 / (1 + rs))
+            df["rsi"] = calculate_rsi(df["close"], window=cfg["indicator_window"])
 
-            # Calculate ATR manually
             df["atr"] = atr
             df["normalized_range"] = (df["high"] - df["low"]) / df["atr"]
         except (IndexError, ValueError, ZeroDivisionError) as e:

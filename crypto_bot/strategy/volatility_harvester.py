@@ -13,6 +13,11 @@ from dataclasses import dataclass
 
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.indicator_cache import cache_series
+from crypto_bot.utils.indicators import (
+    calculate_atr,
+    calculate_bollinger_bands,
+    calculate_rsi,
+)
 
 
 @dataclass
@@ -62,12 +67,7 @@ def _calculate_volatility_indicators(df: pd.DataFrame, config: VolatilityHarvest
     
     indicators = {}
     
-    # Calculate ATR manually
-    high_low = df['high'] - df['low']
-    high_close = (df['high'] - df['close'].shift(1)).abs()
-    low_close = (df['low'] - df['close'].shift(1)).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    indicators['atr'] = tr.rolling(window=config.atr_window).mean()
+    indicators['atr'] = calculate_atr(df, window=config.atr_window)
     indicators['atr_pct'] = indicators['atr'] / df['close']
     
     # ATR moving averages for volatility trend
@@ -87,14 +87,15 @@ def _calculate_volatility_indicators(df: pd.DataFrame, config: VolatilityHarvest
         (df['volume'] - indicators['volume_sma']) / indicators['volume_std']
     )
     
-    # Calculate Bollinger Bands manually
-    bb_mid = df['close'].rolling(config.bb_window).mean()
-    bb_std = df['close'].rolling(config.bb_window).std()
-    bb_width = (bb_std * config.bb_std_dev * 2) / bb_mid
-    indicators['bb_upper'] = bb_mid + (bb_std * config.bb_std_dev)
-    indicators['bb_lower'] = bb_mid - (bb_std * config.bb_std_dev)
-    indicators['bb_width'] = (indicators['bb_upper'] - indicators['bb_lower']) / df['close']
-    indicators['bb_position'] = (df['close'] - indicators['bb_lower']) / (indicators['bb_upper'] - indicators['bb_lower'])
+    bb = calculate_bollinger_bands(
+        df['close'], window=config.bb_window, num_std=config.bb_std_dev
+    )
+    indicators['bb_upper'] = bb.upper
+    indicators['bb_lower'] = bb.lower
+    indicators['bb_width'] = bb.width / df['close']
+    indicators['bb_position'] = (df['close'] - indicators['bb_lower']) / (
+        indicators['bb_upper'] - indicators['bb_lower']
+    )
     
     # Calculate Keltner Channels manually
     typical_price = (df['high'] + df['low'] + df['close']) / 3
@@ -108,12 +109,7 @@ def _calculate_volatility_indicators(df: pd.DataFrame, config: VolatilityHarvest
     indicators['price_momentum'] = df['close'].pct_change(periods=5)
     
     # Volatility-adjusted RSI
-    # Calculate RSI manually
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    indicators['rsi'] = 100 - (100 / (1 + rs))
+    indicators['rsi'] = calculate_rsi(df['close'], window=14)
     
     return indicators
 

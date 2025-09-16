@@ -24,6 +24,7 @@ import ta
 
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from crypto_bot.utils.indicators import calculate_atr
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 
 logger = setup_logger(__name__, LOG_DIR / "market_making.log")
@@ -358,12 +359,7 @@ def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[fl
     low_diff = df["low"].diff()
     dm_plus = ((high_diff > low_diff) & (high_diff > 0)) * high_diff
     dm_minus = ((low_diff > high_diff) & (low_diff > 0)) * (-low_diff)
-    tr = pd.concat([
-        df["high"] - df["low"],
-        (df["high"] - df["close"].shift(1)).abs(),
-        (df["low"] - df["close"].shift(1)).abs()
-    ], axis=1).max(axis=1)
-    atr = tr.rolling(window=14).mean()
+    atr = calculate_atr(df, window=14)
     di_plus = 100 * (dm_plus.rolling(window=14).mean() / atr)
     di_minus = 100 * (dm_minus.rolling(window=14).mean() / atr)
     dx = 100 * ((di_plus - di_minus).abs() / (di_plus + di_minus))
