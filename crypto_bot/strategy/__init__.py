@@ -1,90 +1,115 @@
-"""Convenience imports for strategy modules."""
-
+"""Unified strategy loading helpers."""
 from __future__ import annotations
 
 import importlib
+from types import ModuleType
+from typing import Dict
+
+from .base import StrategyProtocol, coerce_to_strategy
 
 
-def _optional_import(name: str):
-    """Import ``name`` from this package, returning ``None`` on failure."""
+def _import_strategy_module(path: str, *, name: str) -> ModuleType | None:
+    """Import and return the module referenced by ``path``."""
 
     try:  # pragma: no cover - optional dependencies
-        return importlib.import_module(f".{name}", __name__)
-    except Exception as e:  # pragma: no cover - ignore any import errors
-        print(f"Warning: Failed to import {name}: {e}")
+        if path.startswith("."):
+            return importlib.import_module(path, __name__)
+        return importlib.import_module(path)
+    except Exception as exc:  # pragma: no cover - best effort logging
+        print(f"Warning: Failed to import {name}: {exc}")
         return None
 
 
-# Core strategies
-bounce_scalper = _optional_import("bounce_scalper")
-dca_bot = _optional_import("dca_bot")
-breakout_bot = _optional_import("breakout_bot")
-dex_scalper = _optional_import("dex_scalper")
-grid_bot = _optional_import("grid_bot")
-mean_bot = _optional_import("mean_bot")
-micro_scalp_bot = _optional_import("micro_scalp_bot")
-sniper_bot = _optional_import("sniper_bot")
-trend_bot = _optional_import("trend_bot")
+def _load_strategy(name: str, path: str) -> StrategyProtocol | None:
+    """Import ``path`` and adapt it into a :class:`StrategyProtocol`."""
 
-# New strategies from strategy copy folder
-cross_chain_arb_bot = _optional_import("cross_chain_arb_bot")
-dip_hunter = _optional_import("dip_hunter")
-flash_crash_bot = _optional_import("flash_crash_bot")
-hft_engine = _optional_import("hft_engine")
-lstm_bot = _optional_import("lstm_bot")
-maker_spread = _optional_import("maker_spread")
-momentum_bot = _optional_import("momentum_bot")
-range_arb_bot = _optional_import("range_arb_bot")
-stat_arb_bot = _optional_import("stat_arb_bot")
-meme_wave_bot = _optional_import("meme_wave_bot")
+    module = _import_strategy_module(path, name=name)
+    if module is None:
+        return None
+    try:
+        return coerce_to_strategy(module, name=name)
+    except TypeError as exc:  # pragma: no cover - best effort logging
+        print(f"Warning: Strategy {name} does not expose generate_signal: {exc}")
+        return None
 
-# Ultra-aggressive strategies
-ultra_scalp_bot = _optional_import("ultra_scalp_bot")
-momentum_exploiter = _optional_import("momentum_exploiter")
-volatility_harvester = _optional_import("volatility_harvester")
 
-try:  # Export Solana sniper strategy if available
-    sniper_solana = importlib.import_module("crypto_bot.strategies.sniper_solana")
-except Exception as e:  # pragma: no cover - optional during tests
-    print(f"Warning: Failed to import sniper_solana: {e}")
-    sniper_solana = None
-try:
-    solana_scalping = importlib.import_module("crypto_bot.solana.scalping")
-except Exception as e:  # pragma: no cover - optional during tests
-    print(f"Warning: Failed to import solana_scalping: {e}")
-    solana_scalping = None
+_RELATIVE_STRATEGIES = [
+    "arbitrage_engine",
+    "bounce_scalper",
+    "breakout_bot",
+    "cross_chain_arb_bot",
+    "dca_bot",
+    "dex_scalper",
+    "dip_hunter",
+    "flash_crash_bot",
+    "grid_bot",
+    "hft_engine",
+    "lstm_bot",
+    "maker_spread",
+    "market_making_bot",
+    "mean_bot",
+    "meme_wave_bot",
+    "micro_scalp_bot",
+    "momentum_bot",
+    "momentum_exploiter",
+    "range_arb_bot",
+    "sniper_bot",
+    "stat_arb_bot",
+    "trend_bot",
+    "ultra_scalp_bot",
+    "volatility_harvester",
+]
+_EXTERNAL_STRATEGIES = {
+    "sniper_solana": "crypto_bot.strategies.sniper_solana",
+    "solana_scalping": "crypto_bot.solana.scalping",
+}
+STRATEGY_SOURCES: Dict[str, str] = {
+    name: f".{name}" for name in _RELATIVE_STRATEGIES
+}
+STRATEGY_SOURCES.update(_EXTERNAL_STRATEGIES)
+
+_loaded = {name: _load_strategy(name, path) for name, path in STRATEGY_SOURCES.items()}
+globals().update(_loaded)
+
+STRATEGY_REGISTRY: Dict[str, StrategyProtocol] = {
+    name: strategy for name, strategy in _loaded.items() if strategy is not None
+}
+
+STRATEGY_ALIASES: Dict[str, str] = {
+    "trend": "trend_bot",
+    "grid": "grid_bot",
+    "sniper": "sniper_bot",
+    "micro_scalp": "micro_scalp_bot",
+    "dex_scalper_bot": "dex_scalper",
+    "bounce_scalper_bot": "bounce_scalper",
+    "dca": "dca_bot",
+    "momentum": "momentum_bot",
+    "lstm": "lstm_bot",
+    "ultra_scalp": "ultra_scalp_bot",
+    "solana_scalping_bot": "solana_scalping",
+}
+
+
+def get_strategy(name: str) -> StrategyProtocol | None:
+    """Return the strategy registered under ``name`` if available."""
+
+    canonical = STRATEGY_ALIASES.get(name, name)
+    strategy = STRATEGY_REGISTRY.get(canonical)
+    if strategy is not None:
+        return strategy
+
+    path = STRATEGY_SOURCES.get(canonical)
+    if path is None:
+        return None
+
+    loaded = _load_strategy(canonical, path)
+    if loaded is not None:
+        STRATEGY_REGISTRY[canonical] = loaded
+        globals()[canonical] = loaded
+    return loaded
+
 
 __all__ = [
-    name
-    for name in [
-        # Core strategies
-        "bounce_scalper",
-        "breakout_bot",
-        "dex_scalper",
-        "dca_bot",
-        "grid_bot",
-        "mean_bot",
-        "micro_scalp_bot",
-        "sniper_bot",
-        "trend_bot",
-        "sniper_solana",
-        "solana_scalping",
-        # New strategies
-        "cross_chain_arb_bot",
-        "dip_hunter",
-        "flash_crash_bot",
-        "hft_engine",
-        "lstm_bot",
-        "maker_spread",
-        "momentum_bot",
-        "range_arb_bot",
-        "stat_arb_bot",
-        "meme_wave_bot",
-        # Ultra-aggressive strategies
-        "ultra_scalp_bot",
-        "momentum_exploiter",
-        "volatility_harvester",
-    ]
-    if globals().get(name) is not None
+    name for name, strategy in _loaded.items() if strategy is not None
 ]
-
+__all__.extend(["STRATEGY_REGISTRY", "STRATEGY_ALIASES", "get_strategy"])
