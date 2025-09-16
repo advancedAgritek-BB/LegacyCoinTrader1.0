@@ -4,40 +4,33 @@ import pandas as pd
 from pathlib import Path
 
 from crypto_bot.utils.logger import LOG_DIR
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
-from crypto_bot.strategy import (
-    trend_bot,
-    grid_bot,
-    sniper_bot,
-    dex_scalper,
-    dca_bot,
-    mean_bot,
-    breakout_bot,
-    solana_scalping,
-)
+from crypto_bot.strategy import STRATEGIES
+from crypto_bot.strategy.base import StrategyProtocol
 
 # Default log file location
 LOG_FILE = Path("crypto_bot/logs/strategy_pnl.csv")
 
-# Map strategy names to generation functions
-_STRATEGY_FN_MAP: Dict[str, Callable[[pd.DataFrame], tuple]] = {}
-if trend_bot is not None:
-    _STRATEGY_FN_MAP["trend_bot"] = trend_bot.generate_signal
-if grid_bot is not None:
-    _STRATEGY_FN_MAP["grid_bot"] = grid_bot.generate_signal
-if sniper_bot is not None:
-    _STRATEGY_FN_MAP["sniper_bot"] = sniper_bot.generate_signal
-if dex_scalper is not None:
-    _STRATEGY_FN_MAP["dex_scalper"] = dex_scalper.generate_signal
-if dca_bot is not None:
-    _STRATEGY_FN_MAP["dca_bot"] = dca_bot.generate_signal
-if mean_bot is not None:
-    _STRATEGY_FN_MAP["mean_bot"] = mean_bot.generate_signal
-if breakout_bot is not None:
-    _STRATEGY_FN_MAP["breakout_bot"] = breakout_bot.generate_signal
-if solana_scalping is not None:
-    _STRATEGY_FN_MAP["solana_scalping"] = solana_scalping.generate_signal
+_STRATEGY_CACHE: Dict[str, StrategyProtocol] = {}
+
+
+def _resolve_strategy(name: str) -> Optional[StrategyProtocol]:
+    strategy = _STRATEGY_CACHE.get(name)
+    if strategy is not None:
+        return strategy
+
+    strategy = STRATEGIES.get(name)
+    if strategy is None:
+        try:
+            from ..strategy_router import get_strategy_by_name as router_get
+        except Exception:
+            router_get = None
+        if router_get is not None:
+            strategy = router_get(name)
+    if strategy is not None:
+        _STRATEGY_CACHE[name] = strategy
+    return strategy
 
 
 class RLStrategySelector:
@@ -74,7 +67,10 @@ class RLStrategySelector:
         best = max(
             scores.items(), key=lambda x: x[1]["mean"] * x[1]["count"]
         )[0]
-        return _STRATEGY_FN_MAP.get(best, _get_strategy_for()(regime))
+        strategy = _resolve_strategy(best)
+        if strategy is None:
+            return _get_strategy_for()(regime)
+        return strategy
 
 
 _selector = RLStrategySelector()

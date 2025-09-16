@@ -76,6 +76,7 @@ from crypto_bot.strategy import (
     ultra_scalp_bot,
     momentum_exploiter,
     volatility_harvester,
+    STRATEGIES,
 )
 
 import random
@@ -259,8 +260,22 @@ def cfg_get(cfg: Union[Mapping[str, Any], RouterConfig], key: str, default: Opti
     return default
 
 
-def wrap_with_tf(fn: Callable[[pd.DataFrame], Tuple[float, str]], tf: str):
+def _strategy_name(candidate: Any) -> str:
+    return getattr(
+        candidate,
+        "__name__",
+        getattr(getattr(candidate, "generate_signal", None), "__name__", type(candidate).__name__),
+    )
+
+
+def wrap_with_tf(
+    fn: Union[Callable[[pd.DataFrame], Tuple[float, str]], StrategyProtocol],
+    tf: str,
+):
     """Return ``fn`` wrapped to extract ``tf`` from a dataframe map."""
+
+    call = fn if callable(fn) else getattr(fn, "generate_signal")
+    name = _strategy_name(fn)
 
     def wrapped(df_or_map: Any, cfg=None):
         df = None
@@ -277,19 +292,19 @@ def wrap_with_tf(fn: Callable[[pd.DataFrame], Tuple[float, str]], tf: str):
 
         # Ensure df is a valid DataFrame
         if not isinstance(df, pd.DataFrame):
-            logger.warning(f"Strategy {fn.__name__} received invalid data type: {type(df)}")
+            logger.warning(f"Strategy {name} received invalid data type: {type(df)}")
             return 0.0, "none"
 
         if isinstance(df, pd.DataFrame) and df.empty:
-            logger.debug(f"Strategy {fn.__name__} received empty DataFrame")
+            logger.debug(f"Strategy {name} received empty DataFrame")
             return 0.0, "none"
 
         try:
-            return fn(df, cfg)
+            return call(df, cfg)
         except TypeError:
-            return fn(df)
+            return call(df)
 
-    wrapped.__name__ = getattr(fn, "__name__", "wrapped")
+    wrapped.__name__ = name
     return wrapped
 
 
@@ -370,97 +385,52 @@ class Selector:
         return strategy_fn
 
 
-def get_strategy_by_name(
-    name: str,
-) -> Optional[Callable[[pd.DataFrame], Tuple[float, str]]]:
-    """Return strategy callable for ``name`` if available."""
+def get_strategy_by_name(name: str) -> Optional[StrategyProtocol]:
+    """Return strategy interface for ``name`` if available."""
+
+    strategy = STRATEGIES.get(name)
+    if strategy is not None:
+        return strategy
+
     from . import meta_selector
     from .rl import strategy_selector as rl_selector
 
-    # Comprehensive strategy mapping
-    strategy_mapping: Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]] = {}
-    
-    # Import all strategies directly
-    try:
-        from .strategy import (
-            trend_bot, grid_bot, sniper_bot, sniper_solana, dex_scalper,
-            mean_bot, breakout_bot, micro_scalp_bot, bounce_scalper,
-            cross_chain_arb_bot, dip_hunter, flash_crash_bot, hft_engine,
-            lstm_bot, maker_spread, momentum_bot, range_arb_bot,
-            stat_arb_bot, meme_wave_bot, ultra_scalp_bot, momentum_exploiter,
-            volatility_harvester, solana_scalping, dca_bot
-        )
-        
-        # Map strategy names to their generate_signal functions
-        strategy_mapping.update({
-            "trend_bot": trend_bot.generate_signal if trend_bot else None,
-            "grid_bot": grid_bot.generate_signal if grid_bot else None,
-            "sniper_bot": sniper_bot.generate_signal if sniper_bot else None,
-            "sniper_solana": sniper_solana.generate_signal if sniper_solana else None,
-            "dex_scalper": dex_scalper.generate_signal if dex_scalper else None,
-            "mean_bot": mean_bot.generate_signal if mean_bot else None,
-            "breakout_bot": breakout_bot.generate_signal if breakout_bot else None,
-            "micro_scalp_bot": micro_scalp_bot.generate_signal if micro_scalp_bot else None,
-            "bounce_scalper": bounce_scalper.generate_signal if bounce_scalper else None,
-            "cross_chain_arb_bot": cross_chain_arb_bot.generate_signal if cross_chain_arb_bot else None,
-            "dip_hunter": dip_hunter.generate_signal if dip_hunter else None,
-            "flash_crash_bot": flash_crash_bot.generate_signal if flash_crash_bot else None,
-            "hft_engine": hft_engine.generate_signal if hft_engine else None,
-            "lstm_bot": lstm_bot.generate_signal if lstm_bot else None,
-            "maker_spread": maker_spread.generate_signal if maker_spread else None,
-            "momentum_bot": momentum_bot.generate_signal if momentum_bot else None,
-            "range_arb_bot": range_arb_bot.generate_signal if range_arb_bot else None,
-            "stat_arb_bot": stat_arb_bot.generate_signal if stat_arb_bot else None,
-            "meme_wave_bot": meme_wave_bot.generate_signal if meme_wave_bot else None,
-            "ultra_scalp_bot": ultra_scalp_bot.generate_signal if ultra_scalp_bot else None,
-            "momentum_exploiter": momentum_exploiter.generate_signal if momentum_exploiter else None,
-            "volatility_harvester": volatility_harvester.generate_signal if volatility_harvester else None,
-            "solana_scalping": solana_scalping.generate_signal if solana_scalping else None,
-            "dca_bot": dca_bot.generate_signal if dca_bot else None,
-            
-            # Alternative names
-            "trend": trend_bot.generate_signal if trend_bot else None,
-            "grid": grid_bot.generate_signal if grid_bot else None,
-            "sniper": sniper_bot.generate_signal if sniper_bot else None,
-            "micro_scalp": micro_scalp_bot.generate_signal if micro_scalp_bot else None,
-            "bounce_scalper_bot": bounce_scalper.generate_signal if bounce_scalper else None,
-        })
-        
-        # Filter out None values
-        strategy_mapping = {k: v for k, v in strategy_mapping.items() if v is not None}
-        
-    except ImportError as e:
-        logger.warning(f"Failed to import some strategies: {e}")
-    
-    # Add mappings from meta_selector and rl_selector
-    mapping: Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]] = {}
-    mapping.update(strategy_mapping)
-    mapping.update(getattr(meta_selector, "_STRATEGY_FN_MAP", {}))
-    mapping.update(getattr(rl_selector, "_STRATEGY_FN_MAP", {}))
-    
-    return mapping.get(name)
+    resolver = getattr(meta_selector, "get_strategy_by_name", None)
+    if callable(resolver):
+        strategy = resolver(name)
+        if strategy is not None:
+            STRATEGIES[name] = strategy
+            return strategy
+
+    rl_resolver = getattr(rl_selector, "_resolve_strategy", None)
+    if callable(rl_resolver):
+        strategy = rl_resolver(name)
+        if strategy is not None:
+            STRATEGIES[name] = strategy
+            return strategy
+
+    return None
 
 
 @cache_by_id
-def _build_mappings(config: Union[Mapping[str, Any], RouterConfig]) -> tuple[
-    Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]],
-    Dict[str, list[Callable[[pd.DataFrame], Tuple[float, str]]]],
-]:
+def _build_mappings(
+    config: Union[Mapping[str, Any], RouterConfig]
+) -> tuple[Dict[str, StrategyProtocol], Dict[str, list[StrategyProtocol]]]:
     """Return mapping dictionaries from configuration."""
     if isinstance(config, RouterConfig):
         regimes = config.regimes
     else:
         regimes = config.get("strategy_router", {}).get("regimes", {})
-    strat_map: Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]] = {}
-    regime_map: Dict[str, list[Callable[[pd.DataFrame], Tuple[float, str]]]] = {}
+    strat_map: Dict[str, StrategyProtocol] = {}
+    regime_map: Dict[str, list[StrategyProtocol]] = {}
     for regime, names in regimes.items():
         if isinstance(names, str):
             names = [names]
-        funcs = [get_strategy_by_name(n) for n in names]
-        funcs = [f for f in funcs if f]
-        if funcs:
-            strat_map[regime] = funcs[0]
-            regime_map[regime] = funcs
+        strategies = [get_strategy_by_name(n) for n in names]
+        strategies = [s for s in strategies if s]
+        if strategies:
+            strat_map[regime] = strategies[0]
+            regime_map[regime] = strategies
     return strat_map, regime_map
 
 
@@ -475,10 +445,9 @@ def _register_config(cfg: Union[Mapping[str, Any], RouterConfig]) -> int:
 
 
 @lru_cache(maxsize=8)
-def _build_mappings_cached(config_id: int) -> tuple[
-    Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]],
-    Dict[str, list[Callable[[pd.DataFrame], Tuple[float, str]]]],
-]:
+def _build_mappings_cached(
+    config_id: int,
+) -> tuple[Dict[str, StrategyProtocol], Dict[str, list[StrategyProtocol]]]:
     cfg = _CONFIG_REGISTRY.get(config_id, DEFAULT_ROUTER_CFG)
     return _build_mappings(cfg)
 
@@ -487,22 +456,25 @@ STRATEGY_MAP, REGIME_STRATEGIES = _build_mappings_cached(id(DEFAULT_ROUTER_CFG))
 
 
 def strategy_for(
-    regime: str, 
+    regime: str,
     df: Optional[pd.DataFrame] = None,
     config: Optional[Union[RouterConfig, Mapping[str, Any]]] = None
 ) -> Callable[[pd.DataFrame], Tuple[float, str]]:
     """Return strategy callable for a given regime."""
     cfg = config or DEFAULT_ROUTER_CFG
     strategies = get_strategies_for_regime(regime, cfg)
-    base = strategies[0] if strategies else grid_bot.generate_signal
+    base = strategies[0] if strategies else get_strategy_by_name("grid_bot")
     tf_key = f"{regime.replace('-', '_')}_timeframe"
     tf = cfg_get(cfg, tf_key, cfg_get(cfg, "timeframe", "1h"))
+    if base is None:
+        fallback = grid_bot.generate_signal if grid_bot else (lambda *_args, **_kwargs: (0.0, "none"))
+        return wrap_with_tf(fallback, tf)
     return wrap_with_tf(base, tf)
 
 
 def get_strategies_for_regime(
     regime: str, config: Optional[Union[RouterConfig, Mapping[str, Any]]] = None
-) -> list[Callable[[pd.DataFrame], Tuple[float, str]]]:
+) -> list[StrategyProtocol]:
     """Return list of strategies mapped to ``regime``."""
     cfg = config or DEFAULT_ROUTER_CFG
     _register_config(cfg)
@@ -512,16 +484,20 @@ def get_strategies_for_regime(
         names = cfg.get("strategy_router", {}).get("regimes", {}).get(regime, [])
     if isinstance(names, str):
         names = [names]
-    pairs: list[tuple[str, Callable[[pd.DataFrame], Tuple[float, str]]]] = []
+    pairs: list[tuple[str, StrategyProtocol]] = []
     for name in names:
-        fn = get_strategy_by_name(name)
-        if fn:
-            pairs.append((name, fn))
+        strat = get_strategy_by_name(name)
+        if strat:
+            pairs.append((name, strat))
     if not pairs:
         _, mapping = _build_mappings_cached(id(cfg))
-        return mapping.get(regime, [grid_bot.generate_signal])
+        strategies = mapping.get(regime)
+        if strategies:
+            return strategies
+        fallback = get_strategy_by_name("grid_bot")
+        return [fallback] if fallback else []
     pairs.sort(key=lambda p: score_bot(load_bot_stats(p[0])), reverse=True)
-    return [fn for _, fn in pairs]
+    return [strategy for _, strategy in pairs]
 
 
 def evaluate_regime(
@@ -713,7 +689,12 @@ def route(
         Strategy function returning a score and trade direction.
     """
 
-    def _wrap(fn: Callable[[pd.DataFrame], Tuple[float, str]]):
+    def _wrap(
+        fn: Union[Callable[[pd.DataFrame], Tuple[float, str]], StrategyProtocol]
+    ):
+        call = fn if callable(fn) else getattr(fn, "generate_signal")
+        name = _strategy_name(fn)
+
         async def inner(df_input: Union[pd.DataFrame, Mapping[str, pd.DataFrame]], cfg=None):
             # Handle both DataFrame and dict of DataFrames
             if isinstance(df_input, dict):
@@ -734,14 +715,18 @@ def route(
                         if df is not None and isinstance(df, pd.DataFrame) and not df.empty:
                             break
                 if df is None or not isinstance(df, pd.DataFrame):
-                    logger.warning(f"Strategy {fn.__name__} could not find valid DataFrame in mapping")
+                    logger.warning(
+                        f"Strategy {name} could not find valid DataFrame in mapping"
+                    )
                     return 0.0, "none"
             else:
                 df = df_input
 
             # Ensure df is actually a pandas DataFrame
             if not isinstance(df, pd.DataFrame):
-                logger.warning(f"Strategy {fn.__name__} received invalid data type: {type(df)}")
+                logger.warning(
+                    f"Strategy {name} received invalid data type: {type(df)}"
+                )
                 return 0.0, "none"
 
             # Additional validation to catch corrupted DataFrames
@@ -752,20 +737,22 @@ def route(
                     _ = df.columns
                     _ = len(df)
                 else:
-                    logger.error(f"Strategy {fn.__name__} received non-DataFrame type: {type(df)}")
+                    logger.error(
+                        f"Strategy {name} received non-DataFrame type: {type(df)}"
+                    )
                     return 0.0, "none"
             except (AttributeError, TypeError) as e:
-                logger.error(f"Strategy {fn.__name__} received corrupted DataFrame: {e}")
+                logger.error(f"Strategy {name} received corrupted DataFrame: {e}")
                 return 0.0, "none"
 
             # Check if DataFrame is empty
             if isinstance(df, pd.DataFrame) and df.empty:
-                logger.debug(f"Strategy {fn.__name__} received empty DataFrame")
+                logger.debug(f"Strategy {name} received empty DataFrame")
                 return 0.0, "none"
 
             # Additional safety check - ensure DataFrame still has required attributes
             if not hasattr(df, 'empty') or not hasattr(df, 'columns'):
-                logger.error(f"Strategy {fn.__name__} DataFrame missing required attributes")
+                logger.error(f"Strategy {name} DataFrame missing required attributes")
                 return 0.0, "none"
 
             # Store original DataFrame type for validation after function call
@@ -775,7 +762,7 @@ def route(
             # Merge strategy-specific config with global config
             strategy_config = cfg
             if cfg and isinstance(cfg, dict):
-                strategy_name = getattr(fn, '__name__', '').replace('_bot', '').replace('_', '')
+                strategy_name = name.replace('_bot', '').replace('_', '')
                 if strategy_name in cfg:
                     # Merge strategy-specific config with global config
                     strategy_config = {**cfg, **cfg[strategy_name]}
@@ -783,67 +770,73 @@ def route(
 
             try:
                 # Check if the function is async
-                if asyncio.iscoroutinefunction(fn):
+                if asyncio.iscoroutinefunction(call):
                     # Handle async functions properly
                     try:
-                        res = await fn(df, strategy_config)
+                        res = await call(df, strategy_config)
                     except TypeError:
-                        res = await fn(df)
+                        res = await call(df)
                 else:
                     # Handle sync functions
-                    res = fn(df, strategy_config)
+                    res = call(df, strategy_config)
                     # Validate that df is still a DataFrame after strategy execution
                     if not isinstance(df, pd.DataFrame):
-                        logger.error(f"Strategy {fn.__name__} corrupted DataFrame - df type after call: {type(df)}")
+                        logger.error(
+                            f"Strategy {name} corrupted DataFrame - df type after call: {type(df)}"
+                        )
                         return 0.0, "none"
             except TypeError:
                 # Fallback for sync functions with different signatures
-                if asyncio.iscoroutinefunction(fn):
-                    res = await fn(df)
+                if asyncio.iscoroutinefunction(call):
+                    res = await call(df)
                 else:
-                    res = fn(df)
+                    res = call(df)
                     # Validate that df is still a DataFrame after strategy execution
                     if not isinstance(df, pd.DataFrame):
-                        logger.error(f"Strategy {fn.__name__} corrupted DataFrame after TypeError fallback - df type: {type(df)}")
+                        logger.error(
+                            f"Strategy {name} corrupted DataFrame after TypeError fallback - df type: {type(df)}"
+                        )
                         return 0.0, "none"
             except AttributeError as e:
                 if "'dict' object has no attribute" in str(e):
-                    logger.error(f"Strategy {fn.__name__} failed: DataFrame was converted to dict - {e}")
+                    logger.error(f"Strategy {name} failed: DataFrame was converted to dict - {e}")
                     # Try to recover by checking if df is still a DataFrame
                     if not isinstance(df, pd.DataFrame):
-                        logger.error(f"Strategy {fn.__name__} DataFrame was actually converted to {type(df)}")
-                        logger.error(f"Strategy {fn.__name__} df type: {type(df)}, df value: {repr(df)[:200]}...")
+                        logger.error(f"Strategy {name} DataFrame was actually converted to {type(df)}")
+                        logger.error(f"Strategy {name} df type: {type(df)}, df value: {repr(df)[:200]}...")
                     # Also check if the error is coming from within the strategy function
                     import traceback
-                    logger.error(f"Strategy {fn.__name__} traceback: {traceback.format_exc()}")
+                    logger.error(f"Strategy {name} traceback: {traceback.format_exc()}")
                     # Add debug info about the DataFrame state
-                    logger.error(f"Strategy {fn.__name__} debug - original_df_type: {original_df_type}, original_df_id: {original_df_id}")
-                    logger.error(f"Strategy {fn.__name__} debug - current_df_type: {type(df)}, current_df_id: {id(df)}")
+                    logger.error(f"Strategy {name} debug - original_df_type: {original_df_type}, original_df_id: {original_df_id}")
+                    logger.error(f"Strategy {name} debug - current_df_type: {type(df)}, current_df_id: {id(df)}")
                     return 0.0, "none"
                 elif "bollinger_pband" in str(e):
-                    logger.error(f"Strategy {fn.__name__} failed: Bollinger Bands method 'bollinger_pband' does not exist. Use 'bollinger_wband()' and calculate upper/lower bands manually.")
+                    logger.error(
+                        "Strategy {name} failed: Bollinger Bands method 'bollinger_pband' does not exist. Use 'bollinger_wband()' and calculate upper/lower bands manually."
+                    )
                     return 0.0, "none"
                 else:
                     raise
             except Exception as e:
                 # Catch any other exceptions that might indicate DataFrame corruption
-                logger.error(f"Strategy {fn.__name__} failed with unexpected error: {e}")
+                logger.error(f"Strategy {name} failed with unexpected error: {e}")
                 # Check if DataFrame was modified or corrupted during execution
                 if not isinstance(df, pd.DataFrame):
-                    logger.error(f"Strategy {fn.__name__} DataFrame was corrupted during execution: {type(df)}")
+                    logger.error(f"Strategy {name} DataFrame was corrupted during execution: {type(df)}")
                     return 0.0, "none"
                 if not hasattr(df, 'empty') or not hasattr(df, 'columns'):
-                    logger.error(f"Strategy {fn.__name__} DataFrame lost required attributes during execution")
+                    logger.error(f"Strategy {name} DataFrame lost required attributes during execution")
                     return 0.0, "none"
                 raise
 
             # Validate that DataFrame is still intact after function call
             if not isinstance(df, pd.DataFrame):
-                logger.error(f"Strategy {fn.__name__} DataFrame was converted to {type(df)} during execution")
+                logger.error(f"Strategy {name} DataFrame was converted to {type(df)} during execution")
                 return 0.0, "none"
-            
+
             if not hasattr(df, 'empty') or not hasattr(df, 'columns'):
-                logger.error(f"Strategy {fn.__name__} DataFrame lost required attributes during execution")
+                logger.error(f"Strategy {name} DataFrame lost required attributes during execution")
                 return 0.0, "none"
 
             if isinstance(res, tuple):
@@ -880,19 +873,23 @@ def route(
                         df = df_input.get(tf)
                         if df is not None and isinstance(df, pd.DataFrame) and not df.empty:
                             break
-                
+
                 # If still no DataFrame found, return default
                 if df is None or not isinstance(df, pd.DataFrame):
-                    logger.warning(f"Strategy {fn.__name__} received dict but no valid DataFrame found")
+                    logger.warning(
+                        f"Strategy {name} received dict but no valid DataFrame found"
+                    )
                     return 0.0, "none"
             else:
                 df = df_input
-            
+
             # Ensure df is actually a pandas DataFrame
             if not isinstance(df, pd.DataFrame):
-                logger.warning(f"Strategy {fn.__name__} received invalid data type: {type(df)}")
+                logger.warning(
+                    f"Strategy {name} received invalid data type: {type(df)}"
+                )
                 return 0.0, "none"
-            
+
             coro = inner(df, cfg)
             try:
                 loop = asyncio.get_running_loop()
@@ -901,7 +898,7 @@ def route(
             else:
                 return coro
 
-        wrapped.__name__ = fn.__name__
+        wrapped.__name__ = name
         return wrapped
 
     cfg = config or DEFAULT_ROUTER_CFG

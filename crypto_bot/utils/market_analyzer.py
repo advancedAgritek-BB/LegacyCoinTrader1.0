@@ -26,7 +26,7 @@ from crypto_bot.utils.telegram import TelegramNotifier
 from crypto_bot import meta_selector
 from crypto_bot.signals.signal_scoring import evaluate_async, evaluate_strategies
 from crypto_bot.utils.rank_logger import log_second_place
-from crypto_bot.strategy import grid_bot
+from crypto_bot.strategy import STRATEGIES, grid_bot
 from crypto_bot.volatility_filter import calc_atr
 from ta.volatility import BollingerBands
 from .stats import zscore
@@ -333,8 +333,14 @@ async def analyze_symbol(
         higher_df_1h = df_map.get("1h")
 
         def wrap(fn):
-            if fn is grid_bot.generate_signal:
-                return functools.partial(fn, higher_df=higher_df_1h)
+            grid_strategy = STRATEGIES.get("grid_bot")
+            if (
+                fn is grid_bot.generate_signal
+                or fn is grid_strategy
+                or getattr(fn, "__self__", None) is grid_strategy
+            ):
+                target = fn if callable(fn) else getattr(grid_strategy, "generate_signal")
+                return functools.partial(target, higher_df=higher_df_1h)
             # For other strategies, ensure they receive the DataFrame for the base timeframe
             def wrapped_strategy(df_or_map, config=None):
                 if isinstance(df_or_map, dict):
