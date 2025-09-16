@@ -180,11 +180,11 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["modern*"]
+include = ["crypto_bot*"]
 exclude = ["tests*", "docs*", "scripts*"]
 
 [tool.setuptools.package-data]
-"modern" = ["py.typed"]
+"crypto_bot" = ["py.typed"]
 
 [tool.black]
 line-length = 100
@@ -216,7 +216,7 @@ include_trailing_comma = true
 force_grid_wrap = 0
 use_parentheses = true
 ensure_newline_before_comments = true
-known_first_party = ["modern"]
+known_first_party = ["crypto_bot"]
 known_third_party = [
     "aiohttp",
     "fastapi",
@@ -262,7 +262,7 @@ addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
-    "--cov=modern",
+    "--cov=crypto_bot",
     "--cov-report=term-missing",
     "--cov-report=html:htmlcov",
     "--cov-report=xml",
@@ -291,7 +291,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["modern"]
+source = ["crypto_bot"]
 omit = [
     "*/tests/*",
     "*/test_*.py",
@@ -386,7 +386,7 @@ ignore = [
 "tests/**/*" = ["B011"]  # assert false
 
 [tool.ruff.isort]
-known-first-party = ["modern"]
+known-first-party = ["crypto_bot"]
 
 [tool.ruff.mypy]
 python-version = "3.9"
