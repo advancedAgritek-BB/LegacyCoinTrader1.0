@@ -290,6 +290,8 @@ def generate_signal(
     breakout_range = (high - low) / 2
     breakout_threshold = breakout_range * cfg.breakout_mult
     if price > centre + breakout_threshold or price < centre - breakout_threshold:
+        from . import breakout_bot
+
         result = breakout_bot.generate_signal(df, _as_dict(config), higher_df)
         # breakout_bot returns (score, direction, atr) when higher_df is None
         # or (score, direction) when higher_df is provided
@@ -306,6 +308,8 @@ def generate_signal(
         near_lower = price - lower_bound <= grid_step
         near_upper = upper_bound - price <= grid_step
         if (near_lower or near_upper) and {"open", "high", "low", "close"}.issubset(df.columns):
+            from . import micro_scalp_bot
+
             scalp_score, scalp_dir = micro_scalp_bot.generate_signal(
                 df,
                 _as_dict(config),
