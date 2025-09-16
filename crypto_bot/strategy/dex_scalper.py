@@ -1,14 +1,45 @@
+from __future__ import annotations
+
 import os
+from dataclasses import dataclass
+from typing import Mapping, Optional, Tuple
+
 import pandas as pd
-from typing import Tuple, Optional
 import requests
 
+from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.pair_cache import load_liquid_pairs
 from crypto_bot.utils.gas_estimator import fetch_priority_fee_gwei
 
 ALLOWED_PAIRS = load_liquid_pairs() or []
+
+
+@dataclass
+class DexScalperConfig:
+    """Configuration options for the DEX scalper strategy."""
+
+    ema_fast: int = 3
+    ema_slow: int = 10
+    min_signal_score: float = 0.1
+    gas_threshold_gwei: float = 10.0
+    atr_normalization: bool = True
+
+    @classmethod
+    def from_dict(cls, data: object) -> "DexScalperConfig":
+        params = extract_params(
+            data,
+            {
+                "ema_fast",
+                "ema_slow",
+                "min_signal_score",
+                "gas_threshold_gwei",
+                "atr_normalization",
+            },
+            ("dex_scalper",),
+        )
+        return apply_defaults(cls, params)
 
 
 def fetch_priority_fee_gwei(endpoint: Optional[str] = None) -> float:
@@ -60,7 +91,10 @@ def fetch_priority_fee_gwei(endpoint: Optional[str] = None) -> float:
     return 0.0
 
 
-def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
+def generate_signal(
+    df,
+    config: Optional[DexScalperConfig | Mapping[str, Any]] = None,
+) -> Tuple[float, str]:
     """Short-term momentum strategy using EMA divergence on DEX pairs."""
     # Handle type conversion from dict to DataFrame
     if isinstance(df, dict):
@@ -75,11 +109,11 @@ def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
     if df.empty:
         return 0.0, "none"
 
-    params = config.get("dex_scalper", {}) if config else {}
-    fast_window = params.get("ema_fast", 3)
-    slow_window = params.get("ema_slow", 10)
-    min_score = params.get("min_signal_score", 0.1)
-    gas_threshold_gwei = params.get("gas_threshold_gwei", 10.0)
+    cfg = DexScalperConfig.from_dict(config)
+    fast_window = int(cfg.ema_fast)
+    slow_window = int(cfg.ema_slow)
+    min_score = float(cfg.min_signal_score)
+    gas_threshold_gwei = float(cfg.gas_threshold_gwei)
 
     if gas_threshold_gwei > 0:
         fee = fetch_priority_fee_gwei()
@@ -118,11 +152,11 @@ def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
         return 0.0, "none"
 
     if momentum > 0:
-        if config is None or config.get("atr_normalization", True):
+        if cfg.atr_normalization:
             score = normalize_score_by_volatility(df, score)
         return score, "long"
     elif momentum < 0:
-        if config is None or config.get("atr_normalization", True):
+        if cfg.atr_normalization:
             score = normalize_score_by_volatility(df, score)
         return score, "short"
     return 0.0, "none"

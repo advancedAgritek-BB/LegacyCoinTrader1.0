@@ -1,13 +1,77 @@
-from typing import Optional, Tuple
+from __future__ import annotations
 
-from crypto_bot.execution.solana_mempool import SolanaMempoolMonitor
+from dataclasses import dataclass
+from typing import Any, Mapping, Optional, Tuple
 
 import pandas as pd
 import ta
 
+from crypto_bot.execution.solana_mempool import SolanaMempoolMonitor
+from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.indicator_cache import cache_series
-
 from crypto_bot.utils.volatility import normalize_score_by_volatility
+
+
+@dataclass
+class MicroScalpConfig:
+    """Configuration parameters for the micro scalp strategy."""
+
+    ema_fast: int = 2
+    ema_slow: int = 5
+    volume_window: int = 20
+    min_vol_z: float = -0.5
+    atr_period: int = 14
+    min_atr_pct: float = 0.001
+    min_momentum_pct: float = 0.0
+    wick_pct: float = 0.0
+    lower_wick_pct: float = 0.0
+    upper_wick_pct: float = 0.0
+    confirm_bars: int = 0
+    fresh_cross_only: bool = False
+    imbalance_ratio: float = 0.0
+    imbalance_penalty: float = 0.2
+    imbalance_filter: bool = True
+    trend_fast: int = 0
+    trend_slow: int = 0
+    trend_timeframe: Optional[str] = None
+    trend_filter: bool = True
+    atr_normalization: bool = True
+    order_book: Optional[Mapping[str, Any]] = None
+
+    @classmethod
+    def from_dict(cls, data: object) -> "MicroScalpConfig":
+        params = extract_params(
+            data,
+            {
+                "ema_fast",
+                "ema_slow",
+                "volume_window",
+                "min_vol_z",
+                "atr_period",
+                "min_atr_pct",
+                "min_momentum_pct",
+                "wick_pct",
+                "lower_wick_pct",
+                "upper_wick_pct",
+                "confirm_bars",
+                "fresh_cross_only",
+                "imbalance_ratio",
+                "imbalance_penalty",
+                "imbalance_filter",
+                "trend_fast",
+                "trend_slow",
+                "trend_timeframe",
+                "trend_filter",
+                "atr_normalization",
+                "order_book",
+            },
+            ("micro_scalp_bot", "micro_scalp"),
+        )
+        if "lower_wick_pct" not in params and "wick_pct" in params:
+            params["lower_wick_pct"] = params["wick_pct"]
+        if "upper_wick_pct" not in params and "wick_pct" in params:
+            params["upper_wick_pct"] = params["wick_pct"]
+        return apply_defaults(cls, params)
 
 
 def _wick_ratios(row: pd.Series) -> Tuple[float, float]:
@@ -36,7 +100,7 @@ def _wick_ratios(row: pd.Series) -> Tuple[float, float]:
 
 def generate_signal(
     df: pd.DataFrame,
-    config: Optional[dict] = None,
+    config: Optional[MicroScalpConfig | Mapping[str, Any]] = None,
     higher_df: Optional[pd.DataFrame] = None,
     *,
     mempool_monitor: Optional[SolanaMempoolMonitor] = None,
@@ -100,32 +164,30 @@ def generate_signal(
         )
         df = pd.concat([df, tick_df], ignore_index=True)
 
-    params = config.get("micro_scalp", {}) if config else {}
+    scalp_cfg = MicroScalpConfig.from_dict(config)
 
-    cfg = mempool_cfg or {}
-    if mempool_monitor and cfg.get("enabled"):
-        threshold = cfg.get("suspicious_fee_threshold", 0.0)
+    m_cfg = mempool_cfg or {}
+    if mempool_monitor and m_cfg.get("enabled"):
+        threshold = m_cfg.get("suspicious_fee_threshold", 0.0)
         if mempool_monitor.is_suspicious(threshold):
             return 0.0, "none"
-    fast_window = int(params.get("ema_fast", 2))
-    slow_window = int(params.get("ema_slow", 5))
-    vol_window = int(params.get("volume_window", 20))
-    min_vol_z = float(params.get("min_vol_z", -0.5))
-    atr_period = int(params.get("atr_period", 14))
-    min_atr_pct = float(params.get("min_atr_pct", 0.001))
-    min_momentum_pct = float(params.get("min_momentum_pct", 0))
-    wick_pct = float(params.get("wick_pct", 0))
-    lower_wick_pct = float(params.get("lower_wick_pct", wick_pct))
-    upper_wick_pct = float(params.get("upper_wick_pct", wick_pct))
-    confirm_bars = int(params.get("confirm_bars", 0))
-    fresh_cross_only = bool(params.get("fresh_cross_only", False))
-    imbalance_ratio = float(params.get("imbalance_ratio", 0))
-    imbalance_penalty = float(params.get("imbalance_penalty", 0.2))
-    imbalance_filter = bool(params.get("imbalance_filter", True))
-    trend_fast = int(params.get("trend_fast", 0))
-    trend_slow = int(params.get("trend_slow", 0))
-    _ = params.get("trend_timeframe")
-    trend_filter = bool(params.get("trend_filter", True))
+    fast_window = int(scalp_cfg.ema_fast)
+    slow_window = int(scalp_cfg.ema_slow)
+    vol_window = int(scalp_cfg.volume_window)
+    min_vol_z = float(scalp_cfg.min_vol_z)
+    atr_period = int(scalp_cfg.atr_period)
+    min_atr_pct = float(scalp_cfg.min_atr_pct)
+    min_momentum_pct = float(scalp_cfg.min_momentum_pct)
+    lower_wick_pct = float(scalp_cfg.lower_wick_pct)
+    upper_wick_pct = float(scalp_cfg.upper_wick_pct)
+    confirm_bars = int(scalp_cfg.confirm_bars)
+    fresh_cross_only = bool(scalp_cfg.fresh_cross_only)
+    imbalance_ratio = float(scalp_cfg.imbalance_ratio)
+    imbalance_penalty = float(scalp_cfg.imbalance_penalty)
+    imbalance_filter = bool(scalp_cfg.imbalance_filter)
+    trend_fast = int(scalp_cfg.trend_fast)
+    trend_slow = int(scalp_cfg.trend_slow)
+    trend_filter = bool(scalp_cfg.trend_filter)
 
     if len(df) < slow_window:
         return 0.0, "none"
@@ -205,7 +267,7 @@ def generate_signal(
             return 0.0, "none"
 
     score = min(abs(momentum) / latest["close"], 1.0)
-    if config is None or config.get("atr_normalization", True):
+    if scalp_cfg.atr_normalization:
         score = normalize_score_by_volatility(df, score)
 
     direction = "long" if momentum > 0 else "short"
@@ -215,7 +277,7 @@ def generate_signal(
     if direction == "short" and upper_wick_ratio < upper_wick_pct:
         return 0.0, "none"
 
-    book_data = book or params.get("order_book")
+    book_data = book or scalp_cfg.order_book
     if isinstance(book_data, dict):
         bids_list = book_data.get("bids")
         asks_list = book_data.get("asks")

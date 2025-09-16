@@ -1,4 +1,7 @@
-from typing import Optional, Tuple
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Mapping, Optional, Tuple
 
 import pandas as pd
 import numpy as np
@@ -21,12 +24,83 @@ from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils import stats
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 
+from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 
 logger = setup_logger(__name__, LOG_DIR / "trend_bot.log")
 
 
-def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
+@dataclass
+class TorchSignalModelConfig:
+    """Configuration for optional Torch based ensemble weighting."""
+
+    enabled: bool = False
+    weight: float = 0.7
+
+    @classmethod
+    def from_dict(cls, data: object) -> "TorchSignalModelConfig":
+        params = extract_params(
+            data,
+            {"enabled", "weight"},
+            (),
+        )
+        return apply_defaults(cls, params)
+
+
+@dataclass
+class TrendBotConfig:
+    """Structured configuration for :func:`generate_signal`."""
+
+    indicator_lookback: int = 250
+    rsi_overbought_pct: Optional[float] = None
+    rsi_oversold_pct: Optional[float] = None
+    trend_ema_fast: int = 3
+    trend_ema_slow: int = 10
+    atr_period: int = 14
+    k: float = 1.0
+    volume_window: int = 20
+    volume_mult: float = 1.0
+    adx_threshold: float = 25.0
+    donchian_confirmation: bool = False
+    donchian_window: int = 20
+    atr_normalization: bool = True
+    torch_signal_model: TorchSignalModelConfig = field(
+        default_factory=TorchSignalModelConfig
+    )
+
+    @classmethod
+    def from_dict(cls, data: object) -> "TrendBotConfig":
+        params = extract_params(
+            data,
+            {
+                "indicator_lookback",
+                "rsi_overbought_pct",
+                "rsi_oversold_pct",
+                "trend_ema_fast",
+                "trend_ema_slow",
+                "atr_period",
+                "k",
+                "volume_window",
+                "volume_mult",
+                "adx_threshold",
+                "donchian_confirmation",
+                "donchian_window",
+                "atr_normalization",
+                "torch_signal_model",
+            },
+            ("trend_bot", "trend"),
+        )
+        cfg = apply_defaults(cls, params)
+        cfg.torch_signal_model = TorchSignalModelConfig.from_dict(
+            params.get("torch_signal_model", cfg.torch_signal_model)
+        )
+        return cfg
+
+
+def generate_signal(
+    df,
+    config: Optional[TrendBotConfig | Mapping[str, Any]] = None,
+) -> Tuple[float, str]:
     """Trend following signal with ADX, volume and optional Donchian filters."""
     # Handle type conversion from dict to DataFrame
     if isinstance(df, dict):
@@ -42,17 +116,17 @@ def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
         return 0.0, "none"
 
     df = df.copy()
-    params = config or {}
-    lookback_cfg = int(params.get("indicator_lookback", 250))
-    rsi_overbought_pct = params.get("rsi_overbought_pct")
-    rsi_oversold_pct = params.get("rsi_oversold_pct")
-    fast_window = int(params.get("trend_ema_fast", 3))
-    slow_window = int(params.get("trend_ema_slow", 10))
-    atr_period = int(params.get("atr_period", 14))
-    k = float(params.get("k", 1.0))
-    volume_window = int(params.get("volume_window", 20))
-    volume_mult = float(params.get("volume_mult", 1.0))
-    adx_threshold = float(params.get("adx_threshold", 25))
+    cfg = TrendBotConfig.from_dict(config)
+    lookback_cfg = int(cfg.indicator_lookback)
+    rsi_overbought_pct = cfg.rsi_overbought_pct
+    rsi_oversold_pct = cfg.rsi_oversold_pct
+    fast_window = int(cfg.trend_ema_fast)
+    slow_window = int(cfg.trend_ema_slow)
+    atr_period = int(cfg.atr_period)
+    k = float(cfg.k)
+    volume_window = int(cfg.volume_window)
+    volume_mult = float(cfg.volume_mult)
+    adx_threshold = float(cfg.adx_threshold)
 
     # Calculate indicators manually
     df["ema_fast"] = df["close"].ewm(span=fast_window, adjust=False).mean()
@@ -193,8 +267,8 @@ def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
         and volume_ok
     )
 
-    if params.get("donchian_confirmation", False):
-        window = params.get("donchian_window", 20)
+    if cfg.donchian_confirmation:
+        window = int(cfg.donchian_window)
         upper = df["high"].rolling(window=window).max().iloc[-1]
         lower = df["low"].rolling(window=window).min().iloc[-1]
         long_cond = long_cond and latest["close"] >= upper
@@ -227,21 +301,21 @@ def generate_signal(df, config: Optional[dict] = None) -> Tuple[float, str]:
         # No signal conditions met
         pass
 
-    if score > 0 and (config is None or config.get("atr_normalization", True)):
+    if score > 0 and cfg.atr_normalization:
         score = normalize_score_by_volatility(df, score)
 
-    if config:
-        torch_cfg = config.get("torch_signal_model", {})
-        if torch_cfg.get("enabled"):
-            weight = float(torch_cfg.get("weight", 0.7))
-            try:  # pragma: no cover - best effort
-                from crypto_bot.torch_signal_model import predict_signal as _pred
-                ml_score = _pred(df)
-                base = score if score > 0 else 0.0
-                score = base * (1 - weight) + ml_score * weight
-                score = max(0.0, min(score, 1.0))
-            except Exception:
-                pass
+    torch_cfg = cfg.torch_signal_model
+    if torch_cfg.enabled:
+        weight = float(torch_cfg.weight)
+        try:  # pragma: no cover - best effort
+            from crypto_bot.torch_signal_model import predict_signal as _pred
+
+            ml_score = _pred(df)
+            base = score if score > 0 else 0.0
+            score = base * (1 - weight) + ml_score * weight
+            score = max(0.0, min(score, 1.0))
+        except Exception:
+            pass
 
     return score, direction
 

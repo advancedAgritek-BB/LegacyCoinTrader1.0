@@ -1,4 +1,7 @@
-from typing import Dict, Optional, Tuple, Union
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Mapping, Optional, Tuple
 
 import pandas as pd
 
@@ -17,12 +20,65 @@ except Exception:  # pragma: no cover - fallback
 
     scipy_stats = _FakeStats()
 
+from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils import stats
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 
 logger = setup_logger(__name__, LOG_DIR / "breakout_bot.log")
+
+
+@dataclass
+class BreakoutBotConfig:
+    """Configuration options for the breakout strategy."""
+
+    bb_length: int = 12
+    bb_std: float = 2.0
+    kc_length: int = 12
+    kc_mult: float = 1.5
+    donchian_window: int = 30
+    atr_buffer_mult: float = 0.05
+    volume_window: int = 20
+    vol_confirmation: bool = True
+    vol_multiplier: float = 1.2
+    squeeze_threshold: float = 0.03
+    momentum_filter: bool = False
+    adx_threshold: float = 20.0
+    indicator_lookback: int = 250
+    bb_squeeze_pct: float = 20.0
+    atr_normalization: bool = True
+
+    @classmethod
+    def from_dict(cls, data: object) -> "BreakoutBotConfig":
+        params = extract_params(
+            data,
+            {
+                "bb_length",
+                "bb_std",
+                "kc_length",
+                "kc_mult",
+                "donchian_window",
+                "dc_length",
+                "atr_buffer_mult",
+                "volume_window",
+                "vol_confirmation",
+                "vol_multiplier",
+                "volume_mult",
+                "squeeze_threshold",
+                "momentum_filter",
+                "adx_threshold",
+                "indicator_lookback",
+                "bb_squeeze_pct",
+                "atr_normalization",
+            },
+            ("breakout_bot", "breakout"),
+        )
+        if "donchian_window" not in params and "dc_length" in params:
+            params["donchian_window"] = params["dc_length"]
+        if "vol_multiplier" not in params and "volume_mult" in params:
+            params["vol_multiplier"] = params["volume_mult"]
+        return apply_defaults(cls, params)
 
 
 def _squeeze(
@@ -77,7 +133,7 @@ def _squeeze(
 
 def generate_signal(
     df: pd.DataFrame,
-    config: Optional[dict] = None,
+    config: Optional[BreakoutBotConfig | Mapping[str, Any]] = None,
     higher_df: Optional[pd.DataFrame] = None,
 ) -> Tuple[float, str]:
     """Breakout strategy using Bollinger/Keltner squeeze confirmation.
@@ -91,22 +147,21 @@ def generate_signal(
     if df is None or df.empty:
         return 0.0, "none"
 
-    cfg_all = config or {}
-    cfg = cfg_all.get("breakout", {})
-    bb_len = int(cfg.get("bb_length", 12))
-    bb_std = float(cfg.get("bb_std", 2))
-    kc_len = int(cfg.get("kc_length", 12))
-    kc_mult = float(cfg.get("kc_mult", 1.5))
-    donchian_window = int(cfg.get("donchian_window", cfg.get("dc_length", 30)))
-    atr_buffer_mult = float(cfg.get("atr_buffer_mult", 0.05))
-    vol_window = int(cfg.get("volume_window", 20))
-    vol_confirmation = bool(cfg.get("vol_confirmation", True))
-    vol_multiplier = float(cfg.get("vol_multiplier", cfg.get("volume_mult", 1.2)))
-    threshold = float(cfg.get("squeeze_threshold", 0.03))
-    momentum_filter = bool(cfg.get("momentum_filter", False))
-    _ = float(cfg.get("adx_threshold", 20))  # placeholder for future use
-    lookback_cfg = int(cfg_all.get("indicator_lookback", 250))
-    squeeze_pct = float(cfg_all.get("bb_squeeze_pct", 20))
+    cfg = BreakoutBotConfig.from_dict(config)
+    bb_len = int(cfg.bb_length)
+    bb_std = float(cfg.bb_std)
+    kc_len = int(cfg.kc_length)
+    kc_mult = float(cfg.kc_mult)
+    donchian_window = int(cfg.donchian_window)
+    atr_buffer_mult = float(cfg.atr_buffer_mult)
+    vol_window = int(cfg.volume_window)
+    vol_confirmation = bool(cfg.vol_confirmation)
+    vol_multiplier = float(cfg.vol_multiplier)
+    threshold = float(cfg.squeeze_threshold)
+    momentum_filter = bool(cfg.momentum_filter)
+    _ = float(cfg.adx_threshold)  # placeholder for future use
+    lookback_cfg = int(cfg.indicator_lookback)
+    squeeze_pct = float(cfg.bb_squeeze_pct)
 
     lookback = max(bb_len, kc_len, donchian_window, vol_window, 14)
     if len(df) < lookback:
@@ -202,7 +257,7 @@ def generate_signal(
         direction = "short"
         score = 1.0
 
-    if score > 0 and (config is None or config.get("atr_normalization", True)):
+    if score > 0 and cfg.atr_normalization:
         score = normalize_score_by_volatility(recent, score)
 
     return score, direction
