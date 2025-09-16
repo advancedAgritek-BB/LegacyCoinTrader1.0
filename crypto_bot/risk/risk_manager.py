@@ -284,7 +284,9 @@ class RiskManager:
         )
 
         vol_mean = df["volume"].rolling(20).mean().iloc[-1]
-        current_volume = df["volume"].iloc[-1]
+        # Use most recent complete candle for volume (not incomplete current candle)
+        current_volume_idx = -2 if len(df) >= 2 else -1
+        current_volume = df["volume"].iloc[current_volume_idx]
         vol_threshold = vol_mean * self.config.volume_threshold_ratio
         logger.info(
             (

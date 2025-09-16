@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional, Iterable, Any, Union
+from typing import Optional, Iterable, Any, Union, Dict
 import asyncio
 import inspect
 import threading
@@ -22,10 +21,9 @@ except ImportError:
     Request = None
 
 from .logger import LOG_DIR, setup_logger
-from pathlib import Path
 
 
-logger = setup_logger(__name__, LOG_DIR / "bot.log")
+logger = setup_logger(__name__, str(LOG_DIR / "bot.log"))
 
 # Store allowed Telegram admin IDs parsed from the environment or configuration
 _admin_ids: set[str] = set()
@@ -44,7 +42,7 @@ class MessageRateLimiter:
         """
         self.max_messages = max_messages
         self.time_window = time_window
-        self.messages = deque()
+        self.messages: deque[float] = deque()
         self._lock = threading.Lock()
 
     def can_send(self) -> bool:
@@ -106,17 +104,25 @@ def send_message(token: str, chat_id: str, text: str) -> Optional[str]:
     """
     if Bot is None:
         return "Telegram library not available"
-    
+
+    # Validate inputs first
+    if not token or not chat_id or not text.strip():
+        return "Invalid token, chat_id, or empty message"
+
+    # Check if token looks valid (should start with a number followed by colon)
+    if not token.count(':') == 1 or not token.split(':')[0].isdigit():
+        return "Invalid Telegram bot token format"
+
     try:
         if Request is not None:
             bot = Bot(token, request=Request(
-                connection_pool_size=20,  # Increased from 8
-                connect_timeout=30.0,
-                read_timeout=30.0,
-                write_timeout=30.0,
-                pool_connections=20,  # Total connections
-                pool_maxsize=20,      # Max connections per pool
-                max_retries=3,        # HTTP retries
+                connection_pool_size=8,   # Reduced to prevent exhaustion
+                connect_timeout=10.0,     # Reduced from 30s
+                read_timeout=15.0,        # Reduced from 30s
+                write_timeout=10.0,       # Reduced from 30s
+                pool_connections=8,       # Match pool size
+                pool_maxsize=8,           # Match pool size
+                max_retries=2,            # Reduced from 3
             ))
         else:
             # Fallback for older versions
@@ -127,17 +133,17 @@ def send_message(token: str, chat_id: str, text: str) -> Optional[str]:
 
         async def _send() -> None:
             try:
-                if not hasattr(bot, 'send_message') or bot.send_message is None:
+                if not hasattr(bot, 'send_message'):
                     logger.error("Bot object has no send_message method")
                     return
-                
-                # Try with exponential backoff
-                max_retries = 3
-                base_timeout = 15.0
-                
+
+                # Try with shorter timeouts and fewer retries to fail fast
+                max_retries = 2
+                base_timeout = 5.0  # Much shorter base timeout
+
                 for attempt in range(max_retries):
                     try:
-                        timeout = base_timeout * (2 ** attempt)  # Exponential backoff: 15s, 30s, 60s
+                        timeout = min(base_timeout + (attempt * 2), 10.0)
                         await asyncio.wait_for(
                             bot.send_message(chat_id=chat_id, text=text),
                             timeout=timeout
@@ -145,30 +151,30 @@ def send_message(token: str, chat_id: str, text: str) -> Optional[str]:
                         break  # Success, exit retry loop
                     except asyncio.TimeoutError:
                         if attempt < max_retries - 1:
-                            logger.warning(
-                                "Telegram message timeout (attempt %d/%d) for chat %s. Retrying with longer timeout...",
+                            logger.debug(
+                                "Telegram timeout (attempt %d/%d) for %s",
                                 attempt + 1, max_retries, chat_id
                             )
-                            await asyncio.sleep(1)  # Brief delay before retry
+                            await asyncio.sleep(0.5)  # Shorter delay
                         else:
-                            logger.error(
-                                "Telegram message timeout after %d attempts for chat %s. Message may be too long or network is slow.",
+                            logger.warning(
+                                "Telegram timeout after %d attempts for %s",
                                 max_retries, chat_id
                             )
+                            raise  # Re-raise to be caught by outer exception handler
                     except Exception as exc:
                         if attempt < max_retries - 1:
-                            logger.warning(
-                                "Telegram send error (attempt %d/%d): %s. Retrying...",
+                            logger.debug(
+                                "Telegram error (attempt %d/%d): %s",
                                 attempt + 1, max_retries, exc
                             )
-                            await asyncio.sleep(1)
+                            await asyncio.sleep(0.5)
                         else:
-                            logger.error(
-                                "Failed to send message after %d attempts: %s. Verify your Telegram token "
-                                "and chat ID and ensure the bot has started a chat.",
+                            logger.warning(
+                                "Failed to send message after %d attempts: %s",
                                 max_retries, exc
                             )
-                        break
+                            raise  # Re-raise to be caught by outer exception handler
             except Exception as e:
                 logger.error("Unexpected error in _send: %s", e)
 
@@ -183,7 +189,12 @@ def send_message(token: str, chat_id: str, text: str) -> Optional[str]:
             else:
                 asyncio.run(_send())
         else:
-            bot.send_message(chat_id=chat_id, text=text)
+            # Synchronous send_message (older versions)
+            try:
+                bot.send_message(chat_id=chat_id, text=text)
+            except Exception as e:
+                logger.error("Sync send failed: %s", e)
+                return str(e)
         return None
     except Exception as e:  # pragma: no cover - network
         logger.error("Failed to send message: %s", e)
@@ -210,7 +221,8 @@ class TelegramNotifier:
         # lock to serialize send attempts
         self._lock = threading.Lock()
         # rate limiter to prevent message flooding (10 messages per minute)
-        self._rate_limiter = MessageRateLimiter(max_messages=10, time_window=60)
+        self._rate_limiter = MessageRateLimiter(
+            max_messages=10, time_window=60)
 
     def notify(self, text: str) -> Optional[str]:
         """Send ``text`` if notifications are enabled and credentials exist."""
@@ -243,19 +255,28 @@ class TelegramNotifier:
                     self._failure_count = 0
                 self._failure_count += 1
 
-                if self._failure_count >= 5:  # Allow 5 failures before disabling
+                # More aggressive disabling for timeout errors
+                if ("timeout" in str(err).lower() or
+                        "timed out" in str(err).lower()):
+                    failure_threshold = 3  # Disable faster for timeouts
+                else:
+                    failure_threshold = 5  # Normal threshold for other errors
+
+                if self._failure_count >= failure_threshold:
                     self._disabled = True
-                    logger.error(
-                        "Disabling Telegram notifications after %d consecutive failures. Last error: %s",
+                    logger.warning(
+                        "Disabling Telegram notifications after %d failures. "
+                        "Last error: %s",
                         self._failure_count, err,
                     )
-                    logger.error(
-                        "To re-enable, restart the bot or call reset_telegram_notifications()"
+                    logger.info(
+                        "Telegram notifications disabled. To re-enable, "
+                        "restart bot or call reset_notifications()"
                     )
                 else:
-                    logger.warning(
+                    logger.debug(
                         "Telegram send error (%d/%d): %s",
-                        self._failure_count, 5, err,
+                        self._failure_count, failure_threshold, err,
                     )
             else:
                 # Reset failure count on success and record the message
@@ -277,10 +298,28 @@ class TelegramNotifier:
     def from_config(cls, config: dict) -> "TelegramNotifier":
         """Create a notifier from a configuration dictionary."""
         admins = config.get("chat_admins") or config.get("admins")
+
+        # Check if enabled and has valid credentials
+        enabled = config.get("enabled", True)
+        token = config.get("token", "")
+        chat_id = config.get("chat_id", "")
+
+        # Auto-disable if no credentials provided
+        if not token or not chat_id:
+            enabled = False
+            logger.info(
+                "Telegram notifications disabled: missing token or chat_id")
+
+        # Check for fail_silently option
+        fail_silently = config.get("fail_silently", False)
+        if fail_silently and not enabled:
+            logger.debug(
+                "Telegram notifications disabled silently via configuration")
+
         notifier = cls(
-            token=config.get("token", ""),
-            chat_id=config.get("chat_id", ""),
-            enabled=config.get("enabled", True),
+            token=token,
+            chat_id=chat_id,
+            enabled=enabled,
             admins=admins,
         )
         return notifier
@@ -296,7 +335,7 @@ def send_test_message(token: str, chat_id: str, text: str = "Test message") -> b
 
 def check_telegram_health(token: str, chat_id: str) -> Dict[str, Any]:
     """Check Telegram bot health and connectivity."""
-    health_info = {
+    health_info: Dict[str, Any] = {
         "status": "unknown",
         "response_time": None,
         "error": None,
@@ -306,7 +345,8 @@ def check_telegram_health(token: str, chat_id: str) -> Dict[str, Any]:
     if not token or not chat_id:
         health_info["status"] = "invalid_config"
         health_info["error"] = "Missing token or chat_id"
-        health_info["recommendations"].append("Check TELEGRAM_TOKEN and TELEGRAM_CHAT_ID environment variables")
+        health_info["recommendations"].append(
+            "Check TELEGRAM_TOKEN and TELEGRAM_CHAT_ID environment variables")
         return health_info
     
     try:
@@ -319,23 +359,28 @@ def check_telegram_health(token: str, chat_id: str) -> Dict[str, Any]:
             health_info["status"] = "healthy"
             health_info["response_time"] = response_time
             if response_time > 10:
-                health_info["recommendations"].append("Response time is slow, consider increasing timeout")
+                health_info["recommendations"].append(
+                    "Response time is slow, consider increasing timeout")
         else:
             health_info["status"] = "error"
             health_info["error"] = str(err)
-            health_info["recommendations"].append("Check bot token and chat ID")
-            health_info["recommendations"].append("Ensure bot has permission to send messages")
+            health_info["recommendations"].append(
+                "Check bot token and chat ID")
+            health_info["recommendations"].append(
+                "Ensure bot has permission to send messages")
             
     except Exception as e:
         health_info["status"] = "exception"
         health_info["error"] = str(e)
-        health_info["recommendations"].append("Check network connectivity")
-        health_info["recommendations"].append("Verify Telegram API is accessible")
+        health_info["recommendations"].append(
+            "Check network connectivity")
+        health_info["recommendations"].append(
+            "Verify Telegram API is accessible")
     
     return health_info
 
 
-def clear_paper_trading_cache(paper_wallet=None, context=None):
+def clear_paper_trading_cache(paper_wallet: Any = None, context: Any = None) -> str:
     """
     Clear the trade cache in paper trading mode to start fresh.
     

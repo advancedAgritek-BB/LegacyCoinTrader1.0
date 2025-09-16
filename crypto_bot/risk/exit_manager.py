@@ -390,6 +390,8 @@ def should_exit(
     risk_manager=None,
     position_side: str = "buy",  # Add position side parameter
     entry_price: float = None,  # Add entry price for take profit calculations
+    highest_price_since_entry: float = None,  # Add highest price since entry
+    lowest_price_since_entry: float = None,   # Add lowest price since entry
 ) -> Tuple[bool, float]:
     """Determine whether to exit a position and update trailing stop.
 
@@ -409,6 +411,10 @@ def should_exit(
         Position side: "buy" for long, "sell" for short.
     entry_price : float, optional
         Entry price for take profit calculations.
+    highest_price_since_entry : float, optional
+        Highest price since position entry for trailing stop calculation.
+    lowest_price_since_entry : float, optional
+        Lowest price since position entry for trailing stop calculation.
 
     Returns
     -------
@@ -552,47 +558,51 @@ def should_exit(
                     MomentumExitConfig(**exit_cfg.get('momentum_continuation', {}))
                 )
                 
-                # Update trailing stop based on position side
+                # Update trailing stop based on position side using TRADE PERFORMANCE
                 if position_side == "buy":  # Long position
-                    if exit_cfg.get('trailing_stop_factor', 0) > 0:
-                        new_stop = calculate_atr_trailing_stop(df, exit_cfg['trailing_stop_factor'])
+                    if highest_price_since_entry is not None:
+                        new_stop = highest_price_since_entry * (1 - adjusted_trail_pct)
                     else:
-                        new_stop = calculate_trailing_stop(
-                            df['close'],
-                            adjusted_trail_pct,
-                        )
+                        # Fallback to ATR if trade highs not available
+                        if exit_cfg.get('trailing_stop_factor', 0) > 0:
+                            new_stop = calculate_atr_trailing_stop(df, exit_cfg['trailing_stop_factor'])
+                        else:
+                            new_stop = calculate_trailing_stop(df['close'], adjusted_trail_pct)
                 else:  # Short position
-                    if exit_cfg.get('trailing_stop_factor', 0) > 0:
-                        new_stop = calculate_atr_trailing_stop_short(df, exit_cfg['trailing_stop_factor'])
+                    if lowest_price_since_entry is not None:
+                        new_stop = lowest_price_since_entry * (1 + adjusted_trail_pct)
                     else:
-                        new_stop = calculate_trailing_stop_short(
-                            df['close'],
-                            adjusted_trail_pct,
-                        )
+                        # Fallback to ATR if trade lows not available
+                        if exit_cfg.get('trailing_stop_factor', 0) > 0:
+                            new_stop = calculate_atr_trailing_stop_short(df, exit_cfg['trailing_stop_factor'])
+                        else:
+                            new_stop = calculate_trailing_stop_short(df['close'], adjusted_trail_pct)
             else:
-                # Legacy trailing stop logic
+                # Legacy trailing stop logic using TRADE PERFORMANCE
                 if 'trailing_stop_factor' in exit_cfg:
                     if position_side == "buy":
-                        new_stop = calculate_atr_trailing_stop(
-                            df,
-                            exit_cfg['trailing_stop_factor'],
-                        )
+                        if highest_price_since_entry is not None:
+                            # Calculate ATR-based stop from trade high instead of historical data
+                            new_stop = highest_price_since_entry * (1 - exit_cfg['trailing_stop_factor'] * 0.01)  # Convert factor to percentage
+                        else:
+                            new_stop = calculate_atr_trailing_stop(df, exit_cfg['trailing_stop_factor'])
                     else:  # Short position
-                        new_stop = calculate_atr_trailing_stop_short(
-                            df,
-                            exit_cfg['trailing_stop_factor'],
-                        )
+                        if lowest_price_since_entry is not None:
+                            # Calculate ATR-based stop from trade low instead of historical data
+                            new_stop = lowest_price_since_entry * (1 + exit_cfg['trailing_stop_factor'] * 0.01)  # Convert factor to percentage
+                        else:
+                            new_stop = calculate_atr_trailing_stop_short(df, exit_cfg['trailing_stop_factor'])
                 else:
                     if position_side == "buy":
-                        new_stop = calculate_trailing_stop(
-                            df['close'],
-                            exit_cfg['trailing_stop_pct'],
-                        )
+                        if highest_price_since_entry is not None:
+                            new_stop = highest_price_since_entry * (1 - exit_cfg['trailing_stop_pct'])
+                        else:
+                            new_stop = calculate_trailing_stop(df['close'], exit_cfg['trailing_stop_pct'])
                     else:  # Short position
-                        new_stop = calculate_trailing_stop_short(
-                            df['close'],
-                            exit_cfg['trailing_stop_pct'],
-                        )
+                        if lowest_price_since_entry is not None:
+                            new_stop = lowest_price_since_entry * (1 + exit_cfg['trailing_stop_pct'])
+                        else:
+                            new_stop = calculate_trailing_stop_short(df['close'], exit_cfg['trailing_stop_pct'])
             
             # Update stop only if it's better (higher for long, lower for short)
             if position_side == "buy" and new_stop > trailing_stop:

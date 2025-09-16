@@ -4,19 +4,24 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Optional, Any, Union
-
-from crypto_bot.utils.logger import LOG_DIR
+from typing import Optional, Any, Union, List, Dict
 import sys
-
-TRADE_FILE = LOG_DIR / "trades.csv"
+import os
 
 from rich.console import Console
 from rich.table import Table
 
+from crypto_bot.utils.logger import LOG_DIR
+from crypto_bot.utils.logger import setup_logger
+
 from .utils.open_trades import get_open_trades
 from . import log_reader
 
+# Constants
+TRADE_FILE = LOG_DIR / "trades.csv"
+
+# Local logger for this module
+logger = setup_logger(__name__, str(LOG_DIR / "bot.log"))
 
 
 async def monitor_loop(
@@ -30,8 +35,8 @@ async def monitor_loop(
     This coroutine runs until cancelled and is intentionally lightweight so
     tests can easily patch it. The monitor fetches the current balance from
     ``exchange`` or ``paper_wallet`` and prints the last line of ``log_file``.
-    Open trade PnL lines are generated from ``trade_file`` and printed below the
-    status line when positions exist.
+    Open trade PnL lines are generated from ``trade_file`` and printed below
+    the status line when positions exist.
     """
     log_path = Path(log_file)
     last_line = ""
@@ -48,13 +53,18 @@ async def monitor_loop(
                     if paper_wallet is not None:
                         balance = getattr(paper_wallet, "balance", None)
                     elif hasattr(exchange, "fetch_balance"):
-                        # Try calling fetch_balance and check if it returns a coroutine
+                        # Try calling fetch_balance and check if it returns a
+                        # coroutine
                         bal_result = exchange.fetch_balance()
                         if asyncio.iscoroutine(bal_result):
                             bal = await bal_result
                         else:
                             bal = bal_result
-                        balance = bal.get("USDT", {}).get("free", 0) if isinstance(bal.get("USDT"), dict) else bal.get("USDT", 0)
+                        balance = (
+                            bal.get("USDT", {}).get("free", 0)
+                            if isinstance(bal.get("USDT"), dict)
+                            else bal.get("USDT", 0)
+                        )
                 except Exception:
                     pass
 
@@ -71,7 +81,8 @@ async def monitor_loop(
                 if lines:
                     output += "\n" + "\n".join(lines)
 
-                if sys.stdout.isatty():
+                simple_console = bool(os.environ.get("FORCE_SIMPLE_CONSOLE"))
+                if sys.stdout.isatty() and not simple_console:
                     # Clear previously printed lines
                     if prev_lines:
                         print("\033[2K", end="")
@@ -99,11 +110,11 @@ def display_trades(
     """
     console = Console(record=True)
     table = Table(show_header=True, header_style="bold")
-    table.add_column("symbol")
-    table.add_column("side")
-    table.add_column("amount")
-    table.add_column("price")
-    table.add_column("status")
+    table.add_column("Symbol", style="bold cyan")
+    table.add_column("Side", justify="center")
+    table.add_column("Amount", justify="right")
+    table.add_column("Entry Price", justify="right")
+    table.add_column("Unrealized P&L", justify="right")
 
     # Try to get trades from TradeManager first
     try:
@@ -112,19 +123,49 @@ def display_trades(
 
         # Get all positions from TradeManager
         positions = trade_manager.get_all_positions()
-
-        if positions:
-            for pos in positions:
-                status = "open" if pos.is_open else "closed"
+        
+        # Filter to only show open positions with non-zero amounts
+        open_positions = [
+            pos for pos in positions 
+            if pos.is_open and pos.total_amount > 0
+        ]
+        
+        if open_positions:
+            print(f"\n📊 Open Positions ({len(open_positions)} active):")
+            for pos in open_positions:
+                # Get current price for P&L calculation
+                current_price = trade_manager.price_cache.get(
+                    pos.symbol, pos.average_price
+                )
+                
+                # Calculate unrealized P&L
+                unrealized_pnl, unrealized_pct = (
+                    pos.calculate_unrealized_pnl(current_price)
+                )
+                
+                # Format P&L with color
+                pnl_color = "green" if unrealized_pnl >= 0 else "red"
+                pnl_sign = "+" if unrealized_pnl >= 0 else ""
+                
+                pnl_display = (
+                    f"[{pnl_color}]{pnl_sign}${unrealized_pnl:.2f} "
+                    f"({pnl_sign}{unrealized_pct:.2f}%)[/{pnl_color}]"
+                )
+                
                 table.add_row(
                     pos.symbol,
-                    pos.side,
+                    pos.side.upper(),
                     f"{pos.total_amount:.6f}",
-                    f"{pos.average_price:.2f}",
-                    status
+                    f"${pos.average_price:.4f}",
+                    pnl_display
                 )
+            
+            
             console.print(table)
             return console.export_text()
+        else:
+            print("\n📊 No open positions found.")
+            return "No open positions found."
 
     except Exception as e:
         logger.warning(f"Failed to get trades from TradeManager: {e}, falling back to CSV")
@@ -206,7 +247,14 @@ async def trade_stats_lines(exchange: Any, trade_file: Path = TRADE_FILE) -> Lis
         return lines
 
     except Exception as e:
-        logger.warning(f"Failed to get trade stats from TradeManager: {e}, falling back to CSV")
+        logger.warning(f"Failed to get trade stats from TradeManager: {e}")
+        # If TradeManager state exists, do not use CSV fallback to avoid stale/phantom trades
+        try:
+            state_file = LOG_DIR / "trade_manager_state.json"
+            if state_file.exists():
+                return []
+        except Exception:
+            pass
 
     # Fallback to CSV-based calculation (deprecated)
     try:

@@ -19,9 +19,9 @@ sys.path.insert(0, str(Path(__file__).parent / "crypto_bot"))
 
 try:
     from crypto_bot.pipeline_monitor import PipelineMonitor
-    from crypto_bot.utils.logger import setup_logger
+    from crypto_bot.utils.logger import setup_logger, LOG_DIR
     from crypto_bot.config import load_config
-    logger = setup_logger(__name__)
+    logger = setup_logger(__name__, LOG_DIR / "enhanced_monitoring.log")
 except ImportError as e:
     print(f"Import error: {e}")
     sys.exit(1)

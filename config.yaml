@@ -1,6 +1,6 @@
 bounce_scalper:
   enabled: true
-  max_concurrent_signals: 5
+  max_concurrent_signals: 15
   min_score: 0.01
 breakout:
   enabled: true
@@ -15,8 +15,10 @@ data_validation:
   allow_empty_volume: true
   max_data_age_minutes: 60
   min_data_points: 50
+  min_data_percentage: 0.6  # Require at least 60% of requested data points
   require_volume: false
   validate_ohlcv: true
+  filter_incomplete_symbols: true  # Enable filtering of symbols with insufficient historical data
 enhanced_backtesting:
   enabled: false
 enhanced_scanning:
@@ -41,7 +43,7 @@ enhanced_scanning:
   min_score_threshold: 0.4
   min_strategy_fit: 0.6
   min_volume_usd: 5000
-  scan_interval: 30
+  scan_interval: 15
 error_handling:
   continue_on_error: true
   exponential_backoff: true
@@ -56,12 +58,12 @@ error_handling:
 exchange: kraken
 execution_mode: dry_run
 exit_strategy:
-  min_gain_to_trail: 0.005
+  min_gain_to_trail: 0.01
   momentum_aware_exits: true
   momentum_tp_scaling: true
   momentum_trail_adjustment: true
-  take_profit_pct: 0.04
-  trailing_stop_pct: 0.01
+  take_profit_pct: 0.06
+  trailing_stop_pct: 0.008
   real_time_monitoring:
     enabled: true
     check_interval_seconds: 5
@@ -77,7 +79,7 @@ kraken:
   sandbox: false
   timeout: 30
 max_concurrent_ohlcv: 10  # Increased for comprehensive symbol processing
-min_confidence_score: 0.001  # Lowered further to catch ETH/USD pump signals
+min_confidence_score: 0.3  # Increased to 0.3 for better signal quality
 allow_short: true  # Enable short selling to catch ETH/USD pump
 mode: auto
 pipeline_stability:
@@ -107,12 +109,12 @@ risk:
   enable_partial_exits: true
   enable_trailing_stop: true
   max_drawdown: 0.25
-  max_positions: 10
-  max_risk_per_trade: 0.05  # Increased from 0.02
-  max_total_risk: 0.2       # Increased from 0.1
-  partial_exit_pct: 0.5
-  position_size_pct: 0.2     # Increased from 0.1 to 20%
-  stop_loss_pct: 0.02
+  max_positions: 20
+  max_risk_per_trade: 0.08  # Increased to 0.08 for more aggressive trading
+  max_total_risk: 0.3       # Increased to 0.3 for higher exposure
+  partial_exit_pct: 0.3     # Reduced to 30% for faster profit taking
+  position_size_pct: 0.15   # Optimized to 15% per position
+  stop_loss_pct: 0.015      # Tightened to 1.5% for better risk control
   take_profit_pct: 0.04
   trailing_stop_pct: 0.01
   min_position_size_usd: 50  # Increased minimum to allow for better position sizing
@@ -182,6 +184,9 @@ telegram:
   enabled: false
   status_updates: false
   trade_updates: false
+  token: ""  # Leave empty to disable
+  chat_id: ""  # Leave empty to disable
+  fail_silently: true  # Don't log errors when disabled
 # Symbol Processing Mode
 # Set to true (default) to process ALL available symbols on the exchange
 # Set to false to use filtered evaluation pipeline
@@ -196,8 +201,8 @@ comprehensive_mode_optimization:
   memory_cleanup_interval: 50  # Clean memory every 50 symbols processed
 
 testing_mode: true
-timeframe: 1h
-cycle_delay_seconds: 120  # 120 seconds between trading cycles for comprehensive processing
+timeframe: 15m
+cycle_delay_seconds: 30  # Reduced to 30 seconds for faster trading frequency
 use_enhanced_ohlcv_fetcher: true
 use_websocket: true
 websocket:

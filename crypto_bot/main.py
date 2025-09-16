@@ -1358,7 +1358,7 @@ async def fetch_candidates(ctx: BotContext) -> None:
         logger.info(f"🎯 Requesting {batch_size} tokens from evaluation pipeline")
         try:
             # Get tokens from the robust evaluation pipeline
-            tokens = await get_tokens_for_evaluation(ctx.config, batch_size)
+            tokens = await get_tokens_for_evaluation(ctx.config, batch_size, ctx.exchange)
             logger.info(f"✅ Evaluation pipeline returned {len(tokens)} tokens")
             if not tokens:
                 logger.warning("⚠️ Evaluation pipeline returned no tokens, using fallback")
@@ -1408,14 +1408,18 @@ async def fetch_candidates(ctx: BotContext) -> None:
             # Convert tokens to (symbol, score) format for priority queue
             symbols_with_scores = [(token, 1.0) for token in tokens]
             symbol_priority_queue = build_priority_queue(symbols_with_scores)
-        # Add Solana tokens to priority queue if they should be processed by CEX
-        # Only add to CEX queue if they weren't set aside for separate processing
+        # NEVER add Solana tokens to CEX priority queue
+        # Solana tokens must be processed through their own pipeline (scanning → evaluation → execution)
+        # They should never mix with CEX processing
         if solana_tokens and not hasattr(ctx, 'solana_candidates'):
-            for sym in reversed(solana_tokens):
-                symbol_priority_queue.appendleft(sym)
-            logger.info(
-                f"Added {len(solana_tokens)} Solana tokens to CEX priority queue"
+            logger.warning(
+                f"Found {len(solana_tokens)} Solana tokens that were not set aside for separate processing. "
+                f"This indicates a configuration issue - Solana tokens should never be processed through CEX pipeline."
             )
+            # Set them aside to ensure they don't get processed through CEX
+            if not hasattr(ctx, 'solana_candidates'):
+                setattr(ctx, "solana_candidates", list(solana_tokens))
+                logger.info(f"Corrected: Set {len(solana_tokens)} Solana tokens aside for separate processing")
         # Ensure we have enough tokens in queue
         if len(symbol_priority_queue) < batch_size:
             # Add more from pipeline if needed
@@ -1753,7 +1757,7 @@ async def execute_solana_trade(
             # Validate Solana token exists before trading
             try:
                 from crypto_bot.solana import sniper_solana
-                test_score = sniper_solana.generate_signal({"df": None})  # Basic validation
+                test_score = sniper_solana.generate_signal(None)  # Basic validation
                 if test_score == 0.0:  # Token not found or invalid
                     logger.error(f"Solana token validation failed for {base} - aborting trade")
                     return False
@@ -3033,7 +3037,38 @@ async def _main_impl() -> TelegramNotifier:
                         ctx.notifier.notify(paper_exit_msg)
                 except Exception as e:
                     logger.error(f"Failed to close paper trade: {e}")
-            # Update position tracking
+            # Handle TradeManager position closure first (for dashboard sync)
+            if hasattr(ctx, 'trade_manager') and ctx.trade_manager:
+                try:
+                    # Check if TradeManager has this position
+                    tm_position = ctx.trade_manager.get_position(symbol)
+                    if tm_position and tm_position.is_open:
+                        logger.info(f"Closing TradeManager position for {symbol} via {exit_reason}")
+                        # Import create_trade function
+                        from crypto_bot.utils.trade_manager import create_trade
+                        # Determine closing side
+                        closing_side = 'sell' if tm_position.side == 'long' else 'buy'
+                        # Create closing trade
+                        closing_trade = create_trade(
+                            symbol=symbol,
+                            side=closing_side,
+                            amount=Decimal(str(position["size"])),
+                            price=Decimal(str(current_price)),
+                            strategy=exit_reason,  # Use exit_reason as strategy
+                            exchange='kraken'
+                        )
+                        # Record the closing trade
+                        trade_id = ctx.trade_manager.record_trade(closing_trade)
+                        logger.info(f"TradeManager position closed for {symbol} with trade ID: {trade_id}")
+                        # Save TradeManager state
+                        ctx.trade_manager.save_state()
+                        # Sync positions if needed
+                        if hasattr(ctx, 'sync_positions_from_trade_manager') and ctx.use_trade_manager_as_source:
+                            ctx.sync_positions_from_trade_manager()
+                except Exception as e:
+                    logger.error(f"Failed to close TradeManager position for {symbol}: {e}")
+
+            # Update legacy position tracking
             if symbol in ctx.positions:
                 pos = ctx.positions[symbol]
                 if ctx.paper_wallet and symbol in ctx.paper_wallet.positions:
@@ -3074,6 +3109,35 @@ async def _main_impl() -> TelegramNotifier:
             logger.error(f"Error handling position monitor exit for {symbol}: {e}")
     # Set the exit callback
     ctx.position_monitor.on_exit_triggered = handle_position_exit
+
+    # Early position monitoring startup - ensure monitoring starts before main loop
+    logger.info("🚨 Performing early position monitoring startup...")
+    try:
+        # Get all positions from TradeManager for early monitoring
+        tm_positions = []
+        if hasattr(ctx, 'trade_manager') and ctx.trade_manager:
+            tm_positions = ctx.trade_manager.get_all_positions()
+
+        if tm_positions:
+            logger.info(f"Starting early monitoring for {len(tm_positions)} TradeManager positions")
+            for tm_pos in tm_positions:
+                position_dict = {
+                    'entry_price': float(tm_pos.average_price),
+                    'size': float(tm_pos.total_amount),
+                    'side': tm_pos.side,
+                    'symbol': tm_pos.symbol,
+                    'highest_price': float(tm_pos.highest_price) if tm_pos.highest_price else float(tm_pos.average_price),
+                    'lowest_price': float(tm_pos.lowest_price) if tm_pos.lowest_price else float(tm_pos.average_price),
+                    'trailing_stop': float(tm_pos.stop_loss_price) if tm_pos.stop_loss_price else 0.0,
+                    'timestamp': tm_pos.entry_time.isoformat(),
+                }
+                await ctx.position_monitor.start_monitoring(tm_pos.symbol, position_dict)
+            logger.info("✅ Early position monitoring startup completed")
+        else:
+            logger.info("ℹ️ No positions found for early monitoring startup")
+    except Exception as e:
+        logger.warning(f"⚠️ Early position monitoring startup failed: {e}")
+
     # Initialize evaluation pipeline integration
     logger.info("🔗 Initializing evaluation pipeline integration...")
     try:
@@ -3101,13 +3165,70 @@ async def _main_impl() -> TelegramNotifier:
         logger.error(f"❌ Failed to start enhanced scanning integration: {e}")
     async def monitor_positions_phase(ctx: BotContext) -> None:
         """Monitor positions for stop loss triggers."""
-        if hasattr(ctx, 'position_monitor') and ctx.position_monitor.active_monitors:
-            # PositionMonitor runs in background, just log status
-            active_count = len(ctx.position_monitor.active_monitors)
+        if hasattr(ctx, 'position_monitor'):
+            active_count = len(ctx.position_monitor.active_monitors) if hasattr(ctx.position_monitor, 'active_monitors') else 0
+
             if active_count > 0:
-                logger.debug(
-                f"PositionMonitor actively monitoring {active_count} positions"
-            )
+                logger.debug(f"PositionMonitor actively monitoring {active_count} positions")
+
+                # Get monitoring stats if available
+                try:
+                    if hasattr(ctx.position_monitor, 'get_monitoring_stats'):
+                        stats = await ctx.position_monitor.get_monitoring_stats()
+                        if stats and stats.get('price_updates', 0) > 0:
+                            logger.debug(f"Position monitoring stats: {stats.get('price_updates', 0)} price updates, {stats.get('trailing_stop_triggers', 0)} triggers")
+                except Exception as e:
+                    logger.debug(f"Could not get monitoring stats: {e}")
+
+                # Check if we need to restart monitoring for any positions that might be missing
+                if hasattr(ctx, 'trade_manager') and ctx.trade_manager:
+                    tm_positions = ctx.trade_manager.get_all_positions()
+                    tm_symbols = {pos.symbol for pos in tm_positions}
+
+                    # Check for TradeManager positions not being monitored
+                    for tm_pos in tm_positions:
+                        if hasattr(ctx.position_monitor, 'active_monitors') and tm_pos.symbol not in ctx.position_monitor.active_monitors:
+                            logger.warning(f"Position {tm_pos.symbol} not being monitored - restarting monitoring")
+                            try:
+                                position_dict = {
+                                    'entry_price': float(tm_pos.average_price),
+                                    'size': float(tm_pos.total_amount),
+                                    'side': tm_pos.side,
+                                    'symbol': tm_pos.symbol,
+                                    'highest_price': float(tm_pos.highest_price) if tm_pos.highest_price else float(tm_pos.average_price),
+                                    'lowest_price': float(tm_pos.lowest_price) if tm_pos.lowest_price else float(tm_pos.average_price),
+                                    'trailing_stop': float(tm_pos.stop_loss_price) if tm_pos.stop_loss_price else 0.0,
+                                    'timestamp': tm_pos.entry_time.isoformat(),
+                                }
+                                await ctx.position_monitor.start_monitoring(tm_pos.symbol, position_dict)
+                                logger.info(f"Restarted monitoring for {tm_pos.symbol}")
+                            except Exception as e:
+                                logger.error(f"Failed to restart monitoring for {tm_pos.symbol}: {e}")
+            else:
+                logger.warning("PositionMonitor has no active monitors - attempting to restart")
+                # Try to restart monitoring for all positions
+                try:
+                    tm_positions = []
+                    if hasattr(ctx, 'trade_manager') and ctx.trade_manager:
+                        tm_positions = ctx.trade_manager.get_all_positions()
+
+                    if tm_positions:
+                        logger.info(f"Restarting position monitoring for {len(tm_positions)} positions")
+                        for tm_pos in tm_positions:
+                            position_dict = {
+                                'entry_price': float(tm_pos.average_price),
+                                'size': float(tm_pos.total_amount),
+                                'side': tm_pos.side,
+                                'symbol': tm_pos.symbol,
+                                'highest_price': float(tm_pos.highest_price) if tm_pos.highest_price else float(tm_pos.average_price),
+                                'lowest_price': float(tm_pos.lowest_price) if tm_pos.lowest_price else float(tm_pos.average_price),
+                                'trailing_stop': float(tm_pos.stop_loss_price) if tm_pos.stop_loss_price else 0.0,
+                                'timestamp': tm_pos.entry_time.isoformat(),
+                            }
+                            await ctx.position_monitor.start_monitoring(tm_pos.symbol, position_dict)
+                        logger.info("Position monitoring restarted successfully")
+                except Exception as e:
+                    logger.error(f"Failed to restart position monitoring: {e}")
     runner = PhaseRunner(
         [
             fetch_candidates,
@@ -3124,13 +3245,40 @@ async def _main_impl() -> TelegramNotifier:
     if hasattr(ctx, 'position_monitor'):
         logger.info("🚨 Starting PositionMonitor for real-time stop loss monitoring...")
         try:
-            # Start monitoring all existing positions
+            # Get all positions from TradeManager (single source of truth)
+            tm_positions = []
+            if hasattr(ctx, 'trade_manager') and ctx.trade_manager:
+                tm_positions = ctx.trade_manager.get_all_positions()
+
+            # Start monitoring TradeManager positions
+            monitored_count = 0
+            for tm_pos in tm_positions:
+                # Convert TradeManager position to dict format for PositionMonitor
+                position_dict = {
+                    'entry_price': float(tm_pos.average_price),
+                    'size': float(tm_pos.total_amount),
+                    'side': tm_pos.side,
+                    'symbol': tm_pos.symbol,
+                    'highest_price': float(tm_pos.highest_price) if tm_pos.highest_price else float(tm_pos.average_price),
+                    'lowest_price': float(tm_pos.lowest_price) if tm_pos.lowest_price else float(tm_pos.average_price),
+                    'trailing_stop': float(tm_pos.stop_loss_price) if tm_pos.stop_loss_price else 0.0,
+                    'timestamp': tm_pos.entry_time.isoformat(),
+                }
+
+                await ctx.position_monitor.start_monitoring(tm_pos.symbol, position_dict)
+                logger.info(f"Started monitoring {tm_pos.symbol} ({tm_pos.side} {tm_pos.total_amount})")
+                monitored_count += 1
+
+            # Also start monitoring any positions in ctx.positions that aren't already monitored
             for symbol, position in ctx.positions.items():
-                await ctx.position_monitor.start_monitoring(symbol, position)
-                logger.info(f"Started monitoring {symbol}")
-            logger.info("✅ PositionMonitor started successfully")
+                if not hasattr(ctx.position_monitor, 'active_monitors') or symbol not in ctx.position_monitor.active_monitors:
+                    await ctx.position_monitor.start_monitoring(symbol, position)
+                    logger.info(f"Started monitoring legacy position {symbol}")
+                    monitored_count += 1
+
+            logger.info(f"✅ PositionMonitor started successfully - monitoring {monitored_count} positions")
             if status_updates and notifier.enabled:
-                notifier.notify("🚨 Real-time stop loss monitoring activated")
+                notifier.notify(f"🚨 Real-time stop loss monitoring activated for {monitored_count} positions")
         except Exception as e:
             logger.error(f"❌ Failed to start PositionMonitor: {e}")
             if status_updates and notifier.enabled:

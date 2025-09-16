@@ -27,6 +27,11 @@ class EnhancedOHLCVFetcher:
         self.max_concurrent_dex = config.get("max_concurrent_dex_ohlcv", 10)
         self.min_volume_usd = float(config.get("min_volume_usd", 0) or 0)
 
+        # Data validation settings
+        self.filter_incomplete_symbols = config.get("data_validation", {}).get("filter_incomplete_symbols", True)
+        self.min_data_percentage = config.get("data_validation", {}).get("min_data_percentage", 0.6)
+        self.min_data_points = config.get("data_validation", {}).get("min_data_points", 50)
+
         # Circuit breakers for different APIs
         try:
             self.cex_semaphore = asyncio.Semaphore(self.max_concurrent_cex)
@@ -490,14 +495,20 @@ class EnhancedOHLCVFetcher:
                         logger.warning(f"Enhanced OHLCV Fetcher: Empty DataFrame for {symbol}")
                         continue
 
-                    # Check for minimum required candles
-                    min_candles_required = int(limit * 0.5)
-                    if len(df_new) < min_candles_required:
-                        logger.info(
-                            f"Enhanced OHLCV Fetcher: Incomplete data for {symbol}: "
-                            f"{len(df_new)}/{limit} candles"
-                        )
-                        # Still cache partial data
+                    # Check for minimum required candles - filter out incomplete data if enabled
+                    if self.filter_incomplete_symbols:
+                        min_candles_from_percentage = int(limit * self.min_data_percentage)
+                        min_candles_from_points = self.min_data_points
+                        min_candles_required = max(min_candles_from_percentage, min_candles_from_points)
+
+                        if len(df_new) < min_candles_required:
+                            logger.warning(
+                                f"Enhanced OHLCV Fetcher: Filtering out symbol {symbol} due to insufficient data: "
+                                f"{len(df_new)}/{limit} candles ({int((len(df_new)/limit)*100)}% complete, "
+                                f"required: {int(self.min_data_percentage*100)}% or {self.min_data_points} points)"
+                            )
+                            # Skip caching and processing this symbol entirely
+                            continue
 
                     # Update cache
                     if symbol in cache and not cache[symbol].empty:
@@ -581,14 +592,20 @@ class EnhancedOHLCVFetcher:
                         logger.warning(f"Enhanced OHLCV Fetcher: Empty DEX DataFrame for {symbol}")
                         continue
 
-                    # Check for minimum required candles
-                    min_candles_required = int(limit * 0.5)
-                    if len(df_new) < min_candles_required:
-                        logger.info(
-                            f"Enhanced OHLCV Fetcher: Incomplete DEX data for {symbol}: "
-                            f"{len(df_new)}/{limit} candles"
-                        )
-                        # Still cache partial data
+                    # Check for minimum required candles - filter out incomplete data if enabled
+                    if self.filter_incomplete_symbols:
+                        min_candles_from_percentage = int(limit * self.min_data_percentage)
+                        min_candles_from_points = self.min_data_points
+                        min_candles_required = max(min_candles_from_percentage, min_candles_from_points)
+
+                        if len(df_new) < min_candles_required:
+                            logger.warning(
+                                f"Enhanced OHLCV Fetcher: Filtering out DEX symbol {symbol} due to insufficient data: "
+                                f"{len(df_new)}/{limit} candles ({int((len(df_new)/limit)*100)}% complete, "
+                                f"required: {int(self.min_data_percentage*100)}% or {self.min_data_points} points)"
+                            )
+                            # Skip caching and processing this symbol entirely
+                            continue
 
                     # Update cache
                     if symbol in cache and not cache[symbol].empty:

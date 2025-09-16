@@ -172,23 +172,38 @@ class PipelineMonitor:
                 self._is_process_running("start_bot") or
                 self._is_process_running("start_bot_final") or
                 self._is_process_running("start_bot_auto") or
-                self._is_process_running("start_bot_clean")
+                self._is_process_running("start_bot_clean") or
+                self._is_process_running("start_bot_auto.py") or
+                self._is_process_running("Python start_bot_auto.py") or
+                self._is_process_running("python start_bot_auto.py") or
+                self._is_process_running("python3 start_bot_auto.py")
             )
 
-            # Check recent strategy evaluations
+            # Check recent strategy evaluations - updated to match current log patterns
             strategy_log = LOG_DIR / "bot.log"
             recent_evaluations = 0
+            recent_analysis_chunks = 0
 
             if strategy_log.exists():
                 with open(strategy_log, 'r') as f:
-                    lines = f.readlines()[-100:]  # Last 100 lines
+                    lines = f.readlines()[-200:]  # Last 200 lines for better detection
                     for line in lines:
-                        if any(keyword in line.lower() for keyword in [
+                        line_lower = line.lower()
+                        # Look for analysis and processing activity
+                        if any(keyword in line_lower for keyword in [
                             'strategy evaluation', 'evaluating strategy', 'signal generated',
                             'analysis result', 'actionable signals', 'execute_signals',
-                            'queueing cex trade', 'queueing solana trade'
+                            'queueing cex trade', 'queueing solana trade',
+                            'processing chunk', 'analyse_batch', 'phase: analyse_batch',
+                            'progress:', '📊 progress:', '📦 processing', '🔄 processing chunk',
+                            'enhanced ohlcv fetcher', 'successfully updated cache', 'starting update for timeframe',
+                            'calling update_cache', 'finished update for timeframe', 'loading markets from exchange',
+                            'enhanced scanner', 'scan cycle completed', 'discovered', 'analyzed', 'scored'
                         ]):
                             recent_evaluations += 1
+                        # Count analysis chunks specifically
+                        if 'processing chunk' in line_lower or 'analyse_batch' in line_lower:
+                            recent_analysis_chunks += 1
 
             # Determine status
             if not process_running:
@@ -197,24 +212,24 @@ class PipelineMonitor:
                     status='critical',
                     message='Trading bot process not running',
                     last_check=datetime.now(),
-                    metrics={'process_running': False, 'recent_evaluations': recent_evaluations}
+                    metrics={'process_running': False, 'recent_evaluations': recent_evaluations, 'analysis_chunks': recent_analysis_chunks}
                 )
 
-            if recent_evaluations == 0:
+            if recent_evaluations == 0 and recent_analysis_chunks == 0:
                 return HealthStatus(
                     component='evaluation_pipeline',
                     status='warning',
-                    message='No recent strategy evaluations detected',
+                    message='No recent strategy evaluations or analysis activity detected',
                     last_check=datetime.now(),
-                    metrics={'process_running': True, 'recent_evaluations': recent_evaluations}
+                    metrics={'process_running': True, 'recent_evaluations': recent_evaluations, 'analysis_chunks': recent_analysis_chunks}
                 )
 
             return HealthStatus(
                 component='evaluation_pipeline',
                 status='healthy',
-                message=f'Evaluation pipeline healthy ({recent_evaluations} recent evaluations)',
+                message=f'Evaluation pipeline healthy ({recent_evaluations} evaluations, {recent_analysis_chunks} analysis chunks)',
                 last_check=datetime.now(),
-                metrics={'process_running': True, 'recent_evaluations': recent_evaluations}
+                metrics={'process_running': True, 'recent_evaluations': recent_evaluations, 'analysis_chunks': recent_analysis_chunks}
             )
 
         except Exception as e:
@@ -450,12 +465,15 @@ class PipelineMonitor:
 
             if bot_log.exists():
                 with open(bot_log, 'r') as f:
-                    lines = f.readlines()[-50:]
+                    lines = f.readlines()[-100:]  # Increased to catch more activity
                     for line in lines:
-                        if any(keyword in line.lower() for keyword in [
+                        line_lower = line.lower()
+                        if any(keyword in line_lower for keyword in [
                             'routing to strategy', 'strategy selected', 'evaluating',
                             'analysis result', 'actionable signals', 'execute_signals',
-                            'queueing cex trade', 'queueing solana trade'
+                            'queueing cex trade', 'queueing solana trade',
+                            'processing chunk', 'analyse_batch', 'phase: analyse_batch',
+                            'progress:', '📊 progress:', '📦 processing', '🔄 processing chunk'
                         ]):
                             recent_routing += 1
 

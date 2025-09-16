@@ -3,11 +3,10 @@ from typing import Optional
 
 """Log active trade position and wallet balance."""
 
-from pathlib import Path
 
 from .logger import LOG_DIR, setup_logger
 
-LOG_FILE = LOG_DIR / "positions.log"
+LOG_FILE = str(LOG_DIR / "positions.log")
 logger = setup_logger(__name__, LOG_FILE)
 
 
@@ -26,6 +25,7 @@ def log_position(
     current_price: float,
     balance: float,
     pnl: Optional[float] = None,
+    exit_reason: Optional[str] = None,
 ) -> None:
     """Write a log entry describing the active position.
 
@@ -45,6 +45,8 @@ def log_position(
         Current wallet balance including unrealized PnL.
     pnl : float, optional
         Realized profit or loss to log instead of computing from prices.
+    exit_reason : str, optional
+        Reason for position exit (e.g., "stop_loss", "take_profit", "manual").
     """
     if pnl is None:
         if side == "buy":
@@ -54,14 +56,32 @@ def log_position(
     status = "positive" if pnl >= 0 else "negative"
     # Ensure we never log negative balances - use 0.0 as minimum
     safe_balance = max(0.0, balance)
-    logger.info(
-        "Active %s %s %.4f entry %.6f current %.6f pnl $%.2f (%s) balance $%.2f",
-        symbol,
-        side,
-        amount,
-        entry_price,
-        current_price,
-        pnl,
-        status,
-        safe_balance,
-    )
+
+    # Build log message based on whether this is an exit or active position
+    if exit_reason:
+        logger.info(
+            "Position exit %s %s %.4f entry %.6f exit %.6f "
+            "pnl $%.2f (%s) balance $%.2f reason: %s",
+            symbol,
+            side,
+            amount,
+            entry_price,
+            current_price,
+            pnl,
+            status,
+            safe_balance,
+            exit_reason,
+        )
+    else:
+        logger.info(
+            "Active %s %s %.4f entry %.6f current %.6f "
+            "pnl $%.2f (%s) balance $%.2f",
+            symbol,
+            side,
+            amount,
+            entry_price,
+            current_price,
+            pnl,
+            status,
+            safe_balance,
+        )

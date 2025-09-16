@@ -1128,9 +1128,10 @@ body.dark-theme {
 
 .positions-grid {
   display: grid !important;
-  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)) !important;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 350px)) !important;
   gap: var(--space-lg) !important;
   margin-top: var(--space-lg) !important;
+  justify-content: start !important;
 }
 
 /* Position Card Base Styles */
@@ -1229,13 +1230,15 @@ body.dark-theme {
 /* Responsive adjustments for position cards */
 @media (max-width: 1200px) {
   .positions-grid {
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)) !important;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 300px)) !important;
+    justify-content: start !important;
   }
 }
 
 @media (max-width: 768px) {
   .positions-grid {
     grid-template-columns: 1fr !important;
+    justify-content: center !important;
   }
   
   .position-card {

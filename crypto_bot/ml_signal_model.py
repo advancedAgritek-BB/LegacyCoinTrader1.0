@@ -104,7 +104,8 @@ def extract_features(
     except Exception:
         features["ema20_4h"] = pd.Series(dtype=float)
     try:
-        bb_4h = ta.volatility.BollingerBands(df["close"], window=ema_win)
+        from ta.volatility import BollingerBands
+        bb_4h = BollingerBands(df["close"], window=ema_win)
         features["bb_width_4h"] = bb_4h.bollinger_wband()
     except Exception:
         features["bb_width_4h"] = pd.Series(dtype=float)

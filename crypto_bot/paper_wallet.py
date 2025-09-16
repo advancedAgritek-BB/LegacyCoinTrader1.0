@@ -1,13 +1,36 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from uuid import uuid4
 import logging
 import yaml
 from pathlib import Path
 from datetime import datetime
+from decimal import Decimal
+import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+def safe_yaml_representer(dumper, data):
+    """Custom YAML representer for safe serialization."""
+    if isinstance(data, Decimal):
+        return dumper.represent_scalar('tag:yaml.org,2002:str', str(data))
+    elif isinstance(data, np.ndarray):
+        return dumper.represent_list(data.tolist())
+    elif hasattr(data, 'item') and callable(getattr(data, 'item', None)):  # numpy scalar
+        return dumper.represent_scalar('tag:yaml.org,2002:str', str(data.item()))
+    elif isinstance(data, (np.integer, np.floating)):
+        return dumper.represent_scalar('tag:yaml.org,2002:str', str(data))
+    else:
+        return dumper.represent_data(data)
+
+
+# Register custom representers
+yaml.add_representer(Decimal, safe_yaml_representer)
+yaml.add_representer(np.ndarray, safe_yaml_representer)
+yaml.add_representer(np.integer, safe_yaml_representer)
+yaml.add_representer(np.floating, safe_yaml_representer)
 
 
 class PaperWallet:
@@ -40,7 +63,7 @@ class PaperWallet:
     # TradeManager Synchronization
     # ------------------------------------------------------------------
 
-    def sync_from_trade_manager(self, trade_manager_positions: List[dict], current_prices: Dict[str, float] = None) -> None:
+    def sync_from_trade_manager(self, trade_manager_positions: List[dict], current_prices: Optional[Dict[str, float]] = None) -> None:
         """
         Synchronize paper wallet positions with TradeManager positions.
 
@@ -133,14 +156,18 @@ class PaperWallet:
 
     def buy(self, symbol: str, amount: float, price: float) -> bool:
         """Simulate a buy order (paper trading only - no real trades)."""
+        # Convert Decimal to float if needed
+        amount = float(amount) if hasattr(amount, '__float__') else float(amount)
+        price = float(price) if hasattr(price, '__float__') else float(price)
+
         cost = amount * price
         if cost > self._balance:
             logger.warning(f"Insufficient balance for buy: ${cost:.2f} > ${self._balance:.2f}")
             return False
-        
+
         # Deduct cost from balance
         self._balance -= cost
-        
+
         # Create or update position
         if symbol in self.positions:
             # Add to existing position
@@ -160,29 +187,33 @@ class PaperWallet:
                 'reserved': 0.0,
                 'timestamp': datetime.now().isoformat()
             }
-        
+
         self.total_trades += 1
         logger.info(f"Paper buy order executed: {amount} {symbol} at ${price:.2f}")
         return True
 
     def sell(self, symbol: str, amount: float, price: float) -> bool:
         """Simulate a sell order (paper trading only - no real trades)."""
+        # Convert Decimal to float if needed
+        amount = float(amount) if hasattr(amount, '__float__') else float(amount)
+        price = float(price) if hasattr(price, '__float__') else float(price)
+
         if symbol not in self.positions:
             logger.warning(f"No position found for {symbol}")
             return False
-        
+
         position = self.positions[symbol]
         if position['amount'] < amount:
             logger.warning(f"Insufficient amount to sell: {amount} > {position['amount']}")
             return False
-        
+
         # Calculate PnL
         pnl = (price - position['entry_price']) * amount
         self.realized_pnl += pnl
-        
+
         # Add proceeds to balance
         self._balance += amount * price
-        
+
         # Update position
         if position['amount'] == amount:
             # Full position closed
@@ -190,11 +221,11 @@ class PaperWallet:
         else:
             # Partial position closed
             position['amount'] -= amount
-        
+
         self.total_trades += 1
         if pnl > 0:
             self.winning_trades += 1
-        
+
         logger.info(f"Paper sell order executed: {amount} {symbol} at ${price:.2f}, PnL: ${pnl:.2f}")
         return True
 
@@ -409,13 +440,19 @@ class PaperWallet:
         amount: float
         price: float
 
-        if len(args) == 3 and isinstance(args[0], str) and isinstance(args[1], (int, float)) and isinstance(args[2], (int, float)):
+        # Helper function to convert Decimal/int/float to float
+        def to_float(value):
+            if hasattr(value, '__float__'):  # Handles Decimal, int, float
+                return float(value)
+            return float(value)
+
+        if len(args) == 3 and isinstance(args[0], str) and isinstance(args[1], (int, float, Decimal)) and isinstance(args[2], (int, float, Decimal)):
             identifier = args[0]
-            amount = float(args[1])
-            price = float(args[2])
-        elif len(args) >= 2 and all(isinstance(a, (int, float)) for a in args[:2]):
-            amount = float(args[0])
-            price = float(args[1])
+            amount = to_float(args[1])
+            price = to_float(args[2])
+        elif len(args) >= 2 and all(isinstance(a, (int, float, Decimal)) for a in args[:2]):
+            amount = to_float(args[0])
+            price = to_float(args[1])
             identifier = args[2] if len(args) > 2 else None
             if identifier is None and len(self.positions) == 1:
                 identifier = next(iter(self.positions))
@@ -502,7 +539,8 @@ class PaperWallet:
 
         if len(args) == 2 and isinstance(args[0], str):
             identifier = args[0]
-            price = float(args[1])
+            # Convert Decimal to float if needed
+            price = float(args[1]) if hasattr(args[1], '__float__') else float(args[1])
             pos = self.positions.get(identifier)
             if not pos:
                 return 0.0
@@ -519,14 +557,17 @@ class PaperWallet:
                     pos = self.positions.get(pid)
                     if not pos:
                         continue
+                    # Convert Decimal to float if needed
+                    p_float = float(p) if hasattr(p, '__float__') else float(p)
                     key = "size" if "size" in pos else "amount"
                     if pos["side"] == "buy":
-                        total += (p - pos["entry_price"]) * pos[key]
+                        total += (p_float - pos["entry_price"]) * pos[key]
                     else:
-                        total += (pos["entry_price"] - p) * pos[key]
+                        total += (pos["entry_price"] - p_float) * pos[key]
                 return total
 
-            price_val = float(price)
+            # Convert Decimal to float if needed
+            price_val = float(price) if hasattr(price, '__float__') else float(price)
             total = 0.0
             for pos in self.positions.values():
                 key = "size" if "size" in pos else "amount"
@@ -589,13 +630,13 @@ class PaperWallet:
                 'winning_trades': self.winning_trades,
                 'positions': self.positions
             }
-            
+
             # Ensure the directory exists
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
-            
+
             with open(self.state_file, 'w') as f:
-                yaml.dump(state, f, default_flow_style=False)
-            
+                yaml.dump(state, f, default_flow_style=False, allow_unicode=True)
+
             logger.info(f"Saved paper wallet state: balance=${self.balance:.2f}, realized_pnl=${self.realized_pnl:.2f}")
 
             # Ensure single source of truth is synchronized
@@ -604,9 +645,27 @@ class PaperWallet:
                 set_single_balance(self.balance)
             except Exception as e:
                 logger.warning(f"Failed to sync single balance source: {e}")
-            
+
         except Exception as e:
             logger.error(f"Failed to save paper wallet state: {e}")
+
+    def _convert_to_decimal(self, value):
+        """Convert string representations back to Decimal objects where appropriate."""
+        if isinstance(value, str):
+            try:
+                # Try to convert to Decimal if it looks like a decimal number
+                if '.' in value or 'e' in value.lower():
+                    return Decimal(value)
+                return value
+            except:
+                return value
+        elif isinstance(value, dict):
+            # Recursively convert nested dictionaries
+            return {k: self._convert_to_decimal(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            # Recursively convert nested lists
+            return [self._convert_to_decimal(item) for item in value]
+        return value
 
     def load_state(self) -> bool:
         """Load wallet state from file. Returns True if successful."""
@@ -614,12 +673,21 @@ class PaperWallet:
             if not self.state_file.exists():
                 logger.info("No saved paper wallet state found, using initial values")
                 return False
-            
+
             with open(self.state_file, 'r') as f:
                 state = yaml.safe_load(f) or {}
-            
+
+            # Convert string representations back to appropriate types
+            state = self._convert_to_decimal(state)
+
             # Sanitize balance to prevent negative values
             loaded_balance = state.get('balance', self._balance)
+            if isinstance(loaded_balance, str):
+                try:
+                    loaded_balance = float(loaded_balance)
+                except ValueError:
+                    loaded_balance = self._balance
+
             self._balance = max(0.0, loaded_balance)
             self.initial_balance = state.get('initial_balance', self.initial_balance)
 
@@ -627,14 +695,15 @@ class PaperWallet:
             if loaded_balance < 0 and self._balance != loaded_balance:
                 logger.warning(f"Corrected negative balance from ${loaded_balance:.2f} to ${self._balance:.2f} in loaded state")
                 self.save_state()  # Save the corrected state immediately
+
             self.realized_pnl = state.get('realized_pnl', 0.0)
             self.total_trades = state.get('total_trades', 0)
             self.winning_trades = state.get('winning_trades', 0)
             self.positions = state.get('positions', {})
-            
+
             logger.info(f"Loaded paper wallet state: balance=${self.balance:.2f}, realized_pnl=${self.realized_pnl:.2f}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to load paper wallet state: {e}")
             return False

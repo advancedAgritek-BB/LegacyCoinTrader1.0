@@ -6,17 +6,17 @@ ensuring consistent calculations and state management across the entire applicat
 """
 
 from __future__ import annotations
-import asyncio
 import logging
-from typing import Dict, List, Optional, Any, Tuple, Set
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from decimal import Decimal, ROUND_DOWN, InvalidOperation
+from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 import threading
 from pathlib import Path
 import json
 import uuid
 import time
+from crypto_bot.utils.logger import LOG_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -382,15 +382,15 @@ class Position:
         ]
 
         # Handle optional decimal fields
-        for field in [
+        for fld in [
             "highest_price",
             "lowest_price",
             "stop_loss_price",
             "take_profit_price",
             "trailing_stop_pct",
         ]:
-            if data_copy.get(field) is not None:
-                data_copy[field] = Decimal(str(data_copy[field]))
+            if data_copy.get(fld) is not None:
+                data_copy[fld] = Decimal(str(data_copy[fld]))
 
         return cls(**data_copy)
 
@@ -413,6 +413,7 @@ class TradeManager:
         self.trades: List[Trade] = []
         self.positions: Dict[str, Position] = {}
         self.price_cache: Dict[str, Decimal] = {}
+        self.closed_positions: List[Position] = []
 
         # Statistics
         self.total_trades = 0
@@ -424,6 +425,10 @@ class TradeManager:
         self.price_update_callbacks: List[callable] = []
         self.position_update_callbacks: List[callable] = []
         self.trade_callbacks: List[callable] = []
+
+        # Sell operation locks to prevent duplicate concurrent operations
+        self._sell_locks: set = set()
+        self._lock_timeout = 300  # 5 minutes timeout for sell locks
 
         # Auto-save settings
         self.auto_save_enabled = (
@@ -518,6 +523,10 @@ class TradeManager:
             logger.info(
                 f"Recorded trade: {trade.symbol} {trade.side} {trade.amount} @ {trade.price}"
             )
+            try:
+                self.save_state()
+            except Exception as e:
+                logger.error(f"Immediate save after record_trade failed: {e}")
             return trade.id
 
     def _update_position_from_trade(self, trade: Trade) -> None:
@@ -557,7 +566,9 @@ class TradeManager:
 
         else:
             # Update existing position
-            if position.side == ("long" if trade.side == "buy" else "short"):
+            # Determine trade direction: "buy" = long, "sell"/"short" = short
+            trade_direction = "long" if trade.side == "buy" else "short"
+            if position.side == trade_direction:
                 # Same direction - add to position
                 total_value = position.position_value + trade.total_value
                 total_amount = position.total_amount + trade.amount
@@ -566,7 +577,7 @@ class TradeManager:
                 position.fees_paid += trade.fees
             else:
                 # Opposite direction - reduce or reverse position
-                pnl, position_remaining = self._calculate_position_closure(
+                pnl, remaining_position_amount = self._calculate_position_closure(
                     position, trade
                 )
 
@@ -578,37 +589,61 @@ class TradeManager:
 
                 if trade_remaining > 0:
                     # Position reversal: close existing position and open new one in opposite direction
-                    # The excess trade amount becomes a new position at the closing trade price
+                    logger.info(f"Position reversal for {symbol}: closing {position.total_amount} and opening {trade_remaining} in opposite direction")
+
+                    # Move current position to closed positions (fully closed portion)
+                    closed_position = Position(
+                        symbol=symbol,
+                        side=position.side,
+                        total_amount=position.total_amount,  # The amount being closed
+                        average_price=position.average_price,
+                        realized_pnl=position.realized_pnl,
+                        fees_paid=position.fees_paid,
+                        entry_time=position.entry_time,
+                        last_update=trade.timestamp,
+                        trades=position.trades.copy()  # Include all trades up to this point
+                    )
+                    closed_position.trades.append(trade)  # Add the closing trade
+                    self.closed_positions.append(closed_position)
 
                     # Determine new position side
                     new_side = "short" if position.side == "long" else "long"
 
-                    # Create new position with excess trade amount at closing price
-                    # Transfer the realized PnL from the closed position
+                    # Create new position with excess trade amount at the closing trade price
                     new_position = Position(
                         symbol=symbol,
                         side=new_side,
                         total_amount=trade_remaining,
                         average_price=trade.price,  # New position at closing trade price
-                        realized_pnl=position.realized_pnl,  # Transfer realized PnL from closed position
                         entry_time=trade.timestamp,
                         fees_paid=trade.fees,
                     )
 
                     # Replace the old position with the new reversed position
                     self.positions[symbol] = new_position
-                    new_position.trades.append(trade)
+                    new_position.trades.append(trade)  # Only the opening trade for the new position
                     new_position.last_update = trade.timestamp
 
                     # Set up stop losses and take profits for new reversed position
                     self._setup_position_risk_management(new_position)
+
+                    logger.info(f"Position reversal complete: closed {position.side} position and opened {new_side} position for {symbol}")
+
                 else:
                     # Full or partial closure - position is reduced or eliminated
-                    position.total_amount = max(
-                        Decimal("0"), position_remaining
-                    )
+                    position.total_amount = remaining_position_amount
+                    position.fees_paid += trade.fees
                     position.trades.append(trade)
                     position.last_update = trade.timestamp
+
+                    # Check if position is fully closed
+                    if position.total_amount <= Decimal("0.00000001"):  # Use small epsilon for floating point comparison
+                        logger.info(f"Position fully closed for {symbol}: moving to closed positions")
+                        position.total_amount = Decimal("0")
+                        self.closed_positions.append(position)
+                        del self.positions[symbol]
+                    else:
+                        logger.debug(f"Partial position closure for {symbol}: remaining {position.total_amount}")
 
     def _calculate_position_closure(
         self, position: Position, closing_trade: Trade
@@ -766,7 +801,7 @@ class TradeManager:
 
     def get_closed_positions(self) -> List[Position]:
         """Get all closed positions."""
-        return [pos for pos in self.positions.values() if not pos.is_open]
+        return self.closed_positions
 
     def get_total_unrealized_pnl(self) -> Tuple[Decimal, Decimal]:
         """
@@ -813,6 +848,218 @@ class TradeManager:
             "last_update": datetime.utcnow().isoformat(),
         }
 
+    def validate_position_consistency(self) -> Dict[str, Any]:
+        """
+        Validate position consistency and detect issues.
+
+        Returns:
+            Dict with validation results and any issues found
+        """
+        issues = []
+        warnings = []
+
+        try:
+            # Check for positions with zero or negative amounts that are still open
+            for symbol, position in self.positions.items():
+                if position.total_amount <= 0:
+                    issues.append(f"Position {symbol} has non-positive amount {position.total_amount} but is still open")
+                    # Auto-fix: move to closed positions
+                    logger.warning(f"Auto-fixing zero position for {symbol}")
+                    position.total_amount = Decimal("0")
+                    self.closed_positions.append(position)
+                    del self.positions[symbol]
+
+            # Check for duplicate positions (same symbol)
+            symbol_counts = {}
+            for symbol in self.positions.keys():
+                symbol_counts[symbol] = symbol_counts.get(symbol, 0) + 1
+
+            for symbol, count in symbol_counts.items():
+                if count > 1:
+                    issues.append(f"Duplicate positions found for {symbol}: {count} instances")
+
+            # Check for trades with inconsistent sides for the same symbol
+            for symbol in self.positions.keys():
+                position = self.positions[symbol]
+                trades_for_symbol = [t for t in self.trades if t.symbol == symbol]
+
+                if not trades_for_symbol:
+                    warnings.append(f"No trades found for open position {symbol}")
+                    continue
+
+                # Check if position side matches the net effect of trades
+                net_amount = sum(
+                    (t.amount if t.side == "buy" else -t.amount)
+                    for t in trades_for_symbol
+                )
+
+                expected_side = "long" if net_amount > 0 else "short"
+                expected_amount = abs(net_amount)
+
+                if position.side != expected_side:
+                    issues.append(f"Position {symbol} side mismatch: position shows {position.side}, trades indicate {expected_side}")
+
+                if abs(position.total_amount - expected_amount) > Decimal("0.0001"):
+                    issues.append(f"Position {symbol} amount mismatch: position shows {position.total_amount}, trades indicate {expected_amount}")
+
+            # Check for closed positions that still have amounts
+            for position in self.closed_positions:
+                if position.total_amount > 0:
+                    warnings.append(f"Closed position {position.symbol} still has amount {position.total_amount}")
+
+            # Validate trade amounts are reasonable
+            for trade in self.trades:
+                if trade.amount <= 0:
+                    issues.append(f"Trade {trade.id} for {trade.symbol} has invalid amount {trade.amount}")
+
+            logger.info(f"Position validation complete: {len(issues)} issues, {len(warnings)} warnings found")
+
+            return {
+                "valid": len(issues) == 0,
+                "issues": issues,
+                "warnings": warnings,
+                "open_positions": len(self.positions),
+                "closed_positions": len(self.closed_positions),
+                "total_trades": len(self.trades)
+            }
+
+        except Exception as e:
+            logger.error(f"Error during position validation: {e}")
+            return {
+                "valid": False,
+                "issues": [f"Validation failed: {e}"],
+                "warnings": [],
+                "open_positions": len(self.positions),
+                "closed_positions": len(self.closed_positions),
+                "total_trades": len(self.trades)
+            }
+
+    def fix_data_inconsistencies(self) -> Dict[str, Any]:
+        """
+        Automatically fix common data inconsistencies.
+
+        Returns:
+            Dict with fixes applied and results
+        """
+        fixes_applied = []
+        errors = []
+
+        try:
+            # Fix 1: Handle positions with zero/negative amounts
+            positions_to_remove = []
+            for symbol, position in self.positions.items():
+                if position.total_amount <= Decimal("0.00000001"):
+                    logger.info(f"Fixing zero position for {symbol}")
+                    position.total_amount = Decimal("0")
+                    self.closed_positions.append(position)
+                    positions_to_remove.append(symbol)
+                    fixes_applied.append(f"Moved zero position {symbol} to closed positions")
+
+            for symbol in positions_to_remove:
+                del self.positions[symbol]
+
+            # Fix 2: Rebuild positions from trades to ensure consistency
+            logger.info("Rebuilding positions from trade history to ensure consistency")
+
+            # Clear existing positions and rebuild from trades
+            original_positions = self.positions.copy()
+            self.positions.clear()
+
+            # Group trades by symbol and process chronologically
+            trades_by_symbol = {}
+            for trade in sorted(self.trades, key=lambda t: t.timestamp):
+                if trade.symbol not in trades_by_symbol:
+                    trades_by_symbol[trade.symbol] = []
+                trades_by_symbol[trade.symbol].append(trade)
+
+            # Rebuild positions for each symbol
+            for symbol, symbol_trades in trades_by_symbol.items():
+                position = None
+                for trade in symbol_trades:
+                    if position is None:
+                        # Create new position
+                        position = Position(
+                            symbol=symbol,
+                            side="long" if trade.side == "buy" else "short",
+                            total_amount=trade.amount,
+                            average_price=trade.price,
+                            entry_time=trade.timestamp,
+                            fees_paid=trade.fees,
+                        )
+                        position.trades.append(trade)
+                        self.positions[symbol] = position
+                    else:
+                        # Update existing position
+                        if position.side == ("long" if trade.side == "buy" else "short"):
+                            # Same direction - add to position
+                            total_value = position.position_value + trade.total_value
+                            total_amount = position.total_amount + trade.amount
+                            if total_amount > 0:
+                                position.average_price = total_value / total_amount
+                            position.total_amount = total_amount
+                            position.fees_paid += trade.fees
+                        else:
+                            # Opposite direction - reduce position
+                            pnl, remaining = self._calculate_position_closure(position, trade)
+                            position.realized_pnl += pnl
+                            self.total_realized_pnl += pnl
+                            position.total_amount = remaining
+                            position.fees_paid += trade.fees
+
+                            # Check if position is closed
+                            if position.total_amount <= Decimal("0.00000001"):
+                                position.total_amount = Decimal("0")
+                                position.trades.append(trade)
+                                self.closed_positions.append(position)
+                                del self.positions[symbol]
+                                position = None
+                                break
+                            else:
+                                position.trades.append(trade)
+
+                        position.last_update = trade.timestamp
+
+            # Compare with original positions and log differences
+            for symbol in original_positions:
+                if symbol not in self.positions and symbol not in [p.symbol for p in self.closed_positions]:
+                    fixes_applied.append(f"Position {symbol} was lost during rebuild")
+                elif symbol in self.positions:
+                    orig_pos = original_positions[symbol]
+                    new_pos = self.positions[symbol]
+                    if (abs(orig_pos.total_amount - new_pos.total_amount) > Decimal("0.0001") or
+                        orig_pos.side != new_pos.side):
+                        fixes_applied.append(f"Position {symbol} corrected: {orig_pos.side} {orig_pos.total_amount} -> {new_pos.side} {new_pos.total_amount}")
+
+            # Fix 3: Set up risk management for rebuilt positions
+            for position in self.positions.values():
+                if not position.stop_loss_price and not position.take_profit_price:
+                    self._setup_position_risk_management(position)
+
+            # Save the corrected state
+            self.save_state()
+
+            logger.info(f"Data inconsistency fixes applied: {len(fixes_applied)} corrections made")
+
+            return {
+                "success": True,
+                "fixes_applied": fixes_applied,
+                "errors": errors,
+                "positions_rebuilt": len(self.positions),
+                "positions_closed": len([p for p in self.closed_positions if p.total_amount == 0])
+            }
+
+        except Exception as e:
+            error_msg = f"Error fixing data inconsistencies: {e}"
+            logger.error(error_msg)
+            errors.append(error_msg)
+            return {
+                "success": False,
+                "fixes_applied": fixes_applied,
+                "errors": errors,
+                "positions_rebuilt": len(self.positions),
+                "positions_closed": len(self.closed_positions)
+            }
+
     def get_trade_history(
         self, symbol: Optional[str] = None, limit: Optional[int] = None
     ) -> List[Trade]:
@@ -831,14 +1078,9 @@ class TradeManager:
         try:
             state = {
                 "trades": [trade.to_dict() for trade in self.trades],
-                "positions": {
-                    symbol: pos.to_dict()
-                    for symbol, pos in self.positions.items()
-                },
-                "price_cache": {
-                    symbol: float(price)
-                    for symbol, price in self.price_cache.items()
-                },
+                "positions": {s: p.to_dict() for s, p in self.positions.items()},
+                "closed_positions": [p.to_dict() for p in self.closed_positions],
+                "price_cache": {s: float(p) for s, p in self.price_cache.items()},
                 "statistics": {
                     "total_trades": self.total_trades,
                     "total_volume": float(self.total_volume),
@@ -852,20 +1094,27 @@ class TradeManager:
             with open(self.storage_path, "w") as f:
                 json.dump(state, f, indent=2)
 
-            self.last_save_time = time.time()
-            logger.info(
-                f"TradeManager state saved to {self.storage_path} with {len(self.positions)} positions"
-            )
+            logger.info(f"TradeManager state saved to {self.storage_path} with {len(self.positions)} positions")
             logger.info(f"Saved positions: {list(self.positions.keys())}")
 
         except Exception as e:
             logger.error(f"Failed to save TradeManager state: {e}")
 
+    def cleanup_sell_locks(self) -> None:
+        """Clean up sell locks (called periodically to prevent lock accumulation)."""
+        # For now, just clear all locks periodically
+        # In a production system, you'd want more sophisticated lock management
+        if self._sell_locks:
+            logger.info(f"Cleaning up {len(self._sell_locks)} sell locks")
+            self._sell_locks.clear()
+
     def _load_state(self) -> None:
         """Load state from disk."""
         try:
             if not self.storage_path.exists():
-                logger.info("No TradeManager state file found, starting fresh")
+                logger.info("No TradeManager state file found, attempting CSV replay")
+                if not self._replay_from_csv():
+                    logger.info("CSV replay not possible; starting fresh")
                 return
 
             # Load state normally - TradeManager is single source of truth
@@ -910,6 +1159,16 @@ class TradeManager:
                     )
                     filtered_position_count += 1
 
+            # Load closed positions
+            self.closed_positions = []
+            for pos_data in state.get("closed_positions", []):
+                try:
+                    self.closed_positions.append(Position.from_dict(pos_data))
+                except ValueError as e:
+                    logger.warning(
+                        f"Skipping invalid closed position during state loading: {e}"
+                    )
+
             # Load price cache
             self.price_cache = {}
             for symbol, price in state.get("price_cache", {}).items():
@@ -935,10 +1194,11 @@ class TradeManager:
 
         except Exception as e:
             logger.error(f"Failed to load TradeManager state: {e}")
-            # Start with clean state if loading fails
-            self.trades = []
-            self.positions = {}
-            self.price_cache = {}
+            if not self._replay_from_csv():
+                # Start with clean state if loading fails and replay not possible
+                self.trades = []
+                self.positions = {}
+                self.price_cache = {}
 
     def shutdown(self) -> None:
         """Shutdown the trade manager and save final state."""
@@ -956,15 +1216,88 @@ class TradeManager:
             self.save_state()
         logger.info("TradeManager shutdown complete")
 
+    def _replay_from_csv(self) -> bool:
+        """Rebuild TradeManager state by replaying trades from trades.csv.
+
+        Returns True if any trades were successfully replayed.
+        """
+        try:
+            import csv
+            from datetime import datetime as _dt
+
+            csv_path = LOG_DIR / "trades.csv"
+            if not csv_path.exists():
+                logger.info("CSV replay requested but trades.csv not found")
+                return False
+
+            rows = []
+            with csv_path.open("r", encoding="utf-8") as fh:
+                reader = csv.reader(fh)
+                for row in reader:
+                    if not row or len(row) < 5:
+                        continue
+                    # Skip stop records if 6th column indicates is_stop True
+                    if len(row) >= 6 and str(row[5]).strip().lower() == "true":
+                        continue
+                    rows.append(row)
+
+            if not rows:
+                logger.info("No tradable rows found in trades.csv for replay")
+                return False
+
+            def _parse_ts(ts: str) -> _dt:
+                try:
+                    return _dt.fromisoformat(ts)
+                except Exception:
+                    return _dt.min
+
+            # Sort trades by timestamp to preserve order
+            rows.sort(key=lambda r: _parse_ts(r[4]))
+
+            replayed = 0
+            for row in rows:
+                try:
+                    symbol, side, amount_str, price_str, ts_str = row[:5]
+                    amount = Decimal(str(amount_str))
+                    price = Decimal(str(price_str))
+                    timestamp = _parse_ts(ts_str)
+
+                    trade = Trade(
+                        id=str(uuid.uuid4()),
+                        symbol=symbol,
+                        side=side,
+                        amount=amount,
+                        price=price,
+                        timestamp=timestamp,
+                        strategy="replay_csv",
+                        exchange="replay",
+                    )
+                    self.record_trade(trade)
+                    replayed += 1
+                except Exception as row_err:
+                    logger.warning(
+                        f"Skipping CSV row during replay due to error: {row_err}"
+                    )
+                    continue
+
+            self.save_state()
+            logger.info(f"Replayed {replayed} trades from CSV into TradeManager")
+            return replayed > 0
+        except Exception as e:
+            logger.error(f"CSV replay failed: {e}")
+            return False
+
 
 # Global instance
 _trade_manager_instance: Optional[TradeManager] = None
 _trade_manager_lock = threading.Lock()
+_signals_registered = False
 
 
 def get_trade_manager() -> TradeManager:
     """Get the global TradeManager instance."""
     global _trade_manager_instance
+    global _signals_registered
     if _trade_manager_instance is None:
         with _trade_manager_lock:
             if _trade_manager_instance is None:
@@ -974,7 +1307,10 @@ def get_trade_manager() -> TradeManager:
                 current_dir = os.getcwd()
 
                 # Try different possible locations for the state file
+                # Prefer absolute LOG_DIR to avoid CWD mismatches
+                preferred_path = str((LOG_DIR / "trade_manager_state.json").resolve())
                 possible_paths = [
+                    preferred_path,
                     "crypto_bot/logs/trade_manager_state.json",  # Default relative path
                     "../crypto_bot/logs/trade_manager_state.json",  # From frontend directory
                     os.path.join(
@@ -1001,10 +1337,36 @@ def get_trade_manager() -> TradeManager:
                         storage_path=state_file_path
                     )
                 else:
+                    # Use preferred absolute path even if file doesn't exist yet
                     logger.warning(
-                        "No TradeManager state file found, starting fresh"
+                        "No TradeManager state file found; initializing at preferred path"
                     )
-                    _trade_manager_instance = TradeManager()
+                    _trade_manager_instance = TradeManager(
+                        storage_path=preferred_path
+                    )
+                if not _signals_registered:
+                    try:
+                        import signal
+
+                        def _tm_signal_handler(signum, frame):
+                            try:
+                                if _trade_manager_instance is not None:
+                                    _trade_manager_instance.shutdown()
+                            except Exception as e:
+                                logger.error(
+                                    f"Error during TradeManager shutdown on signal {signum}: {e}"
+                                )
+
+                        for _sig_name in ("SIGINT", "SIGTERM"):
+                            _sig = getattr(signal, _sig_name, None)
+                            if _sig is not None:
+                                try:
+                                    signal.signal(_sig, _tm_signal_handler)
+                                except Exception:
+                                    pass
+                        _signals_registered = True
+                    except Exception as e:
+                        logger.warning(f"Failed to register signal handlers: {e}")
     return _trade_manager_instance
 
 

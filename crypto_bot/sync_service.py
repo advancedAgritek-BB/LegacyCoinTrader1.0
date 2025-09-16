@@ -310,7 +310,37 @@ class SyncService:
             added_positions = []
             for symbol, pos_data in missing_positions:
                 try:
-                    # Create a trade to represent the recovered position
+                    # Check if position already exists in TradeManager
+                    existing_position = trade_manager.get_position(symbol)
+                    if existing_position:
+                        # Position already exists, check if amounts match
+                        existing_amount = float(existing_position.total_amount)
+                        log_amount = float(pos_data['amount'])
+
+                        if abs(existing_amount - log_amount) > 0.0001:
+                            logger.warning(f"Position {symbol} amount mismatch: TM has {existing_amount}, log has {log_amount}. Skipping recovery.")
+                            continue
+                        else:
+                            logger.info(f"Position {symbol} already exists in TradeManager with matching amount. Skipping recovery.")
+                            continue
+
+                    # Check if we already have trades for this symbol that would create this position
+                    trades_for_symbol = [t for t in trade_manager.trades if t.symbol == symbol]
+                    if trades_for_symbol:
+                        # Calculate net position from existing trades
+                        net_amount = sum(
+                            (float(t.amount) if t.side == "buy" else -float(t.amount))
+                            for t in trades_for_symbol
+                        )
+
+                        if abs(net_amount - float(pos_data['amount'])) > 0.0001:
+                            logger.warning(f"Position {symbol} trade history suggests different amount ({net_amount}) than log ({pos_data['amount']}). Skipping recovery.")
+                            continue
+                        else:
+                            logger.info(f"Position {symbol} already represented by trade history. Skipping recovery.")
+                            continue
+
+                    # Only recover if position doesn't exist and no conflicting trade history
                     from crypto_bot.utils.trade_manager import create_trade
                     from decimal import Decimal
 

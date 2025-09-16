@@ -55,6 +55,19 @@ def get_current_price_for_symbol(symbol: str) -> float:
         except Exception as e:
             logger.debug(f"Fallback price fetch failed for {symbol}: {e}")
 
+        # Try trade manager cache as final fallback
+        try:
+            from crypto_bot.utils.trade_manager import get_trade_manager
+            trade_manager = get_trade_manager()
+            if hasattr(trade_manager, 'price_cache') and symbol in trade_manager.price_cache:
+                price = trade_manager.price_cache[symbol]
+                if price and price > 0:
+                    logger.debug(f"Using trade manager price for {symbol}: ${price}")
+                    _price_cache[symbol] = (price, time.time())
+                    return price
+        except Exception as e:
+            logger.debug(f"Trade manager price fetch failed for {symbol}: {e}")
+
     except Exception as e:
         logger.warning(f"Price fetch failed for {symbol}: {e}")
 

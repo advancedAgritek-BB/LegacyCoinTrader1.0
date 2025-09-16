@@ -28,7 +28,7 @@ from crypto_bot.signals.signal_scoring import evaluate_async, evaluate_strategie
 from crypto_bot.utils.rank_logger import log_second_place
 from crypto_bot.strategy import grid_bot
 from crypto_bot.volatility_filter import calc_atr
-# BollingerBands will be calculated manually
+from ta.volatility import BollingerBands
 from .stats import zscore
 from crypto_bot.utils.telemetry import telemetry
 
@@ -132,7 +132,7 @@ async def analyze_symbol(
         Optional notifier used to send a message when the strategy is invoked.
     """
     router_cfg = RouterConfig.from_dict(config)
-    lookback = config.get("indicator_lookback", 14) * 2
+    lookback = config.get("indicator_lookback", 10)  # Reduced from 14*2=28 to just 10
     for tf, df in df_map.items():
         if df is None or len(df) < lookback:
             analysis_logger.info(
@@ -166,12 +166,17 @@ async def analyze_symbol(
     bb_z = 0.0
     if df is not None and len(df) >= 14:
         try:
-            bb = BollingerBands(df["close"], window=14)
-            width = bb.bollinger_wband()
-            z = zscore(width, 14)
-            if not z.empty:
-                bb_z = float(z.iloc[-1])
-        except Exception:
+            # Use the project's local Bollinger Bands implementation
+            # This provides consistent calculation across the entire system
+            bb = BollingerBands(df["close"].values, window=14, ndev=2)
+            bb_width = bb.bollinger_wband()
+            # Convert numpy array to pandas Series for zscore calculation
+            bb_width_series = pd.Series(bb_width, index=df.index)
+            bb_z_series = zscore(bb_width_series, 14)
+            if not bb_z_series.empty and not bb_z_series.isna().iloc[-1]:
+                bb_z = float(bb_z_series.iloc[-1])
+        except Exception as e:
+            analysis_logger.warning(f"Bollinger Bands calculation failed: {e}")
             bb_z = 0.0
     min_conf_adaptive = baseline * (1 + bb_z / 3)
     higher_df = df_map.get("1d")
@@ -245,7 +250,9 @@ async def analyze_symbol(
             profile,
         )
         r = r.split("_")[-1]
-        regime_counts[r] = regime_counts.get(r, 0) + 1
+        # Exclude 'unknown' from voting to avoid unknown dominating outcomes
+        if r != "unknown":
+            regime_counts[r] = regime_counts.get(r, 0) + 1
         if tf_df is not None:
             vote_map[tf] = tf_df
     if higher_tf in df_map:
@@ -261,7 +268,21 @@ async def analyze_symbol(
             r = label_map.get(tf)
             if r:
                 r = r.split("_")[-1]
-                regime_counts[r] = regime_counts.get(r, 0) + 1
+                if r != "unknown":
+                    regime_counts[r] = regime_counts.get(r, 0) + 1
+
+    # Seed base timeframe regime to avoid empty-vote unknowns when voting data is sparse
+    base_tf_label = None
+    try:
+        base_tf_label, _ = await classify_regime_cached(
+            symbol, base_tf, df, df_map.get(higher_tf), profile
+        )
+        if base_tf_label:
+            base_tf_label = base_tf_label.split("_")[-1]
+            if base_tf_label != "unknown":
+                regime_counts[base_tf_label] = regime_counts.get(base_tf_label, 0) + 1
+    except Exception:
+        pass
 
     if regime_counts:
         regime, votes = max(regime_counts.items(), key=lambda kv: kv[1])

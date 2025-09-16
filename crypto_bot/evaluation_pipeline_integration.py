@@ -103,6 +103,11 @@ class EvaluationPipelineIntegration:
         self.last_health_check = 0.0
         self.token_cache: Dict[str, TokenBatch] = {}
         self.processing_lock = asyncio.Lock()
+        
+        # Exchange context for dynamic symbol discovery
+        self.exchange = None
+        self.exchange_symbols_cache = []
+        self.symbols_cache_time = 0
 
         # Health monitoring
         self.status = PipelineStatus.OFFLINE
@@ -133,6 +138,14 @@ class EvaluationPipelineIntegration:
 
             # Initialize enhanced scanner integration
             self.enhanced_scanner = get_enhanced_scan_integration(self.config)
+
+            # Start the enhanced scanner integration if enabled
+            try:
+                if self.config.get("enhanced_scanning", {}).get("enabled", True):
+                    await self.enhanced_scanner.start()
+                    logger.info("Enhanced scanner integration started")
+            except Exception as e:
+                logger.warning(f"Failed to start enhanced scanner: {e}")
 
             # Validate scanner is working
             if not await self._validate_scanner():
@@ -377,25 +390,113 @@ class EvaluationPipelineIntegration:
             return None
 
     async def _get_scanner_tokens(self, max_tokens: int) -> List[str]:
-        """Get tokens from enhanced scanner."""
+        """Get CEX tokens from enhanced scanner (NEVER Solana tokens)."""
         try:
             if not self.enhanced_scanner:
                 return []
 
-            # Get top opportunities from scanner
-            opportunities = self.enhanced_scanner.get_top_opportunities(max_tokens)
+            # Only get tokens from Kraken exchange - this is for CEX processing only
+            kraken_tokens = await self._get_kraken_usd_symbols(max_tokens)
+            if kraken_tokens:
+                logger.info(f"Retrieved {len(kraken_tokens)} CEX USD symbols from Kraken")
+                return kraken_tokens[:max_tokens]
 
-            tokens = []
-            for opp in opportunities:
-                if isinstance(opp, dict) and 'symbol' in opp:
-                    tokens.append(opp['symbol'])
-                elif hasattr(opp, 'symbol'):
-                    tokens.append(opp.symbol)
-
-            return tokens[:max_tokens]
+            # DO NOT fallback to Solana scanner - that would mix Solana tokens into CEX processing
+            logger.warning("Failed to get CEX tokens from Kraken - no Solana fallback allowed")
+            return []
 
         except Exception as e:
-            logger.error(f"Failed to get scanner tokens: {e}")
+            logger.error(f"Failed to get CEX scanner tokens: {e}")
+            return []
+
+    def set_exchange(self, exchange) -> None:
+        """Set the exchange instance for dynamic symbol discovery."""
+        self.exchange = exchange
+        logger.info(f"Exchange instance set: {getattr(exchange, 'id', 'unknown')}")
+
+    async def _get_kraken_usd_symbols(self, max_tokens: int) -> List[str]:
+        """Get USD trading pairs from Kraken exchange."""
+        try:
+            # Try to get symbols from live exchange first
+            if self.exchange and hasattr(self.exchange, 'symbols'):
+                # Use cached symbols if available and fresh (within 1 hour)
+                current_time = time.time()
+                if (self.exchange_symbols_cache and 
+                    (current_time - self.symbols_cache_time) < 3600):
+                    logger.debug("Using cached exchange symbols")
+                    return self.exchange_symbols_cache[:max_tokens]
+                
+                # Get fresh symbols from exchange
+                try:
+                    if not self.exchange.symbols and hasattr(self.exchange, 'load_markets'):
+                        logger.info("Loading markets from exchange...")
+                        if asyncio.iscoroutinefunction(self.exchange.load_markets):
+                            await self.exchange.load_markets()
+                        else:
+                            await asyncio.to_thread(self.exchange.load_markets)
+                    
+                    if self.exchange.symbols:
+                        usd_symbols = [s for s in self.exchange.symbols if s.endswith('/USD')]
+                        logger.info(f"Found {len(usd_symbols)} USD pairs from live exchange")
+                        
+                        # Cache the results
+                        self.exchange_symbols_cache = usd_symbols
+                        self.symbols_cache_time = current_time
+                        
+                        return usd_symbols[:max_tokens]
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to get symbols from live exchange: {e}")
+            
+            # Fallback to comprehensive hardcoded list of known Kraken USD pairs
+            kraken_usd_symbols = [
+                # Major cryptocurrencies
+                "BTC/USD", "ETH/USD", "SOL/USD", "ADA/USD", "DOT/USD",
+                "LINK/USD", "UNI/USD", "AAVE/USD", "AVAX/USD", "MATIC/USD",
+                "ATOM/USD", "NEAR/USD", "ALGO/USD", "XTZ/USD", "MANA/USD",
+                
+                # Additional popular tokens on Kraken
+                "XRP/USD", "LTC/USD", "BCH/USD", "ETC/USD", "ZEC/USD",
+                "DASH/USD", "XMR/USD", "EOS/USD", "TRX/USD", "XLM/USD",
+                "DOGE/USD", "SHIB/USD", "FIL/USD", "GRT/USD", "CRV/USD",
+                
+                # DeFi tokens
+                "COMP/USD", "MKR/USD", "SNX/USD", "YFI/USD", "SUSHI/USD",
+                "1INCH/USD", "BAL/USD", "KNC/USD", "REN/USD", "LRC/USD",
+                
+                # Layer 1 & 2 tokens  
+                "FTM/USD", "LUNA/USD", "WAVES/USD", "ICX/USD", "ONT/USD",
+                "QTUM/USD", "ZIL/USD", "BAT/USD", "ENJ/USD", "CHZ/USD",
+                
+                # Additional tokens
+                "SAND/USD", "AXS/USD", "GALA/USD", "IMX/USD", "LPT/USD",
+                "STORJ/USD", "ANKR/USD", "BAND/USD", "NU/USD", "OGN/USD",
+                "NMR/USD", "KEEP/USD", "T/USD", "TBTC/USD", "BADGER/USD",
+                
+                # More Kraken pairs (80+ symbols total)
+                "REP/USD", "KSM/USD", "FLOW/USD", "SC/USD", "KAVA/USD",
+                "LSK/USD", "NANO/USD", "OMG/USD", "OXT/USD", "PAXG/USD",
+                "PERP/USD", "PHA/USD", "POND/USD", "RAD/USD", "RARI/USD",
+                "REPV2/USD", "ROOK/USD", "SAMO/USD", "SDN/USD", "SGB/USD",
+                "SKL/USD", "SRM/USD", "STEP/USD", "STG/USD", "SUI/USD",
+                "SUPER/USD", "TEER/USD", "TIA/USD", "TRU/USD", "UMA/USD", 
+                "UNFI/USD", "WBTC/USD", "WETH/USD", "WSTETH/USD", "XCN/USD"
+            ]
+            
+            # Remove duplicates and filter out invalid symbols
+            valid_symbols = []
+            seen = set()
+            
+            for symbol in kraken_usd_symbols:
+                if symbol not in seen and '/' in symbol and symbol.endswith('/USD'):
+                    valid_symbols.append(symbol)
+                    seen.add(symbol)
+            
+            logger.info(f"Using {len(valid_symbols)} known Kraken USD symbols (fallback)")
+            return valid_symbols[:max_tokens]
+            
+        except Exception as e:
+            logger.error(f"Failed to get Kraken USD symbols: {e}")
             return []
 
     async def _get_solana_tokens(self, max_tokens: int) -> List[str]:
@@ -563,6 +664,15 @@ class EvaluationPipelineIntegration:
     async def cleanup(self):
         """Cleanup resources."""
         await self.stop_health_monitoring()
+        
+        # Stop enhanced scanner integration
+        if self.enhanced_scanner and hasattr(self.enhanced_scanner, 'stop'):
+            try:
+                await self.enhanced_scanner.stop()
+                logger.info("Enhanced scanner integration stopped")
+            except Exception as e:
+                logger.warning(f"Error stopping enhanced scanner: {e}")
+        
         self.token_cache.clear()
         logger.info("Pipeline integration cleanup completed")
 
@@ -587,9 +697,14 @@ async def initialize_evaluation_pipeline(config: Dict[str, Any]) -> bool:
     return await integration.initialize()
 
 
-async def get_tokens_for_evaluation(config: Dict[str, Any], max_tokens: int = 20) -> List[str]:
+async def get_tokens_for_evaluation(config: Dict[str, Any], max_tokens: int = 20, exchange=None) -> List[str]:
     """Get tokens for evaluation with full pipeline integration."""
     integration = get_evaluation_pipeline_integration(config)
+    
+    # Set exchange instance if provided for dynamic symbol discovery
+    if exchange:
+        integration.set_exchange(exchange)
+    
     return await integration.get_tokens_for_evaluation(max_tokens)
 
 

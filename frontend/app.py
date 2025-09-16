@@ -273,45 +273,52 @@ def auth_status():
 def api_monitoring_health():
     """Return comprehensive system health status."""
     try:
-        import psutil
         import json
         from pathlib import Path
 
-        # Get system metrics
+        # Try to read the actual monitoring data first
+        frontend_status_file = LOG_DIR / "frontend_monitoring_status.json"
+        if frontend_status_file.exists():
+            try:
+                with open(frontend_status_file, "r") as f:
+                    monitoring_data = json.load(f)
+
+                # Add current timestamp and return
+                monitoring_data["last_update"] = datetime.now().isoformat()
+
+                return jsonify(
+                    {
+                        "success": True,
+                        "data": monitoring_data,
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+            except Exception as e:
+                print(f"Error reading frontend monitoring status: {e}")
+
+        # Fallback: Get system metrics if monitoring data not available
+        import psutil
         cpu_percent = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory()
         disk = psutil.disk_usage("/")
 
-        # Check if monitoring processes are running
-        monitoring_running = False
-        health_check_running = False
-
+        # Check if bot is running
+        bot_running = False
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
                 cmdline = proc.info["cmdline"]
                 if cmdline and len(cmdline) > 0:
                     cmd_str = " ".join(cmdline).lower()
-                    # Check for various bot startup patterns
                     if any(
                         pattern in cmd_str
                         for pattern in [
-                            "pipeline_monitor",
-                            "enhanced_monitoring",
                             "start_bot_auto",
                             "crypto_bot.main",
                             "crypto_bot/main.py",
                         ]
                     ):
-                        monitoring_running = True
-                    if any(
-                        pattern in cmd_str
-                        for pattern in [
-                            "health_check",
-                            "auto_health_check",
-                            "pipeline_monitor",
-                        ]
-                    ):
-                        health_check_running = True
+                        bot_running = True
+                        break
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
@@ -325,66 +332,70 @@ def api_monitoring_health():
         # Get component status
         components = {
             "evaluation_pipeline": {
-                "status": "healthy" if monitoring_running else "unknown",
-                "message": (
-                    "Strategy evaluation pipeline active"
-                    if monitoring_running
-                    else "Evaluation pipeline status unknown"
-                ),
+                "status": "healthy" if bot_running else "critical",
+                "message": "Trading bot active" if bot_running else "Trading bot not running",
+                "last_check": datetime.now().isoformat(),
                 "metrics": {
-                    "evaluation_count": 0,
-                    "successful_evaluations": 0,
-                    "failed_evaluations": 0,
+                    "process_running": bot_running,
+                    "recent_evaluations": 0
                 },
             },
             "execution_pipeline": {
                 "status": "healthy",
                 "message": "Order execution pipeline active",
+                "last_check": datetime.now().isoformat(),
                 "metrics": {
-                    "execution_count": 0,
-                    "pending_orders": 0,
-                    "success_rate": 100.0,
+                    "recent_executions": 0,
+                    "recent_errors": 0,
+                    "pending_orders": 0
                 },
             },
             "system_resources": {
                 "status": overall_status,
                 "message": f"System resources: CPU {cpu_percent:.1f}%, Memory {memory.percent:.1f}%",
+                "last_check": datetime.now().isoformat(),
                 "metrics": {
-                    "cpu_percent": cpu_percent,
-                    "memory_percent": memory.percent,
-                    "disk_percent": disk.percent,
+                    "memory_usage_mb": memory.used / 1024 / 1024,
+                    "cpu_usage_percent": cpu_percent,
+                    "system_memory_percent": memory.percent
                 },
             },
             "monitoring_system": {
-                "status": "healthy" if monitoring_running else "unknown",
-                "message": (
-                    "Monitoring system active"
-                    if monitoring_running
-                    else "Monitoring system status unknown"
-                ),
+                "status": "unknown",
+                "message": "Monitoring system status unknown",
+                "last_check": datetime.now().isoformat(),
                 "metrics": {
-                    "monitoring_running": monitoring_running,
-                    "health_check_running": health_check_running,
+                    "monitoring_running": False,
+                    "health_check_running": False,
                 },
             },
             "websocket_connections": {
                 "status": "unknown",
                 "message": "WebSocket connection status unknown",
+                "last_check": datetime.now().isoformat(),
                 "metrics": {
                     "connectivity_ok": False,
                     "ws_active": False,
-                    "connections": 0,
+                    "connections": 0
                 },
             },
             "strategy_router": {
                 "status": "unknown",
                 "message": "Strategy router status unknown",
+                "last_check": datetime.now().isoformat(),
                 "metrics": {"recent_routing": 0},
             },
             "enhanced_scanner": {
                 "status": "unknown",
                 "message": "Enhanced scanner status unknown",
+                "last_check": datetime.now().isoformat(),
                 "metrics": {"tokens_scanned": 0, "scanner_active": False},
+            },
+            "position_monitoring": {
+                "status": "unknown",
+                "message": "Position monitoring status unknown",
+                "last_check": datetime.now().isoformat(),
+                "metrics": {"age_seconds": 0, "recent_updates": 0},
             },
         }
 
@@ -653,7 +664,8 @@ def api_monitoring_metrics():
         import json
         from pathlib import Path
 
-        # Initialize default metrics
+        # Try to read from frontend monitoring status first (contains recent_metrics)
+        frontend_status_file = LOG_DIR / "frontend_monitoring_status.json"
         metrics_data = {
             "recent_metrics": [],
             "scan_metrics": {
@@ -669,7 +681,26 @@ def api_monitoring_metrics():
             "alerts_active": [],
         }
 
-        # Try to load actual metrics from monitoring files
+        if frontend_status_file.exists():
+            try:
+                with open(frontend_status_file, "r") as f:
+                    status_data = json.load(f)
+                    # Extract recent metrics from the monitoring data
+                    metrics_data["recent_metrics"] = status_data.get("recent_metrics", [])
+
+                    # Extract component metrics for evaluation counts
+                    components = status_data.get("components", {})
+                    if "evaluation_pipeline" in components:
+                        eval_metrics = components["evaluation_pipeline"].get("metrics", {})
+                        metrics_data["evaluation_metrics"]["strategy_evaluations"] = eval_metrics.get("recent_evaluations", 0)
+
+                    if "enhanced_scanner" in components:
+                        scanner_metrics = components["enhanced_scanner"].get("metrics", {})
+                        metrics_data["scan_metrics"]["tokens_scanned"] = scanner_metrics.get("tokens_scanned", 0)
+            except Exception as e:
+                print(f"Error reading frontend monitoring status for metrics: {e}")
+
+        # Try to load additional metrics from other files as fallback/supplement
         try:
             metrics_file = LOG_DIR / "monitoring_metrics.json"
             if metrics_file.exists():
@@ -677,24 +708,6 @@ def api_monitoring_metrics():
                 metrics_data.update(file_data)
         except Exception as e:
             print(f"Error reading monitoring metrics file: {e}")
-
-        # Try to load scan metrics
-        try:
-            scan_file = LOG_DIR / "scan_metrics.json"
-            if scan_file.exists():
-                scan_data = json.loads(scan_file.read_text())
-                metrics_data["scan_metrics"].update(scan_data)
-        except Exception as e:
-            print(f"Error reading scan metrics: {e}")
-
-        # Try to load evaluation metrics
-        try:
-            eval_file = LOG_DIR / "evaluation_metrics.json"
-            if eval_file.exists():
-                eval_data = json.loads(eval_file.read_text())
-                metrics_data["evaluation_metrics"].update(eval_data)
-        except Exception as e:
-            print(f"Error reading evaluation metrics: {e}")
 
         return jsonify(
             {
@@ -2229,12 +2242,10 @@ def api_open_positions():
     try:
         logger.info("API: Starting open positions request")
 
-        # Load TradeManager state directly from file to bypass singleton issues
+        # Load TradeManager state directly from the resolved LOG_DIR to avoid CWD issues
         import json
-        from pathlib import Path
-
-        state_file = Path("crypto_bot/logs/trade_manager_state.json")
-        logger.info(f"API: Checking state file at {state_file}")
+        state_file = LOG_DIR / "trade_manager_state.json"
+        logger.info(f"API: Checking state file at {state_file.resolve()}")
 
         if state_file.exists():
             logger.info("API: State file exists, loading data")
@@ -2262,14 +2273,25 @@ def api_open_positions():
                     # Try to get current price from cache first
                     current_price = price_cache.get(symbol, 0)
 
-                    # If no cached price, try to fetch current price on-demand
-                    if not current_price or current_price == 0:
+                    # If no cached price or price is stale, try to fetch current price on-demand
+                    if not current_price or current_price == 0 or current_price == pos_data.get("average_price", 0):
                         try:
-                            # Use shared price fetcher alias for robustness
-                            current_price = get_current_price_for_symbol(symbol)
-                            logger.debug(
-                                f"Fetched current price for {symbol}: ${current_price}"
-                            )
+                            # Use shared price fetcher alias for robustness  
+                            fresh_price = get_current_price_for_symbol(symbol)
+                            if fresh_price and fresh_price > 0:
+                                current_price = fresh_price
+                                logger.debug(
+                                    f"Fetched fresh current price for {symbol}: ${current_price}"
+                                )
+                                # Update the TradeManager cache with fresh price
+                                try:
+                                    from crypto_bot.utils.trade_manager import get_trade_manager
+                                    tm = get_trade_manager()
+                                    tm.update_price(symbol, current_price)
+                                except Exception as cache_update_error:
+                                    logger.warning(f"Failed to update price cache for {symbol}: {cache_update_error}")
+                            else:
+                                logger.warning(f"No valid fresh price received for {symbol}")
                         except Exception as price_error:
                             logger.warning(
                                 f"Failed to fetch current price for {symbol}: {price_error}"
@@ -2279,12 +2301,12 @@ def api_open_positions():
                                 from crypto_bot.utils.trade_manager import get_trade_manager
                                 tm = get_trade_manager()
                                 cached_price = tm.price_cache.get(symbol)
-                                if cached_price:
+                                if cached_price and float(cached_price) > 0:
                                     current_price = float(cached_price)
                                     logger.debug(f"Using TradeManager cached price for {symbol}: ${current_price}")
                                 else:
                                     current_price = pos_data.get("average_price", 0)
-                                    logger.warning(f"No price available for {symbol}, using entry price")
+                                    logger.warning(f"No valid price available for {symbol}, using entry price as fallback")
                             except Exception as tm_error:
                                 logger.error(f"Failed to get TradeManager price for {symbol}: {tm_error}")
                                 current_price = pos_data.get("average_price", 0)
@@ -2338,10 +2360,22 @@ def api_open_positions():
                     open_positions.append(position_data)
                     logger.info(f"API: Added position {symbol} to response")
 
-            logger.info(
-                f"API: Returning {len(open_positions)} open positions from state file"
-            )
-            return jsonify(open_positions)
+            # Cross-check against CSV-derived open trades to eliminate stale entries
+            try:
+                from crypto_bot.utils.open_trades import get_open_trades
+                csv_opens = get_open_trades(TRADE_FILE)
+                csv_symbols = {o.get("symbol") for o in csv_opens}
+                filtered_positions = [p for p in open_positions if p.get("symbol") in csv_symbols] if csv_symbols else open_positions
+                logger.info(
+                    f"API: Returning {len(filtered_positions)} positions after CSV cross-check (state had {len(open_positions)})"
+                )
+                return jsonify(filtered_positions)
+            except Exception as _csv_check_err:
+                logger.warning(f"API: CSV cross-check failed: {_csv_check_err}")
+                logger.info(
+                    f"API: Returning {len(open_positions)} open positions from state file"
+                )
+                return jsonify(open_positions)
         else:
             logger.warning(
                 "API: State file does not exist, using legacy method"
@@ -2411,13 +2445,9 @@ def api_wallet_pnl():
     """Return current wallet PnL calculation from TradeManager."""
     try:
         # Load TradeManager state directly from file to bypass singleton issues
-        import json
-        from pathlib import Path
-
-        state_file = Path("crypto_bot/logs/trade_manager_state.json")
+        state_file = LOG_DIR / "trade_manager_state.json"
         if state_file.exists():
-            with open(state_file, "r") as f:
-                state = json.load(f)
+            state = safe_json_load(state_file)
 
             # Calculate P&L from state file data
             trades = state.get("trades", [])
@@ -2791,9 +2821,9 @@ def cli():
     return render_template("cli.html", output=output)
 
 
-# Global cache for dashboard data
+# Global cache for dashboard data (disabled to ensure freshness)
 _dashboard_cache = {}
-_CACHE_TIMEOUT = 30  # seconds
+_CACHE_TIMEOUT = 0  # disable caching
 
 
 @app.route("/")
@@ -2803,26 +2833,13 @@ def index():
 
 
 def get_cached_dashboard_data():
-    """Get cached dashboard data if still fresh."""
-    import time
-
-    current_time = time.time()
-
-    if "data" in _dashboard_cache and "timestamp" in _dashboard_cache:
-        if current_time - _dashboard_cache["timestamp"] < _CACHE_TIMEOUT:
-            logger.info("Using cached dashboard data")
-            return _dashboard_cache["data"]
-
+    """Dashboard caching disabled."""
     return None
 
 
 def set_cached_dashboard_data(data):
-    """Cache dashboard data with timestamp."""
-    import time
-
-    _dashboard_cache["data"] = data
-    _dashboard_cache["timestamp"] = time.time()
-    logger.info("Cached dashboard data")
+    """Dashboard caching disabled (no-op)."""
+    return
 
 
 def batch_fetch_prices(symbols):
@@ -2903,9 +2920,7 @@ def dashboard():
     # Calculate correct balance from state file
     try:
         import json
-        from pathlib import Path
-
-        state_file = Path("crypto_bot/logs/trade_manager_state.json")
+        state_file = LOG_DIR / "trade_manager_state.json"
         if state_file.exists():
             with open(state_file, "r") as f:
                 state = json.load(f)
@@ -2981,11 +2996,9 @@ def dashboard():
 
     # Get open positions from TradeManager (single source of truth)
     try:
-        # Load TradeManager state directly from file to bypass singleton issues
+        # Load TradeManager state directly from LOG_DIR to bypass CWD issues
         import json
-        from pathlib import Path
-
-        state_file = Path("crypto_bot/logs/trade_manager_state.json")
+        state_file = LOG_DIR / "trade_manager_state.json"
         if state_file.exists():
             with open(state_file, "r") as f:
                 state = json.load(f)
@@ -3114,9 +3127,21 @@ def dashboard():
                     }
                     open_positions.append(position_data)
 
-            logger.info(
-                f"Dashboard: Loaded {len(open_positions)} positions from state file"
-            )
+            # Cross-check against CSV-derived open trades to eliminate stale entries
+            try:
+                from crypto_bot.utils.open_trades import get_open_trades
+                csv_opens = get_open_trades(TRADE_FILE)
+                csv_symbols = {o.get("symbol") for o in csv_opens}
+                if csv_symbols:
+                    before = len(open_positions)
+                    open_positions = [p for p in open_positions if p.get("symbol") in csv_symbols]
+                    logger.info(
+                        f"Dashboard: CSV cross-check filtered positions from {before} to {len(open_positions)}"
+                    )
+            except Exception as _csv_err:
+                logger.warning(f"Dashboard: CSV cross-check failed: {_csv_err}")
+
+            logger.info(f"Dashboard: Loaded {len(open_positions)} positions from state file")
         else:
             open_positions = get_open_positions()
     except Exception as e:
@@ -3494,6 +3519,176 @@ def trades_page():
     return render_template("trades.html")
 
 
+@app.route("/trades_data")
+def trades_data():
+    """Return structured trade data for the trades page."""
+    try:
+        from crypto_bot import log_reader
+        from crypto_bot.utils.open_trades import get_open_trades
+        
+        # Read all trades from CSV
+        df = log_reader._read_trades(TRADE_FILE)
+        trades = []
+        
+        if not df.empty:
+            # Convert all trades to structured format
+            for _, row in df.iterrows():
+                try:
+                    trade = {
+                        "id": f"{row['symbol']}_{row['timestamp']}",
+                        "symbol": row["symbol"],
+                        "side": row["side"], 
+                        "type": row["side"],  # For compatibility
+                        "amount": float(row["amount"]) if row["amount"] else 0.0,
+                        "quantity": float(row["amount"]) if row["amount"] else 0.0,  # For compatibility
+                        "price": float(row["price"]) if row["price"] else 0.0,
+                        "execution_price": float(row["price"]) if row["price"] else 0.0,  # For compatibility
+                        "timestamp": row["timestamp"],
+                        "date": row["timestamp"],  # For compatibility
+                        "status": "completed",  # Historical trades are completed
+                        "pnl": 0.0,  # Will calculate for closed positions
+                        "pnl_percentage": 0.0,
+                        "unrealized_pnl": 0.0,
+                        "unrealized_pnl_percentage": 0.0,
+                        "current_price": 0.0
+                    }
+                    trades.append(trade)
+                except Exception as e:
+                    logger.warning(f"Error processing trade row: {e}")
+                    continue
+        
+        # Calculate realized P&L for completed trades using FIFO method
+        def calculate_realized_pnl(trades_list):
+            """Calculate realized P&L for completed trades using FIFO method."""
+            positions = {}  # symbol -> list of (buy_price, amount, timestamp)
+            
+            for trade in trades_list:
+                symbol = trade["symbol"]
+                side = trade["side"]
+                amount = trade["amount"]
+                price = trade["price"]
+                
+                if symbol not in positions:
+                    positions[symbol] = []
+                
+                if side == "buy" or side == "long":
+                    # Add to position
+                    positions[symbol].append((price, amount, trade["timestamp"]))
+                elif side == "sell" or side == "short":
+                    # Calculate realized P&L by matching with buys (FIFO)
+                    remaining_sell = amount
+                    realized_pnl = 0.0
+                    
+                    while remaining_sell > 0 and positions[symbol]:
+                        buy_price, buy_amount, _ = positions[symbol][0]
+                        
+                        if buy_amount <= remaining_sell:
+                            # Use entire buy position
+                            realized_pnl += (price - buy_price) * buy_amount
+                            remaining_sell -= buy_amount
+                            positions[symbol].pop(0)
+                        else:
+                            # Partial sell
+                            realized_pnl += (price - buy_price) * remaining_sell
+                            positions[symbol][0] = (buy_price, buy_amount - remaining_sell, positions[symbol][0][2])
+                            remaining_sell = 0
+                    
+                    # Update trade with realized P&L
+                    if amount > 0:
+                        trade["pnl"] = realized_pnl
+                        trade["pnl_percentage"] = (realized_pnl / (price * amount)) * 100
+            
+            return trades_list
+        
+        # Sort trades chronologically before P&L calculation
+        trades.sort(key=lambda x: x.get("timestamp", ""))
+        
+        # Apply P&L calculation
+        trades = calculate_realized_pnl(trades)
+        
+        # Get open trades and add current prices/PnL
+        open_trades = get_open_trades(TRADE_FILE)
+        current_prices = {}
+        
+        # Get current prices for open positions
+        try:
+            for open_trade in open_trades:
+                symbol = open_trade["symbol"]
+                if symbol not in current_prices:
+                    price = get_current_price_for_symbol(symbol)
+                    if price > 0:
+                        current_prices[symbol] = price
+        except Exception as e:
+            logger.warning(f"Error getting current prices: {e}")
+        
+        # Update trades with current prices and calculate PnL for open positions
+        open_symbols = {trade["symbol"] for trade in open_trades}
+        
+        # Calculate position averages for open positions
+        open_position_averages = {}
+        for symbol in open_symbols:
+            symbol_trades = [t for t in trades if t["symbol"] == symbol]
+            buy_total_cost = 0
+            buy_total_amount = 0
+            
+            for trade in symbol_trades:
+                if trade["side"] == "buy":
+                    buy_total_cost += trade["price"] * trade["amount"]
+                    buy_total_amount += trade["amount"]
+                elif trade["side"] == "sell":
+                    # Reduce the position
+                    sell_amount = trade["amount"]
+                    if buy_total_amount >= sell_amount:
+                        # Calculate average price for the sold portion
+                        avg_price = buy_total_cost / buy_total_amount if buy_total_amount > 0 else 0
+                        buy_total_cost -= avg_price * sell_amount
+                        buy_total_amount -= sell_amount
+            
+            if buy_total_amount > 0:
+                open_position_averages[symbol] = {
+                    "average_price": buy_total_cost / buy_total_amount,
+                    "total_amount": buy_total_amount
+                }
+        
+        for trade in trades:
+            symbol = trade["symbol"]
+            
+            # Add current price if available
+            if symbol in current_prices:
+                trade["current_price"] = current_prices[symbol]
+            
+            # Mark open positions and calculate unrealized PnL
+            if symbol in open_symbols and trade["side"] == "buy":
+                trade["status"] = "active"
+                
+                # Calculate unrealized PnL for open positions using position average
+                if symbol in open_position_averages:
+                    avg_entry_price = open_position_averages[symbol]["average_price"]
+                    current_price = trade["current_price"]
+                    position_amount = open_position_averages[symbol]["total_amount"]
+                    
+                    if current_price > 0 and avg_entry_price > 0 and position_amount > 0:
+                        # Calculate unrealized P&L for the entire position
+                        unrealized_pnl = (current_price - avg_entry_price) * position_amount
+                        unrealized_pnl_percentage = (unrealized_pnl / (avg_entry_price * position_amount)) * 100
+                        
+                        # Only assign unrealized P&L to the most recent buy trade for this symbol
+                        symbol_buys = [t for t in trades if t["symbol"] == symbol and t["side"] == "buy"]
+                        if symbol_buys and trade == symbol_buys[-1]:
+                            trade["unrealized_pnl"] = unrealized_pnl
+                            trade["unrealized_pnl_percentage"] = unrealized_pnl_percentage
+        
+        # Sort trades by timestamp (most recent first)
+        trades.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        # Return the most recent 200 trades to avoid overwhelming the frontend
+        return jsonify(trades[-200:] if len(trades) > 200 else trades)
+        
+    except Exception as e:
+        logger.error(f"Error in trades_data endpoint: {e}")
+        return jsonify([])
+
+
 @app.route("/trades_tail")
 def trades_tail():
     trades = ""
@@ -3507,7 +3702,7 @@ def trades_tail():
 
 @app.route("/api/current-prices")
 def api_current_prices():
-    """Return current market prices for symbols."""
+    """Return current market prices for symbols with fresh data."""
     try:
         # Check if historical data is requested
         include_history = request.args.get("history", "").lower() == "true"
@@ -3550,28 +3745,53 @@ def api_current_prices():
                     404,
                 )
 
-        # Read trades to get unique symbols
-        df = log_reader._read_trades(TRADE_FILE)
-        if df.empty:
-            return jsonify({})
-
-        symbols = df["symbol"].unique().tolist()
+        # Get symbols from active positions in TradeManager
         current_prices = {}
+        try:
+            from crypto_bot.utils.trade_manager import get_trade_manager
+            trade_manager = get_trade_manager()
+            positions = trade_manager.get_all_positions()
+            symbols = [pos.symbol for pos in positions if pos.is_open and pos.total_amount > 0]
+            
+            # Force refresh prices for all active positions
+            for symbol in symbols:
+                try:
+                    # Always fetch fresh price, ignore cache
+                    fresh_price = get_current_price_for_symbol(symbol)
+                    if fresh_price and fresh_price > 0:
+                        current_prices[symbol] = fresh_price
+                        # Update TradeManager cache with fresh price
+                        trade_manager.update_price(symbol, fresh_price)
+                        logger.debug(f"Refreshed price for {symbol}: ${fresh_price}")
+                    else:
+                        # Fallback to cached price if fresh fetch fails
+                        cached_price = trade_manager.price_cache.get(symbol)
+                        if cached_price:
+                            current_prices[symbol] = float(cached_price)
+                            logger.warning(f"Using cached price for {symbol}: ${cached_price}")
+                except Exception as e:
+                    logger.error(f"Error refreshing price for {symbol}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Error accessing TradeManager for price refresh: {e}")
+            # Fallback to CSV-based approach
+            df = log_reader._read_trades(TRADE_FILE)
+            if not df.empty:
+                symbols = df["symbol"].unique().tolist()
+                for symbol in symbols:
+                    try:
+                        price = get_current_price_for_symbol(symbol)
+                        if price > 0:
+                            current_prices[symbol] = price
+                    except Exception as e:
+                        logger.error(f"Error getting price for {symbol}: {e}")
+                        continue
 
-        # For now, we'll use a simple approach to get current prices
-        # In a real implementation, you'd fetch from exchange APIs
-        for symbol in symbols:
-            try:
-                # Try to get price from various sources
-                price = get_current_price_for_symbol(symbol)
-                if price > 0:
-                    current_prices[symbol] = price
-            except Exception as e:
-                print(f"Error getting price for {symbol}: {e}")
-                continue
-
+        logger.info(f"Returning current prices for {len(current_prices)} symbols")
         return jsonify(current_prices)
     except Exception as e:
+        logger.error(f"Error in api_current_prices: {e}")
         return jsonify({"error": str(e)})
 
 
@@ -3706,8 +3926,76 @@ def api_sell_position():
             )
 
         print(f"API: Received sell request for {amount} {symbol}")
+        try:
+            # Debug: Check TradeManager state
+            from crypto_bot.utils.trade_manager import get_trade_manager
+            trade_manager = get_trade_manager()
+            print(f"API: TradeManager instance: {id(trade_manager)}")
+            positions = trade_manager.get_all_positions()
+            print(f"API: TradeManager has {len(positions)} open positions")
+            for pos in positions:
+                if pos.symbol == symbol:
+                    print(f"API: Found position {symbol}: side={pos.side}, amount={pos.total_amount}")
+                    break
+            else:
+                print(f"API: Position {symbol} not found in TradeManager")
 
-        # Try to get the TradeManager and sell the position
+            # Write debug info to file
+            with open("/tmp/sell_debug.log", "a") as f:
+                f.write(f"Received sell request for {amount} {symbol}\n")
+                f.write(f"TradeManager instance: {id(trade_manager)}\n")
+                f.write(f"Open positions: {len(positions)}\n")
+                for pos in positions:
+                    if pos.symbol == symbol:
+                        f.write(f"Found position: {pos.symbol} {pos.side} {pos.total_amount}\n")
+                        break
+            # Check for duplicate sell requests to prevent accumulation
+            import json as _json
+            from datetime import datetime as _dt, timedelta
+            sell_requests_file = LOG_DIR / 'sell_requests.json'
+            requests = []
+            if sell_requests_file.exists():
+                try:
+                    with open(sell_requests_file, 'r') as _f:
+                        requests = _json.load(_f)
+                        if not isinstance(requests, list):
+                            requests = []
+                except Exception:
+                    requests = []
+
+            # Filter out duplicate requests for the same symbol (only keep the most recent)
+            filtered_requests = []
+            symbol_found = False
+            for req in requests:
+                if req.get('symbol') == symbol:
+                    if not symbol_found:
+                        # Keep only the most recent request for this symbol
+                        filtered_requests.append({
+                            'symbol': symbol,
+                            'amount': float(amount),
+                            'timestamp': _dt.utcnow().isoformat()
+                        })
+                        symbol_found = True
+                else:
+                    filtered_requests.append(req)
+
+            # If this symbol wasn't in the existing requests, add it
+            if not symbol_found:
+                filtered_requests.append({
+                    'symbol': symbol,
+                    'amount': float(amount),
+                    'timestamp': _dt.utcnow().isoformat()
+                })
+
+            sell_requests_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(sell_requests_file, 'w') as _f:
+                _json.dump(filtered_requests, _f, indent=2)
+            logger.info(f"API: Added/updated sell request for {symbol} (prevented duplicates)")
+        except Exception as _e:
+            logger.warning(f"API: Failed to process sell request for {symbol}: {_e}")
+
+        # IMMEDIATE EXECUTION: Try to sell the position right away
+        position_locked = False
         try:
             from decimal import Decimal
             from crypto_bot.utils.trade_manager import (
@@ -3716,6 +4004,16 @@ def api_sell_position():
             )
 
             trade_manager = get_trade_manager()
+
+            # Check if position is already being processed (basic lock mechanism)
+            if hasattr(trade_manager, '_sell_locks'):
+                if symbol in trade_manager._sell_locks:
+                    return jsonify({
+                        "success": False,
+                        "error": f"Position {symbol} is already being sold. Please wait.",
+                    }), 409
+                trade_manager._sell_locks.add(symbol)
+                position_locked = True
 
             # Find the position to sell
             positions = trade_manager.get_all_positions()
@@ -3726,24 +4024,176 @@ def api_sell_position():
                     position_to_sell = pos
                     break
 
-            if not position_to_sell:
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": f"No open position found for {symbol}",
-                        }
-                    ),
-                    404,
-                )
+            if position_to_sell:
+                print(f"API: Starting immediate execution for {symbol}")
+                # IMMEDIATE EXECUTION: Close position right away
+                try:
+                    # Determine close amount: force full close to avoid precision residuals
+                    requested_amount = Decimal(str(amount))
+                    total_amt = position_to_sell.total_amount
+                    if total_amt > 0 and requested_amount >= (total_amt * Decimal("0.99999999")):
+                        close_amount = total_amt
+                    else:
+                        # For now enforce full close to prevent reappearing cards due to dust
+                        close_amount = total_amt
 
-            # Determine close amount (support partial close in future)
+                    # Get current market price for the symbol
+                    try:
+                        current_price = get_current_price(symbol)
+                    except Exception:
+                        current_price = float(position_to_sell.average_price)
+
+                    if not current_price or current_price <= 0:
+                        current_price = float(position_to_sell.average_price)
+
+                    # Create and record a market sell (or buy if short) to close position
+                    side = "sell" if position_to_sell.side == "long" else "buy"
+                    print(f"API: Creating {side} trade for {close_amount} {symbol} at ${current_price}")
+                    trade = create_trade(
+                        symbol=symbol,
+                        side=side,
+                        amount=Decimal(str(close_amount)),
+                        price=Decimal(str(current_price)),
+                        strategy="manual_close_immediate",
+                        exchange="paper",  # backend default
+                        order_id=f"ui_close_{symbol}_{int(datetime.utcnow().timestamp())}",
+                        client_order_id=f"ui_close_{symbol}_{int(datetime.utcnow().timestamp())}",
+                    )
+
+                    print(f"API: Recording trade in TradeManager")
+                    try:
+                        trade_manager.record_trade(trade)
+                        print(f"API: Trade recorded successfully")
+                    except Exception as record_err:
+                        print(f"API: Failed to record trade: {record_err}")
+                        raise
+
+                    try:
+                        trade_manager.save_state()
+                        print(f"API: State saved successfully")
+                    except Exception as save_err:
+                        print(f"API: Failed to save state: {save_err}")
+                        raise
+
+                    # Calculate PnL for response
+                    entry_price = float(position_to_sell.average_price)
+                    pnl = (current_price - entry_price) * float(close_amount) * (1 if position_to_sell.side == "long" else -1)
+
+                    print(f"API: IMMEDIATE EXECUTION: Closed {symbol} position with PnL ${pnl:.2f}")
+                    logger.info(f"IMMEDIATE EXECUTION: Closed {symbol} position with PnL ${pnl:.2f}")
+
+                    # Remove position from positions.log to prevent sync service from re-adding it
+                    try:
+                        from pathlib import Path
+                        positions_log_path = LOG_DIR / "positions.log"
+                        if positions_log_path.exists():
+                            # Read and filter out the closed symbol
+                            entries = []
+                            with open(positions_log_path, 'r') as f:
+                                for line in f:
+                                    line = line.strip()
+                                    if line and 'Active' in line:
+                                        # Parse the line to check if it's the symbol we just closed
+                                        parts = line.split()
+                                        line_symbol = None
+                                        for i, part in enumerate(parts):
+                                            if part == 'Active' and i + 1 < len(parts):
+                                                line_symbol = parts[i + 1]
+                                                break
+                                        # Keep the line if it's not the symbol we just closed
+                                        if line_symbol != symbol:
+                                            entries.append(line)
+                                    else:
+                                        # Keep non-position lines (comments, balance entries, etc.)
+                                        entries.append(line)
+
+                            # Write back to file
+                            with open(positions_log_path, 'w') as f:
+                                for entry in entries:
+                                    f.write(entry + "\n")
+
+                            logger.info(f"API: Removed {symbol} from positions.log after immediate closure")
+                    except Exception as log_err:
+                        logger.warning(f"API: Failed to remove {symbol} from positions.log: {log_err}")
+
+                    # Return success response
+                    return jsonify({
+                        "success": True,
+                        "message": f"Successfully closed {symbol} position",
+                        "pnl": round(pnl, 2),
+                        "close_price": current_price,
+                        "amount_closed": float(close_amount)
+                    })
+
+                except Exception as close_error:
+                    print(f"API: IMMEDIATE EXECUTION failed for {symbol}: {close_error}")
+                    logger.error(f"IMMEDIATE EXECUTION failed for {symbol}: {close_error}")
+                    # Continue to fallback method
+                    if position_locked:
+                        trade_manager._sell_locks.discard(symbol)
+
+            # Fallback: try to close directly in state file to reconcile UI
+            try:
+                import json as _json
+                from decimal import Decimal as _D
+                state_path = LOG_DIR / "trade_manager_state.json"
+                if state_path.exists():
+                    with open(state_path, "r") as _f:
+                        _state = _json.load(_f)
+                    pos = _state.get("positions", {}).get(symbol)
+                    if pos and float(pos.get("total_amount", 0)) > 0:
+                        # Record a synthetic closing trade and zero out amount
+                        close_amt = _D(str(pos["total_amount"]))
+                        close_price = float(get_current_price(symbol) or pos.get("average_price", 0) or 0)
+                        if close_price <= 0:
+                            close_price = float(pos.get("average_price", 0) or 0)
+                        _state.setdefault("trades", []).append({
+                            "id": "manual-ui-close-fallback",
+                            "symbol": symbol,
+                            "side": "buy" if pos.get("side") == "short" else "sell",
+                            "amount": float(close_amt),
+                            "price": float(close_price),
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "strategy": "manual_close_fallback",
+                            "exchange": "paper",
+                            "fees": 0.0,
+                            "status": "filled",
+                            "order_id": None,
+                            "client_order_id": None,
+                            "metadata": {},
+                        })
+                        _state["positions"][symbol]["total_amount"] = 0.0
+                        with open(state_path, "w") as _f:
+                            _json.dump(_state, _f, indent=2)
+                        logger.warning(
+                            f"API: Fallback-closed {symbol} directly in state file to resolve UI inconsistency"
+                        )
+                        return jsonify({"success": True, "message": f"Closed {symbol}"})
+            except Exception as _fallback_err:
+                logger.error(f"API: Fallback state close failed for {symbol}: {_fallback_err}")
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"No open position found for {symbol}",
+                    }
+                ),
+                404,
+            )
+
+            # Determine close amount: force full close to avoid precision residuals
             try:
                 requested_amount = Decimal(str(amount))
             except Exception:
-                requested_amount = Decimal(str(position_to_sell.total_amount))
+                requested_amount = position_to_sell.total_amount
 
-            close_amount = min(position_to_sell.total_amount, requested_amount)
+            # If requested ~ full size, snap to full; otherwise still close full by default
+            total_amt = position_to_sell.total_amount
+            if total_amt > 0 and requested_amount >= (total_amt * Decimal("0.99999999")):
+                close_amount = total_amt
+            else:
+                # For now enforce full close to prevent reappearing cards due to dust
+                close_amount = total_amt
 
             # Get current market price for the symbol
             try:
@@ -3773,6 +4223,73 @@ def api_sell_position():
 
             # Save the updated state
             trade_manager.save_state()
+
+            # Remove position from positions.log to prevent sync service from re-adding it
+            try:
+                from pathlib import Path
+                positions_log_path = LOG_DIR / "positions.log"
+                if positions_log_path.exists():
+                    # Read and filter out the closed symbol
+                    entries = []
+                    with open(positions_log_path, 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and 'Active' in line:
+                                # Parse the line to check if it's the symbol we just closed
+                                parts = line.split()
+                                line_symbol = None
+                                for i, part in enumerate(parts):
+                                    if part == 'Active' and i + 1 < len(parts):
+                                        line_symbol = parts[i + 1]
+                                        break
+                                # Keep the line if it's not the symbol we just closed
+                                if line_symbol != symbol:
+                                    entries.append(line)
+                            else:
+                                # Keep non-position lines (comments, balance entries, etc.)
+                                entries.append(line)
+
+                    # Write back to file
+                    with open(positions_log_path, 'w') as f:
+                        for entry in entries:
+                            f.write(entry + "\n")
+
+                    logger.info(f"API: Removed {symbol} from positions.log after successful closure")
+            except Exception as log_err:
+                logger.warning(f"API: Failed to remove {symbol} from positions.log: {log_err}")
+
+            # Verify closure persisted; if not, force-close as a safety net
+            try:
+                from decimal import Decimal as _D
+                pos_after = trade_manager.positions.get(symbol)
+                if pos_after and getattr(pos_after, "total_amount", 0) and pos_after.total_amount > 0:
+                    logger.warning(
+                        f"API: Position {symbol} still open after record_trade; forcing close to prevent UI reappearance"
+                    )
+                    pos_after.total_amount = _D("0")
+                    trade_manager.positions[symbol] = pos_after
+                    trade_manager.save_state()
+            except Exception as _force_err:
+                logger.error(f"API: Force-close verification failed for {symbol}: {_force_err}")
+
+            # Also append to trades.csv to keep CSV-based fallbacks consistent
+            try:
+                from datetime import datetime as _dt
+                import csv as _csv
+
+                TRADE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                with open(TRADE_FILE, 'a', newline='') as _fh:
+                    _writer = _csv.writer(_fh)
+                    _writer.writerow([
+                        symbol,
+                        side,
+                        float(close_amount),
+                        float(current_price),
+                        _dt.utcnow().isoformat(),
+                        False,  # is_stop flag
+                    ])
+            except Exception as csv_err:
+                logger.warning(f"Failed to append manual close to trades.csv: {csv_err}")
 
             return jsonify(
                 {
@@ -4484,6 +5001,42 @@ def _get_price_source_health(source_name: str) -> dict:
     }
 
 
+def safe_json_load(file_path):
+    """Safely load JSON file, handling common corruption issues."""
+    try:
+        with open(file_path, "r") as f:
+            content = f.read()
+
+        # Remove trailing non-JSON characters
+        content = content.strip()
+        if content.endswith('%'):
+            content = content[:-1].strip()
+        if content.endswith(','):
+            content = content[:-1].strip()
+
+        # Find the last valid closing brace
+        last_brace = content.rfind('}')
+        if last_brace != -1:
+            content = content[:last_brace + 1]
+
+        return json.loads(content)
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"JSON parsing failed, attempting to repair: {e}")
+        try:
+            # Try to extract just the JSON portion
+            start = content.find('{')
+            if start != -1:
+                content = content[start:]
+                last_brace = content.rfind('}')
+                if last_brace != -1:
+                    content = content[:last_brace + 1]
+                    return json.loads(content)
+        except Exception as repair_error:
+            logger.error(f"JSON repair also failed: {repair_error}")
+
+        raise e
+
+
 def get_performance_data():
     """Get performance data for dashboard metrics."""
     try:
@@ -4493,18 +5046,17 @@ def get_performance_data():
 
         state_file = Path("crypto_bot/logs/trade_manager_state.json")
         if state_file.exists():
-            with open(state_file, "r") as f:
-                state = json.load(f)
+            state = safe_json_load(state_file)
 
             # Calculate basic performance metrics
             trades = state.get("trades", [])
             total_trades = len(trades)
 
             if total_trades > 0:
-                # Calculate win rate
+                # Calculate win rate based on pnl/fees
                 winning_trades = [
-                    t for t in trades if t.get("fees", 0) > 0
-                ]  # Simplified win detection
+                    t for t in trades if t.get("pnl", 0) > 0 or t.get("fees", 0) > 0
+                ]  # Better win detection
                 win_rate = (
                     len(winning_trades) / total_trades
                     if total_trades > 0
@@ -4764,7 +5316,13 @@ if __name__ == "__main__":
                 continue
         return start_port
 
-    port = find_free_port()
+    # Allow overriding port via environment variable for consistency
+    import os as _os
+    env_port = _os.environ.get("LCT_PORT") or _os.environ.get("FLASK_PORT_OVERRIDE")
+    try:
+        port = int(env_port) if env_port else find_free_port()
+    except Exception:
+        port = find_free_port()
     print(f"FLASK_PORT={port}")  # This is what startup scripts look for
     print(f"Starting Flask app on port {port}...")
     print("Press Ctrl+C to stop the server")

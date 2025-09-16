@@ -282,16 +282,22 @@ class PositionMonitor:
             # Try WebSocket first if available and enabled
             if self.use_websocket and hasattr(self.exchange, 'watch_ticker'):
                 try:
-                    ticker = await self.exchange.watch_ticker(symbol)
+                    if asyncio.iscoroutinefunction(self.exchange.watch_ticker):
+                        ticker = await self.exchange.watch_ticker(symbol)
+                    else:
+                        ticker = self.exchange.watch_ticker(symbol)
                     return float(ticker['last'])
                 except Exception as e:
                     logger.debug(f"WebSocket price fetch failed for {symbol}: {e}")
                     if not self.fallback_to_rest:
                         return None
-            
+
             # Fallback to REST API
             if self.fallback_to_rest:
-                ticker = await self.exchange.fetch_ticker(symbol)
+                if asyncio.iscoroutinefunction(self.exchange.fetch_ticker):
+                    ticker = await self.exchange.fetch_ticker(symbol)
+                else:
+                    ticker = self.exchange.fetch_ticker(symbol)
                 return float(ticker['last'])
             
             return None
@@ -388,6 +394,18 @@ class PositionMonitor:
             pnl_pct = ((current_price - entry_price) / entry_price) * (
                 1 if position["side"] == "buy" else -1
             )
+
+            # Update highest/lowest prices continuously for tracking
+            if position["side"] == "buy":
+                position["highest_price"] = max(
+                    position.get("highest_price", current_price),
+                    current_price
+                )
+            else:  # short position
+                position["lowest_price"] = min(
+                    position.get("lowest_price", current_price),
+                    current_price
+                )
 
             # Only update trailing stop if we're in profit beyond minimum threshold
             if pnl_pct >= min_gain_to_trail:

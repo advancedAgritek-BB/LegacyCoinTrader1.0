@@ -6,7 +6,7 @@ import logging
 
 import pandas as pd
 import numpy as np
-import ta
+# import ta  # Unused import
 import yaml
 
 from .pattern_detector import detect_patterns
@@ -152,8 +152,26 @@ def _normalize(probs: Dict[str, float]) -> Dict[str, float]:
 def _classify_core(
     data: pd.DataFrame, cfg: dict, higher_df: Optional[pd.DataFrame] = None
 ) -> str:
-    if data is None or data.empty or len(data) < 20:
+    # Use configurable minimum bars instead of hard-coded 20
+    min_bars = cfg.get("ml_min_bars", 20)
+    if data is None or data.empty or len(data) < 5:
+        logger.debug(f"Insufficient data for regime classification: {len(data) if data is not None else 0} bars (need 5)")
         return "unknown"
+    
+    # If we have less than ml_min_bars but at least 5, use basic price action
+    if len(data) < min_bars:
+        logger.debug(f"Using basic price action analysis: {len(data)} bars (need {min_bars} for full analysis)")
+        recent_close = data["close"].iloc[-5:].mean()
+        current_close = data["close"].iloc[-1]
+        price_change = (current_close - recent_close) / recent_close
+        volume_change = data["volume"].iloc[-1] / data["volume"].iloc[-5:].mean()
+        
+        if volume_change > 1.3 and abs(price_change) > 0.005:
+            return "breakout"
+        elif abs(price_change) > 0.015:
+            return "trending"
+        else:
+            return "sideways"
 
     df = data.copy()
     for col in ("ema20", "ema50", "adx", "rsi", "atr", "bb_width"):
@@ -196,20 +214,57 @@ def _classify_core(
             # Calculate ATR manually
             df["atr"] = atr
             df["normalized_range"] = (df["high"] - df["low"]) / df["atr"]
-        except IndexError:
+        except (IndexError, ValueError, ZeroDivisionError) as e:
+            logger.warning(f"Error calculating indicators: {e}. Using fallback regime detection.")
+            # Try to determine regime with basic price action if indicators fail
+            if len(df) >= 5:
+                recent_close = df["close"].iloc[-5:].mean()
+                current_close = df["close"].iloc[-1]
+                price_change = (current_close - recent_close) / recent_close
+                
+                if abs(price_change) > 0.02:  # 2% change indicates trending
+                    return "trending" if price_change > 0 else "trending"
+                else:
+                    return "sideways"
             return "unknown"
     else:
+        # If we don't have enough data for indicators, use basic price action analysis
+        logger.debug(f"Insufficient data for indicators ({len(df)} < {cfg['indicator_window']}), using basic analysis")
         df["adx"] = np.nan
         df["rsi"] = np.nan
         df["atr"] = np.nan
         df["normalized_range"] = np.nan
+        
+        # Basic regime detection with limited data
+        if len(df) >= 5:
+            recent_close = df["close"].iloc[-5:].mean()
+            current_close = df["close"].iloc[-1]
+            price_change = (current_close - recent_close) / recent_close
+            volume_change = df["volume"].iloc[-1] / df["volume"].iloc[-5:].mean() if len(df) >= 5 else 1.0
+            
+            if volume_change > 1.5 and abs(price_change) > 0.01:
+                return "breakout"
+            elif abs(price_change) > 0.02:
+                return "trending"
+            else:
+                return "sideways"
 
     if len(df) >= cfg["bb_window"]:
-        # Calculate Bollinger Bands manually
-        bb_mid = df["close"].rolling(cfg["bb_window"]).mean()
-        bb_std = df["close"].rolling(cfg["bb_window"]).std()
-        bb_width = (bb_std * 4) / bb_mid  # 2 standard deviations on each side
-        df["bb_width"] = bb_width
+        # Use the project's local Bollinger Bands implementation for consistency
+        try:
+            from ta.volatility import BollingerBands
+            bb = BollingerBands(df["close"].values, window=cfg["bb_window"], ndev=2)
+            bb_width = bb.bollinger_wband()
+            # Note: local implementation uses 2 std devs, so width is already correct
+            # No need to multiply by 4 like the old manual calculation
+            df["bb_width"] = bb_width
+        except Exception as e:
+            logger.warning(f"Bollinger Bands calculation failed in regime classifier: {e}")
+            # Fallback to simple calculation if ta module fails
+            bb_mid = df["close"].rolling(cfg["bb_window"]).mean()
+            bb_std = df["close"].rolling(cfg["bb_window"]).std()
+            bb_width = (bb_std * 4) / bb_mid
+            df["bb_width"] = bb_width
 
     df["volume_change"] = df["volume"].pct_change()
     if len(df) >= cfg["ma_window"]:
@@ -351,7 +406,7 @@ def _classify_all(
     if df is None:
         return "unknown", {"unknown": 0.0}, {}
 
-    if len(df) < ml_min_bars:
+    if len(df) < 5:
         return "unknown", _probabilities("unknown"), {}
 
     pattern_min = float(cfg.get("pattern_min_conf", 0.0))
@@ -397,14 +452,28 @@ def _classify_all(
             label, conf = _ml_fallback(df)
             log_patterns(label, patterns)
             return label, _normalize(_probabilities(label, conf)), patterns
-        if len(df) >= ml_min_bars:
-            logger.info("Skipping ML fallback \u2014 ML disabled")
+        elif len(df) >= 5:  # Use basic fallback for very limited data
+            logger.info("Using basic price action fallback for regime detection (%d rows)", len(df))
+            recent_close = df["close"].iloc[-5:].mean()
+            current_close = df["close"].iloc[-1]
+            price_change = (current_close - recent_close) / recent_close
+            volume_change = df["volume"].iloc[-1] / df["volume"].iloc[-5:].mean()
+            
+            if volume_change > 1.3 and abs(price_change) > 0.005:
+                fallback_regime = "breakout"
+            elif abs(price_change) > 0.015:
+                fallback_regime = "trending"
+            else:
+                fallback_regime = "sideways"
+            
+            logger.info(f"Basic fallback determined regime: {fallback_regime}")
+            return fallback_regime, _probabilities(fallback_regime, 0.7), patterns
         else:
-            logger.info(
-                "Skipping ML fallback \u2014 insufficient data (%d rows)", len(df)
-            )
+            if len(df) >= ml_min_bars:
+                logger.info("Skipping ML fallback — ML disabled")
+            else:
+                logger.info("Skipping ML fallback — insufficient data (%d rows)", len(df))
         return regime, _probabilities(regime, 0.0), patterns
-
     if ml_label != "unknown" and use_ml and len(df) >= ml_min_bars:
         weight = cfg.get("ml_blend_weight", 0.5)
         final_probs = {
@@ -462,9 +531,9 @@ def classify_regime(
     _configure_logger(cfg)
     cfg = adaptive_thresholds(cfg, df, symbol)
 
-    ml_min_bars = cfg.get("ml_min_bars", 20)
+    # ml_min_bars = cfg.get("ml_min_bars", 20)  # Unused variable
 
-    if df_map is None and (df is None or len(df) < ml_min_bars):
+    if df_map is None and (df is None or len(df) < 5):
         return "unknown", set()
 
     result = _classify_all(df, higher_df, cfg, df_map=df_map)

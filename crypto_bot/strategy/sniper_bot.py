@@ -27,7 +27,7 @@ def generate_signal(
     price_fallback: bool = True,
     fallback_atr_mult: float = 1.5,
     fallback_volume_mult: float = 1.2,
-) -> Union[Tuple[float, str, float, bool], Tuple[float, str, float, bool]]:
+) -> Tuple[float, str]:
     """Detect pumps for newly listed tokens using early price and volume action.
 
     Parameters
@@ -74,7 +74,7 @@ def generate_signal(
     """
     symbol = config.get("symbol") if config else ""
     if symbol and ALLOWED_PAIRS and symbol not in ALLOWED_PAIRS:
-        return 0.0, "none", 0.0, False
+        return 0.0, "none"
 
     if config:
         breakout_pct = config.get("breakout_pct", breakout_pct)
@@ -93,8 +93,8 @@ def generate_signal(
         max_history = min(max_history, 20)
         initial_window = max(1, initial_window // 2)
 
-    if len(df) < initial_window:
-        return 0.0, "none", 0.0, False
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty or len(df) < initial_window:
+        return 0.0, "none"
 
     price_change = df["close"].iloc[-1] / df["close"].iloc[0] - 1
     if direction == "auto" and price_change < 0:
@@ -102,7 +102,7 @@ def generate_signal(
         score = 1.0
         if config is None or config.get("atr_normalization", True):
             score = normalize_score_by_volatility(df, score)
-        return score, "short", atr, False
+        return score, "short"
 
     base_volume = df["volume"].iloc[:initial_window].mean()
     vol_ratio = df["volume"].iloc[-1] / base_volume if base_volume > 0 else 0
@@ -129,7 +129,7 @@ def generate_signal(
             event = True
 
     if df["volume"].iloc[-1] < min_volume:
-        return 0.0, "none", atr, event
+        return 0.0, "none"
 
     if (
         len(df) <= max_history
@@ -146,7 +146,7 @@ def generate_signal(
         trade_direction = direction
         if direction == "auto":
             trade_direction = "short" if price_change < 0 else "long"
-        return score, trade_direction, atr, event
+        return score, trade_direction
 
     trade_direction = direction
     score = 0.0

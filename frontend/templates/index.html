@@ -1005,19 +1005,19 @@ function marketSellPosition(symbol, amount, event) {
     button.disabled = true;
   }
   
-  console.log('Sending sell request to API:', { symbol, amount });
-  console.log('Request URL:', '/api/sell-position');
-  console.log('Request body:', JSON.stringify({ symbol, amount }));
+  const primaryUrl = new URL('/api/sell-position', window.location.origin).toString();
+  const fallbackUrl = new URL('/sell-position', window.location.origin).toString();
+  console.log('Sending sell request to API:', { symbol, amount, primaryUrl, fallbackUrl });
   
-  fetch('/api/sell-position', {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => { try { controller.abort(); } catch (_) {} }, 12000);
+  fetch(primaryUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      symbol: symbol,
-      amount: amount
-    })
+    body: JSON.stringify({ symbol: symbol, amount: amount }),
+    signal: controller.signal
   })
   .then(response => {
     console.log('API response received');
@@ -1031,29 +1031,53 @@ function marketSellPosition(symbol, amount, event) {
       console.log('Sell successful, showing toast...');
       window.LegacyCoinTrader.showToast(`Market sell order submitted for ${amount} ${symbol}`, 'success');
       console.log('Toast shown, refreshing positions in 2 seconds...');
+      
+      // Immediately remove the position card from the DOM if it exists
+      const positionCard = document.querySelector(`.position-card[data-symbol="${symbol}"]`);
+      if (positionCard) {
+        positionCard.remove();
+        console.log(`Removed position card for ${symbol}`);
+      }
+      
+      // Update position count if it exists
+      const positionCount = document.querySelector('.position-count');
+      if (positionCount) {
+        const currentCount = parseInt(positionCount.textContent) || 0;
+        positionCount.textContent = `${Math.max(0, currentCount - 1)} positions`;
+      }
+      
       // Refresh positions after a short delay
       setTimeout(() => {
         console.log('Refreshing positions...');
         updateOpenPositions();
       }, 2000);
-      // Reset button immediately
-      if (button) {
-        console.log('Resetting button...');
-        button.innerHTML = originalText;
-        button.disabled = false;
-      }
-      // Clear processing flag
-      isProcessingMarketSell = false;
     } else {
-      console.log('Sell failed:', data.error);
-      window.LegacyCoinTrader.showToast(`Error: ${data.error}`, 'error');
-      // Reset button
-      if (button) {
-        button.innerHTML = originalText;
-        button.disabled = false;
-      }
-      // Clear processing flag
-      isProcessingMarketSell = false;
+      console.warn('Primary sell endpoint failed, trying fallback:', data.error);
+      return fetch(fallbackUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: symbol, amount: amount })
+      })
+      .then(r => r.json())
+      .then(fb => {
+        console.log('Fallback response:', fb);
+        if (fb && fb.success) {
+          window.LegacyCoinTrader.showToast(`Market sell order submitted for ${amount} ${symbol}`, 'success');
+          const positionCard = document.querySelector(`.position-card[data-symbol="${symbol}"]`);
+          if (positionCard) positionCard.remove();
+          const positionCount = document.querySelector('.position-count');
+          if (positionCount) {
+            const currentCount = parseInt(positionCount.textContent) || 0;
+            positionCount.textContent = `${Math.max(0, currentCount - 1)} positions`;
+          }
+          setTimeout(() => {
+            console.log('Refreshing positions...');
+            updateOpenPositions();
+          }, 2000);
+        } else {
+          window.LegacyCoinTrader.showToast(`Error: ${fb?.error || 'Unknown sell error'}`, 'error');
+        }
+      });
     }
   })
   .catch(error => {
@@ -1062,17 +1086,17 @@ function marketSellPosition(symbol, amount, event) {
     console.error('Error message:', error.message);
     console.error('Error stack:', error.stack);
     window.LegacyCoinTrader.showToast('Error submitting sell order', 'error');
-    // Reset button
+  })
+  .finally(() => {
+    clearTimeout(timeoutId);
+    // Always reset button and clear processing flag
     if (button) {
+      console.log('Resetting button...');
       button.innerHTML = originalText;
       button.disabled = false;
     }
-    // Clear processing flag
     isProcessingMarketSell = false;
   });
-  
-  // Clear processing flag
-  isProcessingMarketSell = false;
   console.log('=== MARKET SELL DEBUG END ===');
 }
 

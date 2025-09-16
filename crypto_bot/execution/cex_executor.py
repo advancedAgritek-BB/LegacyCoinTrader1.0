@@ -140,8 +140,9 @@ def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
     use_ws = config.get("use_websocket", False)
 
     ws_client: Optional[KrakenWSClient] = None
-    api_key = os.getenv("API_KEY")
-    api_secret = os.getenv("API_SECRET")
+    # Prefer generic names, but fall back to Kraken-specific env vars
+    api_key = os.getenv("API_KEY") or os.getenv("KRAKEN_API_KEY")
+    api_secret = os.getenv("API_SECRET") or os.getenv("KRAKEN_API_SECRET")
     ws_token = os.getenv("KRAKEN_WS_TOKEN")
     api_token = os.getenv("KRAKEN_API_TOKEN")
 
@@ -161,9 +162,7 @@ def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
         # Add retry method to exchange instance
         exchange.fetch_balance_with_retry = lambda: fetch_balance_with_retry(exchange)
     elif exchange_name == "kraken":
-        if use_ws:
-            ws_client = KrakenWSClient(api_key, api_secret, ws_token, api_token)
-
+        # Create CCXT exchange first to apply nonce improvements
         exchange = ccxt_mod.kraken(
             {
                 "apiKey": api_key,
@@ -174,7 +173,15 @@ def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
 
         # Apply Kraken nonce improvements
         setup_kraken_nonce_improvements(exchange, config)
-        
+
+        # Create WebSocket client with the exchange that has nonce improvements
+        if use_ws:
+            ws_client = KrakenWSClient(api_key, api_secret, ws_token, api_token)
+            # Pass the exchange instance with nonce improvements to the WebSocket client
+            # This ensures the WebSocket client uses the same nonce management as the main exchange
+            ws_client.exchange = exchange
+            logger.info("WebSocket client configured with improved nonce management")
+
         # Add retry method to exchange instance
         exchange.fetch_balance_with_retry = lambda: fetch_balance_with_retry(exchange)
     else:
@@ -420,9 +427,24 @@ async def execute_trade_async(
                 raise ValueError("token/chat_id or notifier must be provided")
             notifier = TelegramNotifier(token, chat_id)
 
+    # Validate minimum order size before attempting trade
+    try:
+        if not dry_run and hasattr(exchange, 'markets') and symbol in exchange.markets:
+            market = exchange.markets[symbol]
+            min_amount = market.get('limits', {}).get('amount', {}).get('min', 0)
+
+            if min_amount > 0 and amount < min_amount:
+                logger.warning(f"Order amount {amount} below minimum {min_amount} for {symbol}")
+                err_msg = notifier.notify(f"\u26a0\ufe0f Amount Too Small: {amount} < {min_amount} for {symbol}")
+                if err_msg:
+                    logger.error("Failed to send message: %s", err_msg)
+                return {}
+    except Exception as e:
+        logger.debug(f"Could not validate minimum order size for {symbol}: {e}")
+
     msg = f"Placing {side} order for {amount} {symbol}"
     err = notifier.notify(msg)
-    
+
     if err:
         logger.error("Failed to send message: %s", err)
     if dry_run:
@@ -475,7 +497,27 @@ async def execute_trade_async(
                         exchange.create_market_order, symbol, side, amount
                     )
         except Exception as e:  # pragma: no cover - network
-            err_msg = notifier.notify(f"\u26a0\ufe0f Error: Order failed: {e}")
+            error_str = str(e).lower()
+
+            # Check for specific error types and provide better diagnostics
+            if "too many requests" in error_str or "429" in error_str or "rate limit" in error_str:
+                logger.warning(f"Rate limit error for {symbol} {side} {amount}: {e}")
+                err_msg = notifier.notify(f"\u26a0\ufe0f Rate Limit: Order delayed for {symbol}")
+            elif "insufficient funds" in error_str or "balance" in error_str:
+                logger.error(f"Insufficient funds for {symbol} {side} {amount}: {e}")
+                err_msg = notifier.notify(f"\u26a0\ufe0f Insufficient Funds: {symbol} order cancelled")
+            elif "invalid" in error_str and "nonce" in error_str:
+                logger.warning(f"Nonce error for {symbol} {side} {amount}: {e}")
+                err_msg = notifier.notify(f"\u26a0\ufe0f Nonce Error: Retrying {symbol} order")
+                # For nonce errors, we could implement retry logic here
+                # But for now, just log and return empty to indicate failure
+            elif "minimum" in error_str or "amount" in error_str:
+                logger.warning(f"Order amount too small for {symbol} {side} {amount}: {e}")
+                err_msg = notifier.notify(f"\u26a0\ufe0f Amount Too Small: {symbol} order cancelled")
+            else:
+                logger.error(f"Unknown order error for {symbol} {side} {amount}: {e}")
+                err_msg = notifier.notify(f"\u26a0\ufe0f Error: Order failed for {symbol}")
+
             if err_msg:
                 logger.error("Failed to send message: %s", err_msg)
             return {}

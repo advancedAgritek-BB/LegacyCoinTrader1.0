@@ -358,7 +358,12 @@ document.addEventListener('DOMContentLoaded', function() {
   startLiveUpdates();
   loadManualPrices();
   loadPriceSourceHealth();
-  setInterval(() => { updateOpenPositions(); loadManualPrices(); loadPriceSourceHealth(); }, 30000);
+  // Refresh prices more frequently for real-time updates
+  setInterval(() => { 
+    updateOpenPositions(); 
+    loadManualPrices(); 
+    loadPriceSourceHealth(); 
+  }, 15000); // Refresh every 15 seconds instead of 30
 });
 
 

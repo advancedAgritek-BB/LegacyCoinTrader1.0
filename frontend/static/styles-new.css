@@ -871,9 +871,10 @@ body.dark-theme {
 /* Position grid and cards */
 .positions-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(350px, 350px));
   gap: var(--space-lg);
   margin-top: var(--space-lg);
+  justify-content: start;
 }
 
 .position-card {
@@ -1668,7 +1669,8 @@ body.dark-theme {
   }
   
   .positions-grid {
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(300px, 300px));
+    justify-content: start;
   }
 }
 
@@ -1729,6 +1731,7 @@ body.dark-theme {
   
   .positions-grid {
     grid-template-columns: 1fr;
+    justify-content: center;
   }
   
   .position-card {

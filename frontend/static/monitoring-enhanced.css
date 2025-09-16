@@ -127,6 +127,10 @@ button.btn-secondary:hover {
     z-index: 1;
 }
 
+.component-table thead th[role="button"] {
+    cursor: pointer;
+}
+
 /* Last updated indicator */
 .last-updated {
     color: var(--text-muted);

@@ -48,10 +48,18 @@ MARKET_DATA_CONFIG = CircuitBreakerConfig(
     success_threshold=2
 )
 
+# Kraken-specific rate limiting configuration
+KRAKEN_RATE_LIMIT_CONFIG = {
+    'max_concurrent': 2,  # Very conservative for Kraken
+    'requests_per_minute': 10,  # Conservative limit for Kraken
+    'rate_limit_backoff': 120,  # 2 minutes backoff on 429 errors
+    'inter_request_delay': 2.0,  # 2 second delay between requests
+}
+
 # GeckoTerminal rate limiting configuration
 GECKO_RATE_LIMIT_CONFIG = {
-    'max_concurrent': 5,  # Reduced from 25 to prevent rate limiting
-    'requests_per_minute': 30,  # Conservative limit for GeckoTerminal
+    'max_concurrent': 3,  # Reduced from 25 to prevent rate limiting
+    'requests_per_minute': 20,  # Conservative limit for GeckoTerminal
     'rate_limit_backoff': 60,  # 60 seconds backoff on 429 errors
 }
 
@@ -829,22 +837,43 @@ async def _fetch_ohlcv_with_circuit_breaker(exchange, symbol: str, timeframe: st
     """Fetch OHLCV data with circuit breaker protection."""
     exchange_id = getattr(exchange, "id", "unknown").lower()
     circuit_name = f"fetch_ohlcv_{exchange_id}_{symbol}_{timeframe}"
-    
+
     try:
-        # TEMP: Bypass circuit breaker for debugging
+        # Use circuit breaker for proper error handling and resilience
         if asyncio.iscoroutinefunction(exchange.fetch_ohlcv):
             # CCXT signature: (symbol, timeframe, since=None, limit=None)
-            data = await exchange.fetch_ohlcv(symbol, timeframe, since, limit)
+            data = await circuit_breaker_manager.call_with_circuit_breaker(
+                circuit_name,
+                exchange.fetch_ohlcv,
+                symbol,
+                timeframe,
+                since,
+                limit,
+                config=MARKET_DATA_CONFIG
+            )
         else:
-            data = await asyncio.to_thread(exchange.fetch_ohlcv, symbol, timeframe, since, limit)
+            data = await circuit_breaker_manager.call_with_circuit_breaker(
+                circuit_name,
+                asyncio.to_thread,
+                exchange.fetch_ohlcv,
+                symbol,
+                timeframe,
+                since,
+                limit,
+                config=MARKET_DATA_CONFIG
+            )
         return data
     except Exception as e:
         logger.warning(f"Circuit breaker failed for {circuit_name}: {e}")
-        # Fallback to direct call
-        if asyncio.iscoroutinefunction(exchange.fetch_ohlcv):
-            return await exchange.fetch_ohlcv(symbol, timeframe, since, limit)
-        else:
-            return await asyncio.to_thread(exchange.fetch_ohlcv, symbol, timeframe, since, limit)
+        # Fallback to direct call without circuit breaker (last resort)
+        try:
+            if asyncio.iscoroutinefunction(exchange.fetch_ohlcv):
+                return await exchange.fetch_ohlcv(symbol, timeframe, since, limit)
+            else:
+                return await asyncio.to_thread(exchange.fetch_ohlcv, symbol, timeframe, since, limit)
+        except Exception as fallback_e:
+            logger.error(f"Both circuit breaker and fallback failed for {circuit_name}: {fallback_e}")
+            return []
 
 
 async def fetch_ohlcv_async(
@@ -1110,9 +1139,26 @@ async def fetch_ohlcv_async(
                         except Exception:
                             pass
                     if len(data) < expected:
+                        # Filter out symbols with critically incomplete data (< 50% of expected)
+                        if len(data) < expected * 0.5 and expected >= 10:
+                            logger.warning(
+                                "Filtering out symbol %s due to critically incomplete OHLCV: got %d of %d (<%d%% complete)",
+                                symbol,
+                                len(data),
+                                expected,
+                                int((len(data) / expected) * 100)
+                            )
+                            failed_symbols[symbol] = {
+                                "time": time.time(),
+                                "delay": 3600.0,  # 1 hour delay for critically incomplete data
+                                "count": MAX_OHLCV_FAILURES,  # Mark as permanently failed
+                                "disabled": True,
+                            }
+                            return []  # Return empty data to indicate symbol should be skipped
+
                         # Only warn if we got significantly less data (less than 70% of expected)
                         # and we expected at least 10 candles (avoid warnings for small test requests)
-                        if len(data) < expected * 0.7 and expected >= 10:
+                        elif len(data) < expected * 0.7 and expected >= 10:
                             logger.warning(
                                 "Incomplete OHLCV for %s: got %d of %d (significant data gap)",
                                 symbol,
@@ -1127,25 +1173,70 @@ async def fetch_ohlcv_async(
                                 expected,
                             )
 
-                        # Enhanced retry logic for incomplete data
+                        # Final validation: if we still have incomplete data, mark symbol for retry
                         if len(data) < expected * 0.8 and expected >= 10:
-                            logger.info("Attempting enhanced retry for incomplete OHLCV data for %s", symbol)
+                            logger.warning("Marking %s for retry due to persistent incomplete data", symbol)
+                            failed_symbols[symbol] = {
+                                "time": time.time(),
+                                "delay": 300.0,  # 5 minute delay for incomplete data
+                                "count": failed_symbols.get(symbol, {}).get("count", 0) + 1,
+                                "disabled": False,
+                            }
+
+                        # Enhanced retry logic for incomplete data - distinguish between API failures and insufficient historical data
+                        if len(data) < expected * 0.8 and expected >= 10:
+                            logger.info("Attempting enhanced retry for incomplete OHLCV data for %s (got %d/%d)", symbol, len(data), expected)
+
+                            # Check if this is likely insufficient historical data vs API issue
+                            # If we got very little data (< 20% of expected), it's likely insufficient historical data
+                            if len(data) < expected * 0.2:
+                                logger.warning("Symbol %s appears to have insufficient historical data (got %d/%d = %d%%). "
+                                             "Marking as permanently filtered to avoid repeated attempts.",
+                                             symbol, len(data), expected, int((len(data)/expected)*100))
+                                failed_symbols[symbol] = {
+                                    "time": time.time(),
+                                    "delay": 7200.0,  # 2 hour delay for insufficient historical data
+                                    "count": MAX_OHLCV_FAILURES,
+                                    "disabled": True,
+                                }
+                                return []  # Return empty to indicate symbol should be skipped
+
                             # Store original data for comparison
                             original_data = data.copy()
                             original_count = len(data)
 
-                            # Strategy 1: Try fetching with a smaller limit to get more reliable data
-                            retry_limit = min(limit, max(50, int(expected * 0.8)))
-                            if retry_limit != limit:
-                                logger.debug("Strategy 1: Retrying with reduced limit: %d instead of %d", retry_limit, limit)
+                            # Multiple retry strategies to get complete data - only for API-related issues
+                            retry_strategies = [
+                                {
+                                    'name': 'reduced_limit',
+                                    'limit': min(limit, max(100, int(expected * 0.9))),
+                                    'description': f"Reduced limit to {min(limit, max(100, int(expected * 0.9)))}"
+                                },
+                                {
+                                    'name': 'conservative_limit',
+                                    'limit': min(100, expected // 2),
+                                    'description': f"Conservative limit of {min(100, expected // 2)}"
+                                },
+                                {
+                                    'name': 'minimal_limit',
+                                    'limit': min(50, expected // 4),
+                                    'description': f"Minimal limit of {min(50, expected // 4)}"
+                                }
+                            ]
+
+                            for strategy in retry_strategies:
+                                if len(data) >= expected * 0.9:  # Success threshold
+                                    break
+
+                                logger.debug("Retry strategy %s: %s", strategy['name'], strategy['description'])
                                 kwargs_f_retry = kwargs_f.copy()
-                                kwargs_f_retry["limit"] = retry_limit
+                                kwargs_f_retry["limit"] = strategy['limit']
                                 try:
                                     retry_data = await _fetch_ohlcv_with_circuit_breaker(
                                         exchange,
                                         symbol,
                                         timeframe,
-                                        retry_limit,
+                                        strategy['limit'],
                                         since
                                     )
                                     if len(retry_data) > original_count:
@@ -1931,6 +2022,17 @@ async def load_ohlcv_parallel(
     if not symbols:
         return {}
 
+    # Determine appropriate rate limiting based on exchange
+    exchange_id = getattr(exchange, "id", "unknown").lower()
+    if exchange_id == "kraken":
+        config = KRAKEN_RATE_LIMIT_CONFIG
+    else:
+        config = GECKO_RATE_LIMIT_CONFIG
+
+    # Use exchange-specific concurrency limits if not explicitly set
+    if max_concurrent is None:
+        max_concurrent = config['max_concurrent']
+
     if max_concurrent is not None:
         if not isinstance(max_concurrent, int) or max_concurrent < 1:
             raise ValueError("max_concurrent must be a positive integer or None")
@@ -1940,21 +2042,57 @@ async def load_ohlcv_parallel(
     else:
         sem = None
 
+    # Rate limiter for tracking requests per minute
+    rate_limiter = AdaptiveRateLimiter(
+        max_requests_per_minute=config['requests_per_minute'],
+        base_delay=config['inter_request_delay'],
+        max_delay=config['rate_limit_backoff']
+    )
+
     async def sem_fetch(sym: str):
         async def _fetch_and_sleep():
-            data = await fetch_ohlcv_async(
-                exchange,
-                sym,
-                timeframe,
-                limit,
-                since_map.get(sym),
-                use_websocket=use_websocket,
-                force_websocket_history=force_websocket_history,
-            )
-            rl = getattr(exchange, "rateLimit", None)
-            if rl:
-                await asyncio.sleep(rl / 1000)
-            return data
+            # Wait for rate limiter before making request
+            await rate_limiter.wait_if_needed()
+
+            try:
+                data = await fetch_ohlcv_async(
+                    exchange,
+                    sym,
+                    timeframe,
+                    limit,
+                    since_map.get(sym),
+                    use_websocket=use_websocket,
+                    force_websocket_history=force_websocket_history,
+                )
+
+                # Record successful request for rate limiter
+                rate_limiter.record_success()
+
+                # Add exchange-specific delay after successful request
+                if exchange_id == "kraken":
+                    await asyncio.sleep(KRAKEN_RATE_LIMIT_CONFIG['inter_request_delay'])
+                else:
+                    rl = getattr(exchange, "rateLimit", None)
+                    if rl:
+                        await asyncio.sleep(rl / 1000)
+
+                return data
+
+            except Exception as e:
+                # Record failed request for rate limiter
+                rate_limiter.record_error()
+
+                # Check if this is a rate limit error
+                error_str = str(e).lower()
+                if "too many requests" in error_str or "429" in error_str or "rate limit" in error_str:
+                    # Longer backoff for rate limit errors
+                    logger.warning(f"Rate limit hit for {sym}, backing off for {config['rate_limit_backoff']}s")
+                    await asyncio.sleep(config['rate_limit_backoff'])
+                else:
+                    # Shorter backoff for other errors
+                    await asyncio.sleep(1.0)
+
+                raise e
 
         if sem:
             async with sem:

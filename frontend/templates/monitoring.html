@@ -138,14 +138,14 @@
                 </div>
             </div>
             <div class="table-wrapper">
-            <table class="component-table">
+            <table class="component-table" id="componentTable">
                 <thead>
                     <tr>
-                        <th data-sort="component">Component</th>
-                        <th data-sort="status">Status</th>
-                        <th data-sort="check">Last Check</th>
-                        <th data-sort="message">Message</th>
-                        <th data-sort="metrics">Metrics</th>
+                        <th data-sort-key="component" role="button" tabindex="0" aria-sort="none">Component</th>
+                        <th data-sort-key="status" role="button" tabindex="0" aria-sort="none">Status</th>
+                        <th data-sort-key="check" role="button" tabindex="0" aria-sort="none">Last Check</th>
+                        <th data-sort-key="message" role="button" tabindex="0" aria-sort="none">Message</th>
+                        <th data-sort-key="metrics" role="button" tabindex="0" aria-sort="none">Metrics</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -244,6 +244,22 @@
                 </div>
                 <div class="chart-container">
                     <canvas id="healthChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Component Details Modal -->
+    <div class="modal fade" id="componentDetailsModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="componentDetailsTitle">Component Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="componentDetailsContent"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
         </div>
@@ -438,7 +454,20 @@
 
             // Optional: basic sort by status severity then name
             const severity = { healthy: 1, warning: 2, critical: 3, error: 3, unknown: 4 };
-            filtered.sort((a, b) => (severity[(a.value.status||'unknown')] - severity[(b.value.status||'unknown')]) || a.key.localeCompare(b.key));
+            // Apply column sort state if present
+            const sortState = window.componentTableSort || { key: 'status', dir: 'asc' };
+            const sorters = {
+                component: (a, b) => a.key.localeCompare(b.key),
+                status: (a, b) => (severity[(a.value.status||'unknown')] - severity[(b.value.status||'unknown')]) || a.key.localeCompare(b.key),
+                message: (a, b) => (a.value.message || '').localeCompare(b.value.message || ''),
+                metrics: (a, b) => JSON.stringify(a.value.metrics||{}).length - JSON.stringify(b.value.metrics||{}).length,
+                check: (a, b) => 0
+            };
+            const sorter = sorters[sortState.key] || sorters.status;
+            filtered.sort((a, b) => {
+                const res = sorter(a, b);
+                return sortState.dir === 'asc' ? res : -res;
+            });
 
             for (const { key: component, value: status } of filtered) {
                 const componentName = component.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
@@ -700,6 +729,26 @@
                     updatePerformanceChart();
                 });
             });
+
+            // Table header sorting
+            const headers = document.querySelectorAll('#componentTable thead th[data-sort-key]');
+            headers.forEach(h => {
+                h.addEventListener('click', () => toggleSort(h));
+                h.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSort(h); }
+                });
+            });
+
+            function toggleSort(header) {
+                const key = header.dataset.sortKey;
+                const current = window.componentTableSort || { key: 'status', dir: 'asc' };
+                const nextDir = current.key === key && current.dir === 'asc' ? 'desc' : 'asc';
+                window.componentTableSort = { key, dir: nextDir };
+                // Update aria-sort
+                headers.forEach(h => h.setAttribute('aria-sort', 'none'));
+                header.setAttribute('aria-sort', nextDir === 'asc' ? 'ascending' : 'descending');
+                if (monitoringData.health) updateComponentTable(monitoringData.health);
+            }
         }
 
         // Refresh all data
@@ -710,8 +759,33 @@
 
         // View component details
         function viewComponent(componentName) {
-            console.log('Viewing component:', componentName);
-            // Here you could open a modal or navigate to a detailed view
+            const components = (monitoringData.health && monitoringData.health.components) || {};
+            const data = components[componentName] || {};
+            const title = document.getElementById('componentDetailsTitle');
+            const content = document.getElementById('componentDetailsContent');
+            if (!title || !content) return;
+
+            const displayName = componentName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            title.textContent = displayName;
+
+            const status = data.status || 'unknown';
+            const message = data.message || 'No recent message';
+            const metrics = data.metrics || {};
+
+            const metricsHtml = Object.keys(metrics).length
+                ? `<pre>${JSON.stringify(metrics, null, 2)}</pre>`
+                : '<p class="text-muted">No metrics available.</p>';
+
+            content.innerHTML = `
+                <p><strong>Status:</strong> ${status}</p>
+                <p><strong>Message:</strong> ${message}</p>
+                ${metricsHtml}
+            `;
+
+            if (window.bootstrap && bootstrap.Modal) {
+                const modal = new bootstrap.Modal(document.getElementById('componentDetailsModal'));
+                modal.show();
+            }
         }
 
         // Update "Last updated" timestamp

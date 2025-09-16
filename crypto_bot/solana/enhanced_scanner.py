@@ -64,17 +64,17 @@ class EnhancedSolanaScanner:
         self.max_tokens_per_scan = max(1, self.scanner_config.get("max_tokens_per_scan", 100))
         self.min_score_threshold = max(
             0.0,
-            min(1.0, self.scanner_config.get("min_score_threshold", 0.3))
+            min(1.0, self.scanner_config.get("min_score_threshold", 0.1))
         )
         self.enable_sentiment = self.scanner_config.get("enable_sentiment", True)
         self.enable_pyth_prices = self.scanner_config.get("enable_pyth_prices", True)
 
         # Market condition thresholds with validation
-        self.min_volume_usd = max(0, self.scanner_config.get("min_volume_usd", 10000))
-        self.max_spread_pct = max(0.0, self.scanner_config.get("max_spread_pct", 2.0))
+        self.min_volume_usd = max(0, self.scanner_config.get("min_volume_usd", 1000))
+        self.max_spread_pct = max(0.0, self.scanner_config.get("max_spread_pct", 5.0))
         self.min_liquidity_score = max(
             0.0,
-            min(1.0, self.scanner_config.get("min_liquidity_score", 0.5))
+            min(1.0, self.scanner_config.get("min_liquidity_score", 0.1))
         )
 
         # Strategy fit thresholds with validation
@@ -152,7 +152,7 @@ class EnhancedSolanaScanner:
             analyzed_tokens = await self._analyze_tokens(new_tokens)
 
             # Score and filter tokens
-            scored_tokens = await self._score_tokens(analyzed_tokens)
+            scored_tokens = self._score_tokens(analyzed_tokens)
             cached_count = len(scored_tokens)
 
             # Cache results
@@ -320,15 +320,19 @@ class EnhancedSolanaScanner:
                 
                 # Check if token meets minimum criteria
                 if base_score < self.min_score_threshold:
+                    logger.debug(f"Token {token} filtered: score {base_score:.3f} < {self.min_score_threshold}")
                     continue
                 
                 if conditions.volume_24h < self.min_volume_usd:
+                    logger.debug(f"Token {token} filtered: volume ${conditions.volume_24h:.0f} < ${self.min_volume_usd}")
                     continue
                 
                 if conditions.spread_pct > self.max_spread_pct:
+                    logger.debug(f"Token {token} filtered: spread {conditions.spread_pct:.2f}% > {self.max_spread_pct}%")
                     continue
                 
                 if conditions.liquidity_score < self.min_liquidity_score:
+                    logger.debug(f"Token {token} filtered: liquidity {conditions.liquidity_score:.3f} < {self.min_liquidity_score}")
                     continue
                 
                 # Prepare data for caching

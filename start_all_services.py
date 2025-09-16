@@ -386,8 +386,29 @@ if __name__ == "__main__":
 🌐 Dashboard: http://localhost:8001"            print("📊 Health Check: http://localhost:8001/api/monitoring/health"
         return len(services_started) > 0
 
-    def stop_all_services(self):
+    def stop_all_services(self, use_comprehensive_shutdown: bool = True):
         """Stop all running services."""
+        if use_comprehensive_shutdown:
+            print("🛑 Using comprehensive shutdown system...")
+            try:
+                import subprocess
+                result = subprocess.run([
+                    sys.executable, 
+                    str(self.project_root / "safe_shutdown.py")
+                ], capture_output=True, text=True, timeout=120)
+                
+                if result.returncode == 0:
+                    print("✅ Comprehensive shutdown completed successfully")
+                    self.services.clear()
+                    return
+                else:
+                    print(f"⚠️ Comprehensive shutdown failed: {result.stderr}")
+                    print("🔄 Falling back to basic shutdown...")
+            except Exception as e:
+                print(f"⚠️ Comprehensive shutdown error: {e}")
+                print("🔄 Falling back to basic shutdown...")
+        
+        # Fallback to basic shutdown
         print("🛑 Stopping all services...")
 
         for name, process in self.services.items():

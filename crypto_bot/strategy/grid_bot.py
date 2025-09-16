@@ -179,7 +179,7 @@ def generate_signal(
             return 0.0, "none"
 
     min_len = max(20, cfg.volume_ma_window)
-    if df.empty or len(df) < min_len:
+    if df is None or df.empty or len(df) < min_len:
         return 0.0, "none"
 
     if (

@@ -195,8 +195,7 @@ class SystemStatusReporter:
             print("❌ NEEDS ATTENTION - System has issues")
 
         # Detailed results
-        print("
-🔍 DETAILED RESULTS:")
+        print("\n🔍 DETAILED RESULTS:")
         print("\n⚙️ SERVICES:")
         for service, running in services.items():
             status = "✅ RUNNING" if running else "❌ STOPPED"
@@ -215,8 +214,7 @@ class SystemStatusReporter:
             print(f"  {message}")
 
         # Issues resolved
-        print("
-✅ ISSUES RESOLVED:")
+        print("\n✅ ISSUES RESOLVED:")
         resolved = [
             "✅ WebSocket connectivity established",
             "✅ Enhanced scanner service running",
@@ -230,8 +228,7 @@ class SystemStatusReporter:
         for item in resolved:
             print(f"  {item}")
 
-        print("
-🌐 ACCESS INFORMATION:")
+        print("\n🌐 ACCESS INFORMATION:")
         print(f"  📊 Dashboard: http://localhost:8001")
         print(f"  🔍 Health Check: http://localhost:8001/api/monitoring/health")
         print(f"  💰 Balance: http://localhost:8001/api/balance")

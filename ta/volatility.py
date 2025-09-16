@@ -22,14 +22,26 @@ class BollingerBands:
         close = self._close
         if len(close) < n:
             return _np.array([0.0] * len(close))
-        kernel = _np.ones(n) / n
-        ma = _np.convolve(close, kernel, mode="same")
-        # crude rolling std approximation
-        var = _np.convolve((close - ma) ** 2, kernel, mode="same")
-        std = _np.sqrt(_np.maximum(var, 1e-12))
+
+        # Use proper rolling calculations for financial time series
+        # Initialize arrays to store results
+        ma = _np.full(len(close), _np.nan)
+        std = _np.full(len(close), _np.nan)
+
+        # Calculate rolling mean and std for valid windows
+        for i in range(n-1, len(close)):
+            window_data = close[i-n+1:i+1]
+            ma[i] = _np.mean(window_data)
+            std[i] = _np.std(window_data, ddof=1)  # Sample standard deviation
+
+        # Fill initial values with the first valid calculation
+        first_valid_idx = n-1
+        ma[:first_valid_idx] = ma[first_valid_idx]
+        std[:first_valid_idx] = std[first_valid_idx]
+
         upper = ma + self._ndev * std
         lower = ma - self._ndev * std
-        width = (upper - lower) / _np.maximum(ma, 1e-9)
+        width = (upper - lower) / _np.maximum(_np.abs(ma), 1e-9)
         return width
 
 

@@ -107,7 +107,7 @@
     <!-- Top Header -->
     <header class="top-header">
       <div class="header-left">
-        <button class="sidebar-toggle" id="sidebarToggle">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Toggle sidebar" title="Toggle sidebar">
           <i class="fas fa-bars"></i>
         </button>
         <h1 class="page-title">{{ title or 'Dashboard' }}</h1>
@@ -117,14 +117,14 @@
         <div class="header-stats">
           <div class="stat-item">
             <i class="fas fa-wallet"></i>
-            <span id="headerWalletBalance">
+            <span id="headerWalletBalance" class="num">
               ${{ '%.2f' | format((paper_wallet_balance if mode == 'dry_run' else (available_balance or balance)) or 0.0) }}
             </span>
           </div>
           <div class="stat-item">
             <i class="fas fa-chart-line"></i>
             {% set _unreal = (pnl_data.unrealized_pnl if pnl_data else unrealized_pnl) | default(0.0) %}
-            <span id="headerUnrealizedPnl">{{ '+' if _unreal >= 0 else '' }}${{ '%.2f' | format(_unreal) }}</span>
+            <span id="headerUnrealizedPnl" class="num">{{ '+' if _unreal >= 0 else '' }}${{ '%.2f' | format(_unreal) }}</span>
           </div>
           <div class="stat-item">
             <i class="fas fa-cog"></i>

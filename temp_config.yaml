@@ -4,23 +4,23 @@ exchange_market_types:
 - futures
 execution_mode: dry_run
 testing_mode: false
-timeframe: 15m
+timeframe: 5m
 timeframes:
 - 1m
 - 5m
 - 15m
 - 1h
 - 4h
-max_open_trades: 10
+max_open_trades: 20
 max_concurrent_ohlcv: 3
 max_concurrent_dex_ohlcv: 10
 max_parallel: 20
 max_ws_limit: 300
 risk:
-  risk_pct: 0.01
-  trade_size_pct: 0.1
-  stop_loss_pct: 0.01
-  take_profit_pct: 0.02
+  risk_pct: 0.015
+  trade_size_pct: 0.15
+  stop_loss_pct: 0.012
+  take_profit_pct: 0.05
   stop_loss_atr_mult: 2.0
   take_profit_atr_mult: 4.0
   max_drawdown: 0.25
@@ -115,13 +115,13 @@ exits:
   default_tp_pct: 0.045
   trailing_stop_pct: 0.008
 strategy_allocation:
-  bounce_scalper: 15
-  grid_bot: 15
-  micro_scalp_bot: 30
-  momentum_bot: 10
-  sniper_bot: 25
-  trend_bot: 15
-  volatility_harvester: 10
+  bounce_scalper: 20
+  grid_bot: 10
+  micro_scalp_bot: 35
+  momentum_bot: 15
+  sniper_bot: 30
+  trend_bot: 10
+  volatility_harvester: 15
 bounce_scalper:
   pattern_timeframe: 1m
   lookback: 150
@@ -182,10 +182,10 @@ micro_scalp:
   trend_slow: 25
   vol_window: 10
   volume_window: 10
-  stop_loss_pct: 0.005
-  take_profit_pct: 0.02
+  stop_loss_pct: 0.008
+  take_profit_pct: 0.04
   max_drawdown: 0.25
-  max_concurrent_signals: 30
+  max_concurrent_signals: 40
   min_score: 0.01
   min_atr_pct: 0.0003
   wick_pct: 0.08
@@ -197,19 +197,19 @@ micro_scalp:
 sniper_bot:
   atr_window: 8
   volume_window: 2
-  stop_loss_pct: 0.0063797342686504575
-  take_profit_pct: 0.050447594063026804
+  stop_loss_pct: 0.008
+  take_profit_pct: 0.06
   max_drawdown: 0.25
-  max_concurrent_signals: 20
+  max_concurrent_signals: 25
   max_slippage_bps: 15
-  volume_multiple: 2.340419908826357
-  breakout_pct: 0.011236940825431006
+  volume_multiple: 2.5
+  breakout_pct: 0.015
   min_liquidity_usd: 100
   max_history: 15
   price_fallback: true
   fallback_atr_mult: 1.0
   fallback_volume_mult: 1.0
-  cooldown_seconds: 30
+  cooldown_seconds: 20
 trend:
   trend_ema_fast: 10
   trend_ema_slow: 25
@@ -527,19 +527,19 @@ monitoring:
     track_drawdown: true
 telegram:
   enabled: false
-  token: 8126215032:AAEhQZLiXpssauKf0ktQsq1XqXl94QriCdE
-  chat_id: '827777274'
-  chat_admins: '827777274'
-  balance_updates: true
-  trade_updates: true
+  token: ""  # Disabled - was causing timeout errors
+  chat_id: ""  # Disabled - was causing timeout errors  
+  chat_admins: ""
+  balance_updates: false
+  trade_updates: false
   status_updates: false
-  connect_timeout: 30.0
-  read_timeout: 30.0
-  write_timeout: 30.0
-  timeout_seconds: 30
-  connection_pool_size: 20
-  max_retries: 3
-  retry_delay_seconds: 5
+  connect_timeout: 10.0  # Reduced from 30.0
+  read_timeout: 15.0     # Reduced from 30.0
+  write_timeout: 10.0    # Reduced from 30.0
+  timeout_seconds: 10    # Reduced from 30
+  connection_pool_size: 8  # Reduced from 20
+  max_retries: 2         # Reduced from 3
+  retry_delay_seconds: 1 # Reduced from 5
   fail_silently: true
   command_cooldown: 5
 telegram_ctl:
@@ -670,5 +670,4 @@ symbols:
 - LINK/USDT
 - UNI/USDT
 - AAVE/USDT
-loop_interval_minutes: 0.5
-loop_interval_minutes: 0.5
+loop_interval_minutes: 0.25

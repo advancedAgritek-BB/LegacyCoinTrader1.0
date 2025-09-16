@@ -46,13 +46,13 @@ POS_PATTERN = re.compile(
 
 @app.get("/positions")
 def positions() -> List[dict]:
-    """Return parsed position log entries."""
+    """Return positions from TradeManager (single source of truth)."""
     try:
-        # Try to get positions from TradeManager first (more accurate)
-        from crypto_bot.utils.trade_manager import TradeManager
-        tm = TradeManager()
+        # Get positions from TradeManager (single source of truth)
+        from crypto_bot.utils.trade_manager import get_trade_manager
+        tm = get_trade_manager()
         positions = tm.get_all_positions()
-        
+
         entries = []
         for pos in positions:
             if pos.is_open:  # Only return open positions
@@ -62,13 +62,13 @@ def positions() -> List[dict]:
                     exchange = ccxt.kraken()
                     ticker = exchange.fetch_ticker(pos.symbol)
                     current_price = ticker['last']
-                    
+
                     # Calculate P&L
                     pnl, pnl_pct = pos.calculate_unrealized_pnl(current_price)
-                    
+
                     # Calculate current value
                     current_value = float(pos.total_amount) * current_price
-                    
+
                     entries.append({
                         "symbol": pos.symbol,
                         "side": pos.side,
@@ -77,51 +77,38 @@ def positions() -> List[dict]:
                         "current_price": current_price,
                         "position_value": current_value,
                         "pnl": float(pnl),
+                        "pnl_pct": float(pnl_pct),
                         "balance": 0.0,  # Will be calculated separately
                     })
                 except Exception as e:
-                    # Fallback to position data without current price
-                    # Calculate current value
-                    current_value = float(pos.total_amount) * float(pos.average_price)
-                    
+                    # Use cached price from TradeManager if available
+                    cached_price = float(tm.price_cache.get(pos.symbol, pos.average_price))
+
+                    # Calculate P&L with cached price
+                    pnl, pnl_pct = pos.calculate_unrealized_pnl(cached_price)
+                    current_value = float(pos.total_amount) * cached_price
+
                     entries.append({
                         "symbol": pos.symbol,
                         "side": pos.side,
                         "amount": float(pos.total_amount),
                         "entry_price": float(pos.average_price),
-                        "current_price": float(pos.average_price),  # Use entry price as fallback
+                        "current_price": cached_price,
                         "position_value": current_value,
-                        "pnl": 0.0,
+                        "pnl": float(pnl),
+                        "pnl_pct": float(pnl_pct),
                         "balance": 0.0,
                     })
-        
-        if entries:
-            return entries
-            
+
+        # Log position summary for debugging
+        print(f"Returning {len(entries)} open positions from TradeManager")
+        return entries
+
     except Exception as e:
         print(f"Error getting positions from TradeManager: {e}")
-    
-    # Fallback to log file parsing
-    if not POSITIONS_FILE.exists():
+        # Return empty list instead of falling back to log file
+        # TradeManager is the single source of truth
         return []
-    entries: List[dict] = []
-    for line in POSITIONS_FILE.read_text().splitlines():
-        match = POS_PATTERN.search(line)
-        if not match:
-            continue
-        entries.append(
-            {
-                "symbol": match.group("symbol"),
-                "side": match.group("side"),
-                "amount": float(match.group("amount")),
-                "entry_price": float(match.group("entry")),
-                "current_price": float(match.group("current")),
-                "position_value": float(match.group("amount")) * float(match.group("current")),
-                "pnl": float(match.group("pnl")),
-                "balance": float(match.group("balance")),
-            }
-        )
-    return entries
 
 
 @app.get("/wallet-status")

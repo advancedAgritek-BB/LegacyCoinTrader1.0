@@ -232,9 +232,9 @@ class GPUAcceleratedBacktester:
         best_score = -np.inf
         best_params = {}
         
-        # Generate parameter combinations
-        stop_losses = np.linspace(0.01, 0.05, 10)
-        take_profits = np.linspace(0.02, 0.10, 10)
+        # Generate parameter combinations - Optimized for scalping
+        stop_losses = np.array([0.003, 0.005, 0.007, 0.010])  # Tight stops for scalping
+        take_profits = np.array([0.008, 0.012, 0.015, 0.020])  # Quick targets for scalping
         
         for sl in stop_losses:
             for tp in take_profits:
@@ -409,14 +409,14 @@ class ContinuousBacktestingEngine:
             if df.empty or len(df) < 100:
                 return None
                 
-            # Create backtest config
+            # Create backtest config - Optimized for scalping
             config = BacktestConfig(
                 symbol=pair,
                 timeframe=timeframe,
                 since=0,
                 limit=len(df),
-                stop_loss_range=[0.01, 0.02, 0.03],
-                take_profit_range=[0.02, 0.04, 0.06]
+                stop_loss_range=[0.003, 0.005, 0.007, 0.010],  # Tight stops for scalping
+                take_profit_range=[0.008, 0.012, 0.015, 0.020]  # Quick targets for scalping
             )
             
             # Run backtest

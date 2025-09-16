@@ -145,7 +145,7 @@
 
             <!-- Position Actions -->
             <div class="position-actions">
-              <button class="btn btn-danger" data-symbol="{{ position.symbol }}" data-amount="{{ position.size }}" onclick="sellPosition('{{ position.symbol }}', {{ position.size }})">
+              <button class="btn btn-danger" data-action="market-sell" data-symbol="{{ position.symbol }}" data-amount="{{ position.size }}" onclick="sellPosition('{{ position.symbol }}', {{ position.size }})">
                 Market Sell
               </button>
             </div>
@@ -166,9 +166,11 @@
       <h2><i class="fas fa-star"></i> Top Performers</h2>
       </div>
     <div class="performers-list">
+          {% set open_symbols = (open_positions | map(attribute='symbol') | list) if open_positions else [] %}
           {% if performance and performance.per_symbol %}
+            {% set shown = 0 %}
             {% for symbol, pnl in performance.per_symbol.items() %}
-              {% if loop.index <= 5 %}
+              {% if symbol in open_symbols and shown < 5 %}
                 <div class="performer-item">
             <div class="performer-rank">{{ loop.index }}</div>
             <div class="performer-info">
@@ -179,6 +181,7 @@
                     ${{ "%.2f"|format(pnl) }}
                   </span>
                 </div>
+                {% set shown = shown + 1 %}
               {% endif %}
             {% endfor %}
           {% else %}
@@ -236,6 +239,21 @@ function refreshPrices() {
     .then(positions => {
       console.log('Received updated positions:', positions);
       
+      // Remove any cards for symbols no longer present
+      try {
+        const present = new Set((positions || []).map(p => p.symbol));
+        document.querySelectorAll('.position-card[data-symbol]')
+          .forEach(card => {
+            const sym = card.getAttribute('data-symbol');
+            if (sym && !present.has(sym)) {
+              console.log('Removing stale position card for', sym);
+              card.remove();
+            }
+          });
+      } catch (e) {
+        console.warn('Failed to remove stale cards', e);
+      }
+
       // Update each position card with new data
       positions.forEach(position => {
         updatePositionCard(position);
@@ -326,62 +344,122 @@ function updatePositionCard(position) {
 
 // Function to sell a position (referenced in template)
 function sellPosition(symbol, amount) {
-  if (!confirm(`Are you sure you want to market sell ${amount} ${symbol}?`)) {
-    return;
-  }
-  
-  const sellBtn = document.querySelector(`button[onclick="sellPosition('${symbol}', ${amount})"]`);
-  const originalText = sellBtn ? sellBtn.innerHTML : '';
-  if (sellBtn) {
-    sellBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Selling...';
-    sellBtn.disabled = true;
-  }
-  
-  fetch('/api/sell-position', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      symbol: symbol,
-      amount: amount
-    })
-  })
-  .then(response => response.json())
-  .then(data => {
-    if (data.success) {
-      if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
-        window.LegacyCoinTrader.showToast(`Market sell order submitted for ${amount} ${symbol}`, 'success');
-      }
-      // Refresh positions after a short delay
-      setTimeout(() => {
-        refreshPrices();
-      }, 2000);
-    } else {
-      if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
-        window.LegacyCoinTrader.showToast(`Error: ${data.error}`, 'error');
-      }
+  try {
+    console.log('[MarketSell] sellPosition called', { symbol, amount });
+    if (!confirm(`Are you sure you want to market sell ${amount} ${symbol}?`)) {
+      return;
     }
-  })
-  .catch(error => {
-    console.error('Error selling position:', error);
-    if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
-      window.LegacyCoinTrader.showToast('Error selling position', 'error');
-    }
-  })
-  .finally(() => {
+
+    const sellBtn = document.querySelector(`button[onclick="sellPosition('${symbol}', ${amount})"]`);
+    const originalText = sellBtn ? sellBtn.innerHTML : '';
     if (sellBtn) {
-      sellBtn.innerHTML = originalText;
-      sellBtn.disabled = false;
+      sellBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Selling...';
+      sellBtn.disabled = true;
     }
-  });
+
+    // Add a timeout so the UI never stays stuck if the request hangs
+    const controller = new AbortController();
+    const timeoutMs = 12000; // 12s primary attempt
+    const timeoutId = setTimeout(() => {
+      console.warn('[MarketSell] Aborting sell due to timeout', { symbol });
+      controller.abort();
+    }, timeoutMs);
+
+    const primaryUrl = new URL('/api/sell-position', window.location.origin).toString();
+    const fallbackUrl = new URL('/sell-position', window.location.origin).toString();
+
+    fetch(primaryUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ symbol: symbol, amount: amount }),
+      signal: controller.signal
+    })
+    .then(response => {
+      console.log('[MarketSell] Response received', { status: response.status });
+      return response.json().catch(() => ({ success: false, error: 'Invalid JSON response' }));
+    })
+    .then(data => {
+      console.log('[MarketSell] Response data', data);
+      if (data && data.success) {
+        if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+          window.LegacyCoinTrader.showToast(`Market sell order submitted for ${amount} ${symbol}`, 'success');
+        }
+
+        // Immediately remove the position card from the DOM
+        const positionCard = document.querySelector(`.position-card[data-symbol="${symbol}"]`);
+        if (positionCard) {
+          positionCard.remove();
+          console.log(`[MarketSell] Removed position card for ${symbol}`);
+        }
+
+        // Update position count
+        const positionCount = document.querySelector('.position-count');
+        if (positionCount) {
+          const currentCount = parseInt(positionCount.textContent) || 0;
+          positionCount.textContent = `${Math.max(0, currentCount - 1)} positions`;
+        }
+
+        // Refresh remaining positions after a short delay
+        setTimeout(() => { try { refreshPrices(); } catch (e) { console.warn('refreshPrices failed', e); } try { if (typeof window.updateOpenPositions === 'function') { window.updateOpenPositions(); } } catch (e) { console.warn('updateOpenPositions failed', e); } }, 800);
+      } else {
+        // Try fallback alias route once if primary did not succeed
+        console.warn('[MarketSell] Primary route failed, trying fallback alias');
+        return fetch(fallbackUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: symbol, amount: amount })
+        })
+        .then(r => r.json().catch(() => ({ success: false, error: 'Invalid JSON response (fallback)' })))
+        .then(fb => {
+          console.log('[MarketSell] Fallback response', fb);
+          if (fb && fb.success) {
+            if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+              window.LegacyCoinTrader.showToast(`Market sell order submitted for ${amount} ${symbol}`, 'success');
+            }
+            const positionCard = document.querySelector(`.position-card[data-symbol="${symbol}"]`);
+            if (positionCard) { positionCard.remove(); }
+            const positionCount = document.querySelector('.position-count');
+            if (positionCount) {
+              const currentCount = parseInt(positionCount.textContent) || 0;
+              positionCount.textContent = `${Math.max(0, currentCount - 1)} positions`;
+            }
+            setTimeout(() => { try { refreshPrices(); } catch (e) {} try { if (typeof window.updateOpenPositions === 'function') { window.updateOpenPositions(); } } catch (e) {} }, 800);
+          } else {
+            const errMsg = (fb && fb.error) ? fb.error : 'Unknown error submitting sell order';
+            if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+              window.LegacyCoinTrader.showToast(`Error: ${errMsg}`, 'error');
+            }
+          }
+        });
+      }
+    })
+    .catch(error => {
+      console.error('[MarketSell] Request error', error);
+      const isAbort = error && (error.name === 'AbortError');
+      if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+        window.LegacyCoinTrader.showToast(isAbort ? 'Sell request timed out' : 'Error selling position', 'error');
+      }
+    })
+    .finally(() => {
+      clearTimeout(timeoutId);
+      // Always reset the button state
+      if (sellBtn) {
+        sellBtn.innerHTML = originalText;
+        sellBtn.disabled = false;
+      }
+    });
+  } catch (err) {
+    console.error('[MarketSell] Unexpected error in sellPosition', err);
+  }
 }
 
 // Expose for inline handlers and add delegated handler for robustness
 window.sellPosition = sellPosition;
 
 document.addEventListener('click', function(e) {
-  const btn = e.target.closest('button.btn.btn-danger[data-symbol][data-amount]');
+  const btn = e.target.closest('button.btn.btn-danger[data-action="market-sell"][data-symbol][data-amount]');
   if (!btn) return;
   const symbol = btn.getAttribute('data-symbol');
   const amountAttr = btn.getAttribute('data-amount');

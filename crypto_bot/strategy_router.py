@@ -772,17 +772,26 @@ def route(
             original_df_type = type(df)
             original_df_id = id(df)
 
+            # Merge strategy-specific config with global config
+            strategy_config = cfg
+            if cfg and isinstance(cfg, dict):
+                strategy_name = getattr(fn, '__name__', '').replace('_bot', '').replace('_', '')
+                if strategy_name in cfg:
+                    # Merge strategy-specific config with global config
+                    strategy_config = {**cfg, **cfg[strategy_name]}
+                    logger.debug(f"Applied strategy-specific config for {strategy_name}")
+
             try:
                 # Check if the function is async
                 if asyncio.iscoroutinefunction(fn):
                     # Handle async functions properly
                     try:
-                        res = await fn(df, cfg)
+                        res = await fn(df, strategy_config)
                     except TypeError:
                         res = await fn(df)
                 else:
                     # Handle sync functions
-                    res = fn(df, cfg)
+                    res = fn(df, strategy_config)
                     # Validate that df is still a DataFrame after strategy execution
                     if not isinstance(df, pd.DataFrame):
                         logger.error(f"Strategy {fn.__name__} corrupted DataFrame - df type after call: {type(df)}")
@@ -920,7 +929,7 @@ def route(
     else:
         df = df_map
         
-    if df is not None:
+    if df is not None and isinstance(df, pd.DataFrame):
         try:
             # 1) breakout squeeze detected by Bollinger band z-score and
             #    concurrent volume spike

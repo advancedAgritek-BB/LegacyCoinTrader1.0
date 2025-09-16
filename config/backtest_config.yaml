@@ -27,28 +27,34 @@ learning_enabled: true
 results_cache_dir: "crypto_bot/logs/backtest_results"
 model_update_interval_hours: 24
 
-# Risk management thresholds
-max_drawdown_threshold: 0.5    # Maximum acceptable drawdown
-min_sharpe_threshold: 0.5      # Minimum acceptable Sharpe ratio
-min_win_rate: 0.4              # Minimum acceptable win rate
+# Risk management thresholds - Optimized for scalping
+max_drawdown_threshold: 0.15    # Maximum acceptable drawdown for scalping
+min_sharpe_threshold: 0.2       # Minimum acceptable Sharpe ratio for scalping
+min_win_rate: 0.3               # Minimum acceptable win rate for scalping
+
+# Scalp-specific backtesting parameters
+scalp_backtest_config:
+  max_positions: 100            # Allow many concurrent scalp positions
+  min_position_size_usd: 5      # Smaller minimum for scalping
+  position_size_pct: 0.02       # Smaller position sizes for scalping
+  max_risk_per_trade: 0.002     # Very small risk per scalp trade
 
 # Strategy-specific parameters
 strategies_to_test: []  # Empty = test all available strategies
 
-# Parameter optimization ranges
+# Parameter optimization ranges - Optimized for scalping
 parameter_ranges:
   stop_loss:
-    - 0.01  # 1%
-    - 0.02  # 2%
-    - 0.03  # 3%
-    - 0.05  # 5%
-  
+    - 0.003  # 0.3% - Ultra tight for scalping
+    - 0.005  # 0.5% - Tight for scalping
+    - 0.007  # 0.7% - Moderate for scalping
+    - 0.010  # 1.0% - Conservative scalp stop
+
   take_profit:
-    - 0.02  # 2%
-    - 0.04  # 4%
-    - 0.06  # 6%
-    - 0.08  # 8%
-    - 0.10  # 10%
+    - 0.008  # 0.8% - Quick scalp targets
+    - 0.012  # 1.2% - Standard scalp targets
+    - 0.015  # 1.5% - Extended scalp targets
+    - 0.020  # 2.0% - Maximum scalp targets
 
 # Performance tracking
 performance_metrics:

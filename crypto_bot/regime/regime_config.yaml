@@ -21,11 +21,11 @@ normalized_range_volatility_min: 1.3  # Reduced from 1.5 for earlier detection
 rsi_bounce_max: 30            # Maximum RSI for bounce detection
 bounce_volume_mult: 1.2       # Volume multiplier for bounce confirmation
 
-# Scalp Regime Detection - New parameters
-adx_scalp_max: 15             # Maximum ADX for scalp detection
-bb_width_scalp_max: 0.02     # Maximum BB width for scalp detection
-scalp_volume_mult: 1.5        # Volume multiplier for scalp confirmation
-ema_distance_scalp_max: 0.005 # Maximum EMA distance for scalp detection
+# Scalp Regime Detection - Optimized for 1m scalping
+adx_scalp_max: 20             # Increased ADX threshold for scalp detection
+bb_width_scalp_max: 0.04     # Increased BB width for more opportunities
+scalp_volume_mult: 1.2        # Reduced volume requirement
+ema_distance_scalp_max: 0.01  # Increased EMA distance tolerance
 
 # Moving Average Windows - Faster response
 ema_fast: 6                    # Reduced from 8 for faster trend detection
@@ -42,7 +42,7 @@ confirm_trend_with_higher_tf: true  # Enable higher timeframe confirmation
 
 # ML Integration
 use_ml_regime_classifier: true # Enable ML fallback
-ml_min_bars: 50               # Minimum bars for ML classification (reduced for better trading coverage)
+ml_min_bars: 10               # Minimum bars for ML classification (further reduced to avoid persistent unknowns)
 ml_blend_weight: 0.5          # Weight for ML vs rule-based classification
 
 # Pattern Detection
