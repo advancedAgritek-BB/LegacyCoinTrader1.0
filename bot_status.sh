@@ -5,9 +5,9 @@ echo "🤖 LegacyCoinTrader Status Checker"
 echo "=================================="
 
 # Check if bot is running
-if pgrep -f "start_bot_auto.py" > /dev/null 2>&1; then
+if pgrep -f "start_bot.py" > /dev/null 2>&1; then
     echo "✅ Bot is RUNNING"
-    echo "   Process ID: $(pgrep -f 'start_bot_auto.py')"
+    echo "   Process ID: $(pgrep -f 'start_bot.py')"
     echo ""
     echo "📊 Available Interfaces:"
     echo "   • Web Dashboard: http://localhost:8000 (if web server is running)"
@@ -20,7 +20,7 @@ if pgrep -f "start_bot_auto.py" > /dev/null 2>&1; then
     echo "   • Frontend Log: frontend.log"
     echo ""
     echo "🎮 Control Options:"
-    echo "   • Stop bot: pkill -f 'start_bot_auto.py'"
+    echo "   • Stop bot: pkill -f 'start_bot.py'"
     echo "   • View logs: tail -f bot_output.log"
     echo "   • Check web interface: curl http://localhost:8000"
     echo ""
@@ -41,6 +41,6 @@ echo ""
 echo "🔍 Quick Commands:"
 echo "   • Check this status: ./bot_status.sh"
 echo "   • View live logs: tail -f bot_output.log"
-echo "   • Stop bot: pkill -f 'start_bot_auto.py'"
+echo "   • Stop bot: pkill -f 'start_bot.py'"
 echo "   • Start bot (fixed): ./start_integrated_fixed.sh"
 echo "   • Restart bot: ./start_integrated_fixed.sh"

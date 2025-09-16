@@ -23,7 +23,7 @@
 ### Option 2: Python Interactive Launcher
 ```bash
 # Start with Python launcher
-./start_bot_interactive.py
+python start_bot.py interactive
 ```
 
 **Same controls as Option 1**
@@ -43,7 +43,7 @@
 - Shows real-time bot output
 - Works with any shell (bash, zsh, etc.)
 
-### 2. **`start_bot_interactive.py`** - Python Launcher
+### 2. **Interactive Mode (`start_bot.py interactive`)** - Python Launcher
 - Python-based interactive launcher
 - Captures bot output and displays it
 - Provides interactive commands
@@ -67,8 +67,8 @@
 # Method 1: Shell script (recommended)
 ./run_bot.sh
 
-# Method 2: Python launcher  
-./start_bot_interactive.py
+# Method 2: Python launcher
+python start_bot.py interactive
 
 # Method 3: Test mode
 ./test_interactive_shutdown.py
@@ -175,7 +175,7 @@ shutdown_system, console_control = setup_interactive_shutdown(
 | Method | Pros | Cons | Best For |
 |--------|------|------|----------|
 | **run_bot.sh** | Simple, fast, works everywhere | Shell script | Most users |
-| **start_bot_interactive.py** | More features, Python-based | Requires Python | Advanced users |
+| **start_bot.py interactive** | More features, Python-based | Requires Python | Advanced users |
 | **Integration** | Built into bot | Requires code changes | Developers |
 
 ## 🚨 Troubleshooting
@@ -208,7 +208,7 @@ ls -la crypto_bot/main.py
 
 # Check permissions
 chmod +x run_bot.sh
-chmod +x start_bot_interactive.py
+chmod +x start_bot.py
 ```
 
 ## 🎉 Success!

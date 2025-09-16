@@ -17,7 +17,7 @@ fi
 # Test 2: Check if bot process is running
 echo ""
 echo "🤖 Test 2: Bot Process Status"
-if pgrep -f "start_bot_auto.py" > /dev/null; then
+if pgrep -f "start_bot.py" > /dev/null; then
     echo "✅ Bot process is running"
 else
     echo "❌ Bot process not found"
@@ -58,7 +58,7 @@ echo "📋 Test 5: System Information"
 echo "   Web Server: http://localhost:8000"
 echo "   Dashboard: http://localhost:8000/dashboard"
 echo "   Bot Status: Running"
-echo "   Process ID: $(pgrep -f 'start_bot_auto.py')"
+echo "   Process ID: $(pgrep -f 'start_bot.py')"
 
 echo ""
 echo "🎯 All tests completed!"

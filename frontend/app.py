@@ -312,7 +312,7 @@ def api_monitoring_health():
                     if any(
                         pattern in cmd_str
                         for pattern in [
-                            "start_bot_auto",
+                            "start_bot.py",
                             "crypto_bot.main",
                             "crypto_bot/main.py",
                         ]
@@ -801,7 +801,7 @@ def api_monitoring_status():
                         for pattern in [
                             "pipeline_monitor",
                             "enhanced_monitoring",
-                            "start_bot_auto",
+                            "start_bot.py",
                             "crypto_bot.main",
                             "crypto_bot/main.py",
                         ]
@@ -1022,8 +1022,7 @@ def check_existing_bot() -> bool:
                     for pattern in [
                         "crypto_bot.main",
                         "crypto_bot/main.py",
-                        "start_bot_noninteractive.py",
-                        "start_bot_auto.py",
+                        "start_bot.py",
                     ]
                 ):
                     return True
@@ -1045,12 +1044,9 @@ def watch_bot() -> None:
                 venv_python = (
                     Path(__file__).parent.parent / "venv" / "bin" / "python3"
                 )
-                bot_script = (
-                    Path(__file__).parent.parent
-                    / "start_bot_noninteractive.py"
-                )
+                bot_script = Path(__file__).parent.parent / "start_bot.py"
                 bot_proc = subprocess.Popen(
-                    [str(venv_python), str(bot_script)]
+                    [str(venv_python), str(bot_script), "noninteractive"]
                 )
                 bot_start_time = time.time()
             else:
@@ -2524,10 +2520,8 @@ def start():
     if not is_running() and not check_existing_bot():
         # Launch the asyncio-based trading bot using the non-interactive script
         venv_python = Path(__file__).parent.parent / "venv" / "bin" / "python3"
-        bot_script = (
-            Path(__file__).parent.parent / "start_bot_noninteractive.py"
-        )
-        bot_proc = subprocess.Popen([str(venv_python), str(bot_script)])
+        bot_script = Path(__file__).parent.parent / "start_bot.py"
+        bot_proc = subprocess.Popen([str(venv_python), str(bot_script), "noninteractive"])
         bot_start_time = time.time()
     return redirect(url_for("index"))
 
@@ -2597,7 +2591,7 @@ def start_bot():
     try:
         venv_python = Path(__file__).parent.parent / "venv" / "bin" / "python3"
         bot_script = (
-            Path(__file__).parent.parent / "start_bot_noninteractive.py"
+            Path(__file__).parent.parent / "start_bot.py"
         )
 
         print(f"Using Python: {venv_python}")
@@ -2630,7 +2624,7 @@ def start_bot():
         # Pass environment variables to subprocess
         env = os.environ.copy()
         bot_proc = subprocess.Popen(
-            [str(venv_python), str(bot_script)], env=env
+            [str(venv_python), str(bot_script), "noninteractive"], env=env
         )
         bot_start_time = time.time()
 
@@ -2810,7 +2804,7 @@ def cli():
         elif base == "custom":
             cmd = cmd_args
         else:
-            cmd = f"{venv_python} start_bot_noninteractive.py {cmd_args}"
+            cmd = f"{venv_python} start_bot.py noninteractive {cmd_args}"
         try:
             proc = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, check=False

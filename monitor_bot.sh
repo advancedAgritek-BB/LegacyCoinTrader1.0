@@ -6,7 +6,7 @@ LOG_FILE="crypto_bot/logs/bot_monitor.log"
 while true; do
     if ! pgrep -f "crypto_bot" > /dev/null; then
         echo "$(date): Bot not running, restarting..." >> $LOG_FILE
-        python3 start_bot_auto.py &
+        python3 start_bot.py auto &
         echo $! > $BOT_PID_FILE
         sleep 10
     else

@@ -19,10 +19,10 @@ echo -e "${GREEN}🤖 Trading Bot + 📊 Monitoring Dashboard + 🌐 Web Server$
 echo -e "${BLUE}$(printf '%.0s=' {1..60})${NC}"
 
 # Check if we're already running
-if pgrep -f "start_bot_auto.py" > /dev/null 2>&1; then
+if pgrep -f "start_bot.py" > /dev/null 2>&1; then
     echo -e "${YELLOW}⚠️  Integrated system appears to already be running${NC}"
-    echo "   To stop: pkill -f 'start_bot_auto.py'"
-    echo "   To restart: pkill -f 'start_bot_auto.py' && ./start_integrated.sh"
+    echo "   To stop: pkill -f 'start_bot.py'"
+    echo "   To restart: pkill -f 'start_bot.py' && ./start_integrated.sh"
     exit 1
 fi
 
@@ -34,7 +34,7 @@ echo "🎯 Launching integrated system..."
 echo ""
 
 # Run the bot in background and capture output
-python3 start_bot_auto.py > bot_output.log 2>&1 &
+python3 start_bot.py auto > bot_output.log 2>&1 &
 BOT_PID=$!
 
 echo "✅ Bot started with PID: $BOT_PID"
@@ -78,7 +78,7 @@ fi
 echo ""
 echo -e "${GREEN}✅ Integrated system is running!${NC}"
 echo "📋 To view logs: tail -f bot_output.log"
-echo "🛑 To stop: pkill -f 'start_bot_auto.py'"
+echo "🛑 To stop: pkill -f 'start_bot.py'"
 echo "🔄 To restart: ./start_integrated.sh"
 echo ""
 echo "The terminal is now free for other commands."

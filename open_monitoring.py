@@ -40,7 +40,7 @@ def main():
     else:
         print("❌ Monitoring dashboard not found")
         print("💡 Try starting the bot first:")
-        print("   python3 start_bot_auto.py")
+        print("   python3 start_bot.py auto")
 
 if __name__ == "__main__":
     main()

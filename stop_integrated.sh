@@ -68,7 +68,7 @@ stop_process "frontend.app" "Web dashboard"
 stop_process "crypto_bot.main" "Trading bot"
 
 # Stop integrated startup script
-stop_process "start_bot_auto.py" "Integrated startup script"
+stop_process "start_bot.py" "Integrated startup script"
 
 # Stop any remaining Python processes related to the bot
 if pgrep -f "python.*crypto_bot\|python.*frontend\|python.*telegram" > /dev/null 2>&1; then
@@ -103,7 +103,7 @@ if is_running "telegram_ctl.py"; then
     SERVICES_STOPPED=false
 fi
 
-if is_running "start_bot_auto.py"; then
+if is_running "start_bot.py"; then
     echo -e "${RED}❌ Startup script still running${NC}"
     SERVICES_STOPPED=false
 fi

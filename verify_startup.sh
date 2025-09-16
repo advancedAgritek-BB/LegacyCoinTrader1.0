@@ -7,7 +7,7 @@ echo "========================================"
 
 # Check if any processes are still running
 echo "📋 Checking for running processes..."
-if pgrep -f "start_bot_auto.py\|frontend/app.py\|crypto_bot/main.py" > /dev/null; then
+if pgrep -f "start_bot.py\|frontend/app.py\|crypto_bot/main.py" > /dev/null; then
     echo "⚠️  Found running processes. Please stop them first:"
     echo "   ./stop_integrated.sh"
     exit 1

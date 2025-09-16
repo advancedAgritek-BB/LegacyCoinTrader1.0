@@ -19,10 +19,10 @@ echo -e "${GREEN}📈 OHLCV Fetching + 🤖 Trading Bot + 🌐 Web Dashboard + �
 echo -e "${BLUE}$(printf '%.0s=' {1..60})${NC}"
 
 # Check if we're already running
-if pgrep -f "start_bot_auto.py\|crypto_bot.main\|frontend.app" > /dev/null 2>&1; then
+if pgrep -f "start_bot.py\|crypto_bot.main\|frontend.app" > /dev/null 2>&1; then
     echo -e "${YELLOW}⚠️  System appears to already be running${NC}"
     echo "   To stop: Ctrl+C or use './stop_integrated.sh'"
-    echo "   Check processes: ps aux | grep -E '(start_bot_auto|crypto_bot|frontend)'"
+    echo "   Check processes: ps aux | grep -E '(start_bot.py|crypto_bot|frontend)'"
     exit 1
 fi
 
@@ -30,7 +30,7 @@ fi
 cleanup() {
     echo ""
     echo -e "${YELLOW}🛑 Shutting down all services...${NC}"
-    pkill -f "start_bot_auto.py" || true
+    pkill -f "start_bot.py" || true
     pkill -f "crypto_bot.main" || true
     pkill -f "frontend.app" || true
     pkill -f "telegram_ctl.py" || true
@@ -61,7 +61,7 @@ export AUTO_START_TRADING=1
 export NON_INTERACTIVE=1
 
 # Start the integrated system
-python3 start_bot_auto.py
+python3 start_bot.py auto
 
 echo ""
 echo -e "${GREEN}✅ Complete system has stopped${NC}"
