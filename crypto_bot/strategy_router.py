@@ -50,33 +50,38 @@ from crypto_bot.utils.telegram import TelegramNotifier
 from crypto_bot.utils.cache_helpers import cache_by_id
 from crypto_bot.selector import bandit
 
-from crypto_bot.strategy import (
-    # Core strategies
-    trend_bot,
-    grid_bot,
-    sniper_bot,
-    sniper_solana,
-    dex_scalper,
-    mean_bot,
-    breakout_bot,
-    micro_scalp_bot,
-    bounce_scalper,
-    # New strategies
-    cross_chain_arb_bot,
-    dip_hunter,
-    flash_crash_bot,
-    hft_engine,
-    lstm_bot,
-    maker_spread,
-    momentum_bot,
-    range_arb_bot,
-    stat_arb_bot,
-    meme_wave_bot,
-    # Ultra-aggressive strategies
-    ultra_scalp_bot,
-    momentum_exploiter,
-    volatility_harvester,
-)
+from crypto_bot.strategy import STRATEGY_ALIASES, STRATEGY_REGISTRY, get_strategy
+from crypto_bot.strategy.base import StrategyProtocol
+
+
+_STRATEGY_REFERENCES = [
+    "trend_bot",
+    "grid_bot",
+    "sniper_bot",
+    "sniper_solana",
+    "dex_scalper",
+    "mean_bot",
+    "breakout_bot",
+    "micro_scalp_bot",
+    "bounce_scalper",
+    "cross_chain_arb_bot",
+    "dip_hunter",
+    "flash_crash_bot",
+    "hft_engine",
+    "lstm_bot",
+    "maker_spread",
+    "momentum_bot",
+    "range_arb_bot",
+    "stat_arb_bot",
+    "meme_wave_bot",
+    "ultra_scalp_bot",
+    "momentum_exploiter",
+    "volatility_harvester",
+    "solana_scalping",
+    "dca_bot",
+]
+globals().update({name: get_strategy(name) for name in _STRATEGY_REFERENCES})
+
 
 import random
 from collections import defaultdict, deque
@@ -101,6 +106,12 @@ STRATEGY_CONFIG_TYPES = {
 
 def _resolve_strategy_name(fn: Callable[..., Any]) -> str:
     """Return the canonical strategy name for ``fn``."""
+
+    owner = getattr(fn, "__self__", None)
+    if isinstance(owner, StrategyProtocol):
+        return owner.name
+    if owner is not None and hasattr(owner, "name"):
+        return getattr(owner, "name")
 
     module = getattr(fn, "__module__", "")
     if module.startswith("crypto_bot.strategy."):
@@ -422,75 +433,35 @@ class Selector:
         return strategy_fn
 
 
+def _strategy_function_map() -> Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]]:
+    mapping: Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]] = {}
+    for key, strategy in STRATEGY_REGISTRY.items():
+        mapping[key] = strategy.generate_signal
+    for alias, canonical in STRATEGY_ALIASES.items():
+        strategy = STRATEGY_REGISTRY.get(canonical)
+        if strategy is not None:
+            mapping.setdefault(alias, strategy.generate_signal)
+    return mapping
+
+
 def get_strategy_by_name(
     name: str,
 ) -> Optional[Callable[[pd.DataFrame], Tuple[float, str]]]:
     """Return strategy callable for ``name`` if available."""
+
+    strategy = get_strategy(name)
+    if strategy is not None:
+        return strategy.generate_signal
+
     from . import meta_selector
     from .rl import strategy_selector as rl_selector
 
-    # Comprehensive strategy mapping
-    strategy_mapping: Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]] = {}
-    
-    # Import all strategies directly
-    try:
-        from .strategy import (
-            trend_bot, grid_bot, sniper_bot, sniper_solana, dex_scalper,
-            mean_bot, breakout_bot, micro_scalp_bot, bounce_scalper,
-            cross_chain_arb_bot, dip_hunter, flash_crash_bot, hft_engine,
-            lstm_bot, maker_spread, momentum_bot, range_arb_bot,
-            stat_arb_bot, meme_wave_bot, ultra_scalp_bot, momentum_exploiter,
-            volatility_harvester, solana_scalping, dca_bot
-        )
-        
-        # Map strategy names to their generate_signal functions
-        strategy_mapping.update({
-            "trend_bot": trend_bot.generate_signal if trend_bot else None,
-            "grid_bot": grid_bot.generate_signal if grid_bot else None,
-            "sniper_bot": sniper_bot.generate_signal if sniper_bot else None,
-            "sniper_solana": sniper_solana.generate_signal if sniper_solana else None,
-            "dex_scalper": dex_scalper.generate_signal if dex_scalper else None,
-            "mean_bot": mean_bot.generate_signal if mean_bot else None,
-            "breakout_bot": breakout_bot.generate_signal if breakout_bot else None,
-            "micro_scalp_bot": micro_scalp_bot.generate_signal if micro_scalp_bot else None,
-            "bounce_scalper": bounce_scalper.generate_signal if bounce_scalper else None,
-            "cross_chain_arb_bot": cross_chain_arb_bot.generate_signal if cross_chain_arb_bot else None,
-            "dip_hunter": dip_hunter.generate_signal if dip_hunter else None,
-            "flash_crash_bot": flash_crash_bot.generate_signal if flash_crash_bot else None,
-            "hft_engine": hft_engine.generate_signal if hft_engine else None,
-            "lstm_bot": lstm_bot.generate_signal if lstm_bot else None,
-            "maker_spread": maker_spread.generate_signal if maker_spread else None,
-            "momentum_bot": momentum_bot.generate_signal if momentum_bot else None,
-            "range_arb_bot": range_arb_bot.generate_signal if range_arb_bot else None,
-            "stat_arb_bot": stat_arb_bot.generate_signal if stat_arb_bot else None,
-            "meme_wave_bot": meme_wave_bot.generate_signal if meme_wave_bot else None,
-            "ultra_scalp_bot": ultra_scalp_bot.generate_signal if ultra_scalp_bot else None,
-            "momentum_exploiter": momentum_exploiter.generate_signal if momentum_exploiter else None,
-            "volatility_harvester": volatility_harvester.generate_signal if volatility_harvester else None,
-            "solana_scalping": solana_scalping.generate_signal if solana_scalping else None,
-            "dca_bot": dca_bot.generate_signal if dca_bot else None,
-            
-            # Alternative names
-            "trend": trend_bot.generate_signal if trend_bot else None,
-            "grid": grid_bot.generate_signal if grid_bot else None,
-            "sniper": sniper_bot.generate_signal if sniper_bot else None,
-            "micro_scalp": micro_scalp_bot.generate_signal if micro_scalp_bot else None,
-            "bounce_scalper_bot": bounce_scalper.generate_signal if bounce_scalper else None,
-        })
-        
-        # Filter out None values
-        strategy_mapping = {k: v for k, v in strategy_mapping.items() if v is not None}
-        
-    except ImportError as e:
-        logger.warning(f"Failed to import some strategies: {e}")
-    
-    # Add mappings from meta_selector and rl_selector
-    mapping: Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]] = {}
-    mapping.update(strategy_mapping)
+    mapping: Dict[str, Callable[[pd.DataFrame], Tuple[float, str]]] = _strategy_function_map()
     mapping.update(getattr(meta_selector, "_STRATEGY_FN_MAP", {}))
     mapping.update(getattr(rl_selector, "_STRATEGY_FN_MAP", {}))
-    
-    return mapping.get(name)
+
+    canonical = STRATEGY_ALIASES.get(name, name)
+    return mapping.get(name) or mapping.get(canonical)
 
 
 @cache_by_id
@@ -1262,6 +1233,9 @@ def _select_strategy_with_rotation(
     except ImportError:
         pass
     
-    logger.debug(f"Selected strategy {selected_strategy.__name__} for regime {regime} with priority {_get_strategy_priority(selected_strategy.__name__, regime, config):.3f}")
-    
+    logger.debug(
+        f"Selected strategy {selected_strategy.__name__} for regime {regime} "
+        f"with priority {_get_strategy_priority(selected_strategy.__name__, regime, config):.3f}"
+    )
+
     return selected_strategy

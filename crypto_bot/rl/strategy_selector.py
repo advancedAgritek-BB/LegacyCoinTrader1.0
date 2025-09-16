@@ -6,38 +6,34 @@ from pathlib import Path
 from crypto_bot.utils.logger import LOG_DIR
 from typing import Callable, Dict
 
-from crypto_bot.strategy import (
-    trend_bot,
-    grid_bot,
-    sniper_bot,
-    dex_scalper,
-    dca_bot,
-    mean_bot,
-    breakout_bot,
-    solana_scalping,
-)
+from crypto_bot.strategy import STRATEGY_ALIASES, get_strategy
 
 # Default log file location
 LOG_FILE = Path("crypto_bot/logs/strategy_pnl.csv")
 
 # Map strategy names to generation functions
 _STRATEGY_FN_MAP: Dict[str, Callable[[pd.DataFrame], tuple]] = {}
-if trend_bot is not None:
-    _STRATEGY_FN_MAP["trend_bot"] = trend_bot.generate_signal
-if grid_bot is not None:
-    _STRATEGY_FN_MAP["grid_bot"] = grid_bot.generate_signal
-if sniper_bot is not None:
-    _STRATEGY_FN_MAP["sniper_bot"] = sniper_bot.generate_signal
-if dex_scalper is not None:
-    _STRATEGY_FN_MAP["dex_scalper"] = dex_scalper.generate_signal
-if dca_bot is not None:
-    _STRATEGY_FN_MAP["dca_bot"] = dca_bot.generate_signal
-if mean_bot is not None:
-    _STRATEGY_FN_MAP["mean_bot"] = mean_bot.generate_signal
-if breakout_bot is not None:
-    _STRATEGY_FN_MAP["breakout_bot"] = breakout_bot.generate_signal
-if solana_scalping is not None:
-    _STRATEGY_FN_MAP["solana_scalping"] = solana_scalping.generate_signal
+for name in [
+    "trend_bot",
+    "grid_bot",
+    "sniper_bot",
+    "dex_scalper",
+    "dca_bot",
+    "mean_bot",
+    "breakout_bot",
+    "solana_scalping",
+]:
+    strategy = get_strategy(name)
+    if strategy is not None:
+        _STRATEGY_FN_MAP[name] = strategy.generate_signal
+
+for alias, canonical in STRATEGY_ALIASES.items():
+    strategy = _STRATEGY_FN_MAP.get(canonical)
+    if strategy is None:
+        obj = get_strategy(alias)
+        strategy = obj.generate_signal if obj is not None else None
+    if strategy is not None:
+        _STRATEGY_FN_MAP.setdefault(alias, strategy)
 
 
 class RLStrategySelector:
