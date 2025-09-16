@@ -67,135 +67,175 @@ class MetaRegressor:
         return {k: float(v) for k, v in zip(df.index, preds)}
 
 
+def _resolve_signal(obj: object, alias: str) -> Optional[Callable[[pd.DataFrame], tuple]]:
+    if not obj:
+        return None
+    globals().setdefault(alias, obj)
+    return getattr(obj, "generate_signal", None)
+
+
 def _get_strategy_function(strategy_name: str):
     """Lazy import strategy functions to avoid circular dependencies."""
     try:
         if strategy_name in ["trend", "trend_bot"]:
             from crypto_bot.strategy import trend_bot
-            return trend_bot.generate_signal
+
+            return _resolve_signal(trend_bot, "trend_bot")
         elif strategy_name in ["grid", "grid_bot"]:
             from crypto_bot.strategy import grid_bot
-            return grid_bot.generate_signal
+
+            return _resolve_signal(grid_bot, "grid_bot")
         elif strategy_name in ["sniper", "sniper_bot"]:
             from crypto_bot.strategy import sniper_bot
-            return sniper_bot.generate_signal
+
+            return _resolve_signal(sniper_bot, "sniper_bot")
         elif strategy_name in ["dex_scalper", "dex_scalper_bot"]:
             from crypto_bot.strategy import dex_scalper
-            return dex_scalper.generate_signal
+
+            return _resolve_signal(dex_scalper, "dex_scalper")
         elif strategy_name in ["mean_bot"]:
             from crypto_bot.strategy import mean_bot
-            return mean_bot.generate_signal
+
+            return _resolve_signal(mean_bot, "mean_bot")
         elif strategy_name in ["breakout_bot"]:
             from crypto_bot.strategy import breakout_bot
-            return breakout_bot.generate_signal
+
+            return _resolve_signal(breakout_bot, "breakout_bot")
         elif strategy_name in ["micro_scalp", "micro_scalp_bot"]:
             from crypto_bot.strategy import micro_scalp_bot
-            return micro_scalp_bot.generate_signal
+
+            return _resolve_signal(micro_scalp_bot, "micro_scalp_bot")
         elif strategy_name in ["bounce_scalper", "bounce_scalper_bot"]:
             from crypto_bot.strategy import bounce_scalper
-            return bounce_scalper.generate_signal
+
+            return _resolve_signal(bounce_scalper, "bounce_scalper")
         elif strategy_name in ["solana_scalping", "solana_scalping_bot"]:
             from crypto_bot.strategy import solana_scalping
-            return solana_scalping.generate_signal
+
+            return _resolve_signal(solana_scalping, "solana_scalping")
         elif strategy_name in ["dca", "dca_bot"]:
             from crypto_bot.strategy import dca_bot
-            return dca_bot.generate_signal
+
+            return _resolve_signal(dca_bot, "dca_bot")
         elif strategy_name in ["momentum", "momentum_bot"]:
             from crypto_bot.strategy import momentum_bot
-            return momentum_bot.generate_signal
+
+            return _resolve_signal(momentum_bot, "momentum_bot")
         elif strategy_name in ["lstm", "lstm_bot"]:
             from crypto_bot.strategy import lstm_bot
-            return lstm_bot.generate_signal
+
+            return _resolve_signal(lstm_bot, "lstm_bot")
         elif strategy_name in ["ultra_scalp", "ultra_scalp_bot"]:
             from crypto_bot.strategy import ultra_scalp_bot
-            return ultra_scalp_bot.generate_signal
+
+            return _resolve_signal(ultra_scalp_bot, "ultra_scalp_bot")
         elif strategy_name in ["volatility_harvester"]:
             from crypto_bot.strategy import volatility_harvester
-            return volatility_harvester.generate_signal
+
+            return _resolve_signal(volatility_harvester, "volatility_harvester")
         elif strategy_name in ["hft_engine"]:
             from crypto_bot.strategy import hft_engine
-            return hft_engine.generate_signal
+
+            return _resolve_signal(hft_engine, "hft_engine")
         elif strategy_name in ["maker_spread"]:
             from crypto_bot.strategy import maker_spread
-            return maker_spread.generate_signal
+
+            return _resolve_signal(maker_spread, "maker_spread")
         elif strategy_name in ["flash_crash_bot"]:
             from crypto_bot.strategy import flash_crash_bot
-            return flash_crash_bot.generate_signal
+
+            return _resolve_signal(flash_crash_bot, "flash_crash_bot")
         elif strategy_name in ["meme_wave_bot"]:
             from crypto_bot.strategy import meme_wave_bot
-            return meme_wave_bot.generate_signal
+
+            return _resolve_signal(meme_wave_bot, "meme_wave_bot")
         elif strategy_name in ["cross_chain_arb_bot"]:
             from crypto_bot.strategy import cross_chain_arb_bot
-            return cross_chain_arb_bot.generate_signal
+
+            return _resolve_signal(cross_chain_arb_bot, "cross_chain_arb_bot")
         elif strategy_name in ["dip_hunter"]:
             from crypto_bot.strategy import dip_hunter
-            return dip_hunter.generate_signal
+
+            return _resolve_signal(dip_hunter, "dip_hunter")
         elif strategy_name in ["range_arb_bot"]:
             from crypto_bot.strategy import range_arb_bot
-            return range_arb_bot.generate_signal
+
+            return _resolve_signal(range_arb_bot, "range_arb_bot")
         elif strategy_name in ["stat_arb_bot"]:
             from crypto_bot.strategy import stat_arb_bot
-            return stat_arb_bot.generate_signal
+
+            return _resolve_signal(stat_arb_bot, "stat_arb_bot")
         elif strategy_name in ["momentum_exploiter"]:
             from crypto_bot.strategy import momentum_exploiter
-            return momentum_exploiter.generate_signal
+
+            return _resolve_signal(momentum_exploiter, "momentum_exploiter")
         elif strategy_name in ["arbitrage_engine"]:
             from crypto_bot.strategy import arbitrage_engine
-            return arbitrage_engine.generate_signal
+
+            return _resolve_signal(arbitrage_engine, "arbitrage_engine")
         else:
             return None
     except ImportError:
         return None
 
-# Strategy map will be populated lazily when needed
-_STRATEGY_FN_MAP = {}
+# Strategy map is populated on import so tests can introspect it directly
+_STRATEGY_FN_MAP: Dict[str, Optional[Callable[[pd.DataFrame], tuple]]] = {}
+
+
+def _ensure_strategy_map() -> None:
+    if _STRATEGY_FN_MAP:
+        return
+
+    entries = {
+        "trend": _get_strategy_function("trend"),
+        "trend_bot": _get_strategy_function("trend_bot"),
+        "grid": _get_strategy_function("grid"),
+        "grid_bot": _get_strategy_function("grid_bot"),
+        "sniper": _get_strategy_function("sniper"),
+        "sniper_bot": _get_strategy_function("sniper_bot"),
+        "dex_scalper": _get_strategy_function("dex_scalper"),
+        "dex_scalper_bot": _get_strategy_function("dex_scalper_bot"),
+        "mean_bot": _get_strategy_function("mean_bot"),
+        "breakout_bot": _get_strategy_function("breakout_bot"),
+        "micro_scalp": _get_strategy_function("micro_scalp"),
+        "micro_scalp_bot": _get_strategy_function("micro_scalp_bot"),
+        "bounce_scalper": _get_strategy_function("bounce_scalper"),
+        "bounce_scalper_bot": _get_strategy_function("bounce_scalper_bot"),
+        "solana_scalping": _get_strategy_function("solana_scalping"),
+        "solana_scalping_bot": _get_strategy_function("solana_scalping_bot"),
+        "dca": _get_strategy_function("dca"),
+        "dca_bot": _get_strategy_function("dca_bot"),
+        "momentum": _get_strategy_function("momentum"),
+        "momentum_bot": _get_strategy_function("momentum_bot"),
+        "lstm": _get_strategy_function("lstm"),
+        "lstm_bot": _get_strategy_function("lstm_bot"),
+        "ultra_scalp": _get_strategy_function("ultra_scalp"),
+        "ultra_scalp_bot": _get_strategy_function("ultra_scalp_bot"),
+        "volatility_harvester": _get_strategy_function("volatility_harvester"),
+        "hft_engine": _get_strategy_function("hft_engine"),
+        "maker_spread": _get_strategy_function("maker_spread"),
+        "flash_crash_bot": _get_strategy_function("flash_crash_bot"),
+        "meme_wave_bot": _get_strategy_function("meme_wave_bot"),
+        "cross_chain_arb_bot": _get_strategy_function("cross_chain_arb_bot"),
+        "dip_hunter": _get_strategy_function("dip_hunter"),
+        "range_arb_bot": _get_strategy_function("range_arb_bot"),
+        "stat_arb_bot": _get_strategy_function("stat_arb_bot"),
+        "momentum_exploiter": _get_strategy_function("momentum_exploiter"),
+        "arbitrage_engine": _get_strategy_function("arbitrage_engine"),
+    }
+    _STRATEGY_FN_MAP.update({k: v for k, v in entries.items() if v is not None})
 
 
 def get_strategy_by_name(
     name: str,
 ) -> Optional[Callable[[pd.DataFrame], tuple]]:
     """Return the strategy function mapped to ``name`` if present."""
-    # Populate the strategy map lazily if it's empty
-    if not _STRATEGY_FN_MAP:
-        _STRATEGY_FN_MAP.update({
-            "trend": _get_strategy_function("trend"),
-            "trend_bot": _get_strategy_function("trend_bot"),
-            "grid": _get_strategy_function("grid"),
-            "grid_bot": _get_strategy_function("grid_bot"),
-            "sniper": _get_strategy_function("sniper"),
-            "sniper_bot": _get_strategy_function("sniper_bot"),
-            "dex_scalper": _get_strategy_function("dex_scalper"),
-            "dex_scalper_bot": _get_strategy_function("dex_scalper_bot"),
-            "mean_bot": _get_strategy_function("mean_bot"),
-            "breakout_bot": _get_strategy_function("breakout_bot"),
-            "micro_scalp": _get_strategy_function("micro_scalp"),
-            "micro_scalp_bot": _get_strategy_function("micro_scalp_bot"),
-            "bounce_scalper": _get_strategy_function("bounce_scalper"),
-            "bounce_scalper_bot": _get_strategy_function("bounce_scalper_bot"),
-            "solana_scalping": _get_strategy_function("solana_scalping"),
-            "solana_scalping_bot": _get_strategy_function("solana_scalping_bot"),
-            "dca": _get_strategy_function("dca"),
-            "dca_bot": _get_strategy_function("dca_bot"),
-            "momentum": _get_strategy_function("momentum"),
-            "momentum_bot": _get_strategy_function("momentum_bot"),
-            "lstm": _get_strategy_function("lstm"),
-            "lstm_bot": _get_strategy_function("lstm_bot"),
-            "ultra_scalp": _get_strategy_function("ultra_scalp"),
-            "ultra_scalp_bot": _get_strategy_function("ultra_scalp_bot"),
-            "volatility_harvester": _get_strategy_function("volatility_harvester"),
-            "hft_engine": _get_strategy_function("hft_engine"),
-            "maker_spread": _get_strategy_function("maker_spread"),
-            "flash_crash_bot": _get_strategy_function("flash_crash_bot"),
-            "meme_wave_bot": _get_strategy_function("meme_wave_bot"),
-            "cross_chain_arb_bot": _get_strategy_function("cross_chain_arb_bot"),
-            "dip_hunter": _get_strategy_function("dip_hunter"),
-            "range_arb_bot": _get_strategy_function("range_arb_bot"),
-            "stat_arb_bot": _get_strategy_function("stat_arb_bot"),
-            "momentum_exploiter": _get_strategy_function("momentum_exploiter"),
-            "arbitrage_engine": _get_strategy_function("arbitrage_engine"),
-        })
-    
+
+    _ensure_strategy_map()
     return _STRATEGY_FN_MAP.get(name)
+
+
+_ensure_strategy_map()
 
 
 def _load() -> Dict[str, Dict[str, List[dict]]]:

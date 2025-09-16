@@ -8,6 +8,8 @@ from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 import numpy as np
 
+from crypto_bot.strategy.base import StrategyBase, StrategyCallable
+
 logger = logging.getLogger(__name__)
 
 NAME = "momentum_bot"
@@ -161,17 +163,21 @@ class regime_filter:
         return regime in {"trending", "volatile"}
 
 
-class Strategy:
-    """Strategy wrapper so :func:`load_strategies` can auto-register it."""
+_strategy_callable = generate_signal
+
+
+class Strategy(StrategyBase):
+    """Strategy wrapper leveraging :class:`StrategyBase`."""
+
+    name = NAME
+    regime_filter = regime_filter
 
     def __init__(self) -> None:
-        self.name = "momentum_bot"
-        self.generate_signal = generate_signal
-        self.regime_filter = regime_filter
+        super().__init__(name=self.name, regime_filter=self.regime_filter)
 
-    def signal(self, *args, **kwargs):
-        """Compatibility wrapper for pipelines expecting ``signal``."""
-        return self.generate_signal(*args, **kwargs)
+    @property
+    def generate_signal(self) -> StrategyCallable:
+        return _strategy_callable
 
 
 __all__ = ["generate_signal", "regime_filter", "Strategy"]

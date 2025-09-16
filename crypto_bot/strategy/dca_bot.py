@@ -2,6 +2,8 @@ from typing import Optional, Tuple
 
 import pandas as pd
 
+from crypto_bot.strategy.base import FunctionStrategy
+
 
 def generate_signal(df: pd.DataFrame, config: Optional[dict] = None) -> Tuple[float, str]:
     """Simple dollar-cost averaging signal."""
@@ -20,3 +22,9 @@ class regime_filter:
     @staticmethod
     def matches(regime: str) -> bool:
         return True
+
+
+Strategy = FunctionStrategy("dca_bot", generate_signal, regime_filter)
+
+
+__all__ = ["generate_signal", "regime_filter", "Strategy"]
