@@ -58,6 +58,32 @@ def _df_low_bw_drop() -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
+def _df_rsi_extreme(direction: str) -> pd.DataFrame:
+    import numpy as np
+
+    np.random.seed(123 if direction == "long" else 456)
+    base = list(100 + np.random.randn(40) * 2.5)
+    last = base[-1]
+    primary_step = -1.5 if direction == "long" else 1.5
+    secondary_step = -0.2 if direction == "long" else 0.2
+    for _ in range(20):
+        last += primary_step
+        base.append(last)
+    for _ in range(15):
+        last += secondary_step
+        base.append(last)
+
+    return pd.DataFrame(
+        {
+            "open": base,
+            "high": [p + 0.5 for p in base],
+            "low": [p - 0.5 for p in base],
+            "close": base,
+            "volume": [150] * len(base),
+        }
+    )
+
+
 def test_long_signal_on_big_drop():
     """High bandwidth should block the signal."""
     df = _df_with_drop(80.0)
@@ -85,6 +111,20 @@ def test_long_signal_when_bandwidth_low():
     score, direction = mean_bot.generate_signal(df)
     assert direction == "long"
     assert score > 0
+
+
+def test_rsi_extremes_trigger_long_and_short():
+    cfg = {"adx_threshold": 200}
+
+    long_df = _df_rsi_extreme("long")
+    long_score, long_direction = mean_bot.generate_signal(long_df, cfg)
+    assert long_direction == "long"
+    assert long_score > 0
+
+    short_df = _df_rsi_extreme("short")
+    short_score, short_direction = mean_bot.generate_signal(short_df, cfg)
+    assert short_direction == "short"
+    assert short_score > 0
 
 
 def test_no_signal_when_trending():
