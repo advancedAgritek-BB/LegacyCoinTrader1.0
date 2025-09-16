@@ -5,13 +5,15 @@ and prevent optional dependency issues during collection. Modules should
 import what they need directly rather than relying on package side effects.
 """
 
-from typing import Any
+from typing import Any, Optional
 
 LOG_DIR: Any = None
 
 
 def _setup_logger_stub(
-    name: str, log_file: str, to_console: bool = True
+    name: str,
+    log_file: Optional[str] = None,
+    to_console: bool = True,
 ) -> Any:
     class _Dummy:
         def info(self, *a: Any, **k: Any) -> None:
