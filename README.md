@@ -76,36 +76,19 @@ LUNARCRUSH_API_KEY=your_lunarcrush_key
 EXECUTION_MODE=dry_run            # or live
 ```
 
-### Main Configuration (`crypto_bot/config.yaml`)
-```yaml
-# Core Settings
-exchange: kraken
-execution_mode: dry_run
-use_websocket: false
+### Configuration
 
-# Risk Management
-risk:
-  trade_size_pct: 0.1
-  max_open_trades: 10
-  stop_loss_pct: 0.008
-  take_profit_pct: 0.045
-  max_drawdown: 0.25
+Default settings now live in `crypto_bot/config/settings.py` and are powered by
+[`pydantic-settings`](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).
+At runtime the loader merges three sources in the following order:
 
-# Strategy Allocation
-strategy_allocation:
-  micro_scalp_bot: 30
-  sniper_bot: 25
-  bounce_scalper: 15
-  grid_bot: 15
-  trend_bot: 15
+1. **Code defaults** defined by the Pydantic models.
+2. **YAML overrides** stored in `crypto_bot/config.yaml` (optional).
+3. **Environment variables** prefixed with `BOT_` (nested fields use
+   `__` as a delimiter, e.g. `BOT_RISK__MAX_POSITIONS=5`).
 
-# Performance Optimization
-performance:
-  adaptive_concurrency: true
-  adaptive_rate_limiting: true
-  adaptive_cache_sizing: true
-  max_memory_usage_pct: 80.0
-```
+A generated reference document describing every available option lives at
+`crypto_bot/config/REFERENCE.md`.
 
 ### Production Configuration (`production_config.yaml`)
 - `production_config.yaml` is now the single source of truth for production deployments.

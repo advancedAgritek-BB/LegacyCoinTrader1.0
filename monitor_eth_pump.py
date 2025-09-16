@@ -5,7 +5,6 @@ Quick ETH/USD pump monitoring script.
 
 import asyncio
 import sys
-import os
 from pathlib import Path
 
 # Add the project root to the Python path
@@ -13,7 +12,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 from crypto_bot.utils.logger import setup_logger, LOG_DIR
-import yaml
+from crypto_bot.config import load_config
 import ccxt
 import pandas as pd
 import numpy as np
@@ -27,8 +26,7 @@ async def monitor_eth_pump():
     logger.info("🔍 Starting ETH/USD pump monitoring...")
     
     # Load config
-    with open("crypto_bot/config.yaml", 'r') as f:
-        config = yaml.safe_load(f)
+    config = load_config()
     
     # Initialize exchange
     exchange = ccxt.kraken({

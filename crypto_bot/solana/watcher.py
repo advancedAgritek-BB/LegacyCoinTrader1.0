@@ -14,7 +14,7 @@ try:  # optional for unit tests
 except Exception:  # pragma: no cover - allow import without aiohttp
     aiohttp = None  # type: ignore
 import logging
-import yaml
+from crypto_bot.config import load_config as load_bot_config, resolve_config_path
 
 
 @dataclass
@@ -31,7 +31,7 @@ class NewPoolEvent:
     timestamp: float = 0.0
 
 
-CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
+CONFIG_PATH = resolve_config_path()
 
 
 logger = logging.getLogger(__name__)
@@ -49,8 +49,7 @@ class PoolWatcher:
         max_failures: int = 3,
     ) -> None:
         if url is None or interval is None:
-            with open(CONFIG_PATH) as f:
-                cfg = yaml.safe_load(f) or {}
+            cfg = load_bot_config(CONFIG_PATH)
             sniper_cfg = cfg.get("meme_wave_sniper", {})
             pool_cfg = sniper_cfg.get("pool", {})
             if url is None:

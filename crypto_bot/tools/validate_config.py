@@ -4,19 +4,11 @@ Configuration validation script for the crypto bot.
 Checks for common configuration issues and provides fixes.
 """
 
-import yaml
 import os
 from pathlib import Path
 from typing import Dict, Any, List
 
-def load_config(config_path: str) -> Dict[str, Any]:
-    """Load configuration from YAML file."""
-    try:
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        print(f"Error loading config: {e}")
-        return {}
+from crypto_bot.config import load_config, resolve_config_path
 
 def validate_telegram_config(config: Dict[str, Any]) -> List[str]:
     """Validate Telegram configuration."""
@@ -92,15 +84,15 @@ def validate_risk_config(config: Dict[str, Any]) -> List[str]:
 
 def main():
     """Main validation function."""
-    config_path = "crypto_bot/config.yaml"
-    
-    if not os.path.exists(config_path):
-        print(f"Configuration file not found: {config_path}")
-        return
-    
+    config_path = resolve_config_path()
+
     print("🔍 Validating crypto bot configuration...")
-    config = load_config(config_path)
-    
+    try:
+        config = load_config(config_path)
+    except Exception as exc:
+        print(f"❌ Failed to load configuration: {exc}")
+        return
+
     if not config:
         print("❌ Failed to load configuration")
         return

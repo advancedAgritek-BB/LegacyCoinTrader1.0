@@ -5,11 +5,12 @@ import logging
 from pathlib import Path
 from typing import Any, Dict
 
-import yaml
 from pydantic import ValidationError
 
 from schema.scanner import PythConfig, ScannerConfig, SolanaScannerConfig
 
+from crypto_bot.config import load_config as _load_config_dict
+from crypto_bot.config import resolve_config_path
 from crypto_bot.cooldown_manager import configure as cooldown_configure
 from crypto_bot.open_position_guard import OpenPositionGuard
 from crypto_bot.portfolio_rotator import PortfolioRotator
@@ -19,7 +20,7 @@ from crypto_bot.utils.symbol_utils import fix_symbol
 
 logger = logging.getLogger("bot")
 
-CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
+CONFIG_PATH = resolve_config_path()
 try:
     _LAST_CONFIG_MTIME = CONFIG_PATH.stat().st_mtime
 except OSError:
@@ -38,9 +39,8 @@ __all__ = [
 
 def load_config() -> Dict[str, Any]:
     """Load YAML configuration for the bot."""
-    with open(CONFIG_PATH) as f:
-        logger.info("Loading config from %s", CONFIG_PATH)
-        data = yaml.safe_load(f) or {}
+    logger.info("Loading config from %s", CONFIG_PATH)
+    data = _load_config_dict(config_path=CONFIG_PATH)
 
     strat_dir = CONFIG_PATH.parent.parent / "config" / "strategies"
     trend_file = strat_dir / "trend_bot.yaml"

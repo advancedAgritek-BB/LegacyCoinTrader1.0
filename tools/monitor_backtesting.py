@@ -11,17 +11,18 @@ import os
 from pathlib import Path
 from datetime import datetime, timedelta
 import pandas as pd
-import yaml
+from crypto_bot.config import load_config as load_bot_config, resolve_config_path
 
 def load_config():
     """Load the main bot configuration."""
-    config_path = Path("crypto_bot/config.yaml")
-    if not config_path.exists():
-        print("❌ Config file not found: crypto_bot/config.yaml")
+    config_path = resolve_config_path()
+    if not Path(config_path).exists():
+        print(f"ℹ️ Override configuration not found at {config_path}; using defaults.")
+    try:
+        return load_bot_config(config_path)
+    except Exception as exc:
+        print(f"❌ Failed to load configuration: {exc}")
         return None
-    
-    with open(config_path) as f:
-        return yaml.safe_load(f)
 
 def check_optimization_config(config):
     """Check if optimization is properly configured."""

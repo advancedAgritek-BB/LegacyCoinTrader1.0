@@ -4,11 +4,12 @@ Telegram bot connection test script.
 Tests the bot's ability to connect and send messages.
 """
 
-import yaml
 import asyncio
 import time
 from pathlib import Path
 from typing import Dict, Any
+
+from crypto_bot.config import load_config as load_bot_config, resolve_config_path
 
 try:
     from telegram import Bot
@@ -17,15 +18,6 @@ try:
 except ImportError:
     TELEGRAM_AVAILABLE = False
     print("❌ python-telegram-bot not installed. Install with: pip install python-telegram-bot")
-
-def load_config(config_path: str) -> Dict[str, Any]:
-    """Load configuration from YAML file."""
-    try:
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        print(f"Error loading config: {e}")
-        return {}
 
 async def test_telegram_connection(token: str, chat_id: str) -> bool:
     """Test Telegram bot connection and send a test message."""
@@ -103,16 +95,14 @@ def test_config_values(config: Dict[str, Any]) -> None:
 
 def main():
     """Main test function."""
-    config_path = "crypto_bot/config.yaml"
-    
+    config_path = resolve_config_path()
     if not Path(config_path).exists():
-        print(f"❌ Configuration file not found: {config_path}")
-        return
-    
+        print(f"ℹ️ Override configuration not found at {config_path}; using defaults.")
+
     print("🤖 Telegram Bot Connection Test")
     print("=" * 40)
-    
-    config = load_config(config_path)
+
+    config = load_bot_config(config_path)
     if not config:
         print("❌ Failed to load configuration")
         return

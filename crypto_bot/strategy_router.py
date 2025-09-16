@@ -148,9 +148,13 @@ def _build_strategy_config_object(
     return raw_cfg
 
 
-CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
-with open(CONFIG_PATH) as f:
-    DEFAULT_CONFIG = yaml.safe_load(f)
+from crypto_bot.config import load_config as load_bot_config, resolve_config_path
+
+CONFIG_PATH = resolve_config_path()
+try:
+    DEFAULT_CONFIG = load_bot_config(CONFIG_PATH)
+except Exception:
+    DEFAULT_CONFIG = {}
 
 # Map symbols to asyncio locks guarding order placement
 symbol_locks: Dict[str, asyncio.Lock] = {}

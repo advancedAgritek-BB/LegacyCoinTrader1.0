@@ -20,7 +20,6 @@ import warnings
 
 import numpy as np
 import pandas as pd
-import yaml
 from scipy.optimize import differential_evolution, minimize
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import cross_val_score
@@ -55,6 +54,8 @@ try:
     from crypto_bot.strategy_router import strategy_for
 except ImportError:
     strategy_for = None
+
+from crypto_bot.config import load_config as load_bot_config, save_config, resolve_config_path
 
 warnings.filterwarnings('ignore')
 
@@ -127,9 +128,8 @@ class StrategyOptimizer:
         
     def _load_current_config(self) -> Dict[str, Any]:
         """Load current configuration from config.yaml."""
-        config_path = Path(__file__).parent.parent / "config.yaml"
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f)
+        config_path = resolve_config_path()
+        return load_bot_config(config_path)
     
     def _define_parameter_ranges(self) -> Dict[str, Dict[str, List[float]]]:
         """Define parameter ranges for each strategy."""
@@ -576,13 +576,11 @@ class StrategyOptimizer:
     def _save_optimized_config(self, results: Dict[str, Dict[str, Any]]):
         """Save optimized configuration to config.yaml."""
         
-        # Load current config
-        config_path = Path(__file__).parent.parent / "config.yaml"
-        
+        config_path = resolve_config_path()
+
         try:
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
-            
+            config = load_bot_config(config_path)
+
             # Update strategy configurations with optimized parameters
             for strategy_name, result in results.items():
                 if result["status"] == "success" and result["parameters"]:
@@ -593,17 +591,14 @@ class StrategyOptimizer:
                                 config[key].update(result["parameters"])
                                 logger.info(f"Updated {key} configuration with optimized parameters")
                                 break
-            
+
             # Save updated config
-            backup_path = config_path.with_suffix('.yaml.backup')
-            with open(backup_path, 'w') as f:
-                yaml.dump(config, f, default_flow_style=False)
-            
-            with open(config_path, 'w') as f:
-                yaml.dump(config, f, default_flow_style=False)
-            
+            backup_path = Path(config_path).with_suffix('.yaml.backup')
+            save_config(config, backup_path)
+            save_config(config, config_path)
+
             logger.info(f"Updated configuration saved. Backup created at {backup_path}")
-            
+
         except Exception as e:
             logger.error(f"Error saving optimized configuration: {e}")
     
