@@ -10,15 +10,19 @@ import time
 import logging
 from pathlib import Path
 
-# Add the crypto_bot directory to the path
-sys.path.insert(0, str(Path(__file__).parent / "crypto_bot"))
+# Ensure the project root and crypto_bot package are available for imports
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+CRYPTO_BOT_PATH = PROJECT_ROOT / "crypto_bot"
+if str(CRYPTO_BOT_PATH) not in sys.path:
+    sys.path.insert(0, str(CRYPTO_BOT_PATH))
 
 from crypto_bot.execution.cex_executor import get_exchange
 from crypto_bot.utils.logger import setup_logger
 
 # Setup logging
-from pathlib import Path
-LOG_DIR = Path(__file__).parent / "logs"
+LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 logger = setup_logger(__name__, LOG_DIR / "test_nonce.log")
 

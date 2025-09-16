@@ -2,13 +2,14 @@
 """Debug script to test regime classification and identify why it's returning 100% unknown."""
 
 import sys
-import os
 import pandas as pd
 import numpy as np
 from pathlib import Path
 
-# Add the crypto_bot directory to the Python path
-sys.path.insert(0, str(Path(__file__).parent / 'crypto_bot'))
+# Ensure the project root is on the Python path for local imports
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from crypto_bot.regime.regime_classifier import classify_regime, _classify_core, CONFIG
 from crypto_bot.regime.pattern_detector import detect_patterns
@@ -91,15 +92,23 @@ def test_regime_classification():
     # Test with higher timeframe data
     print("\n=== Testing with Higher Timeframe ===")
     # Create higher timeframe data (4h)
-    higher_df = df.resample('4H', on=pd.to_datetime(df['timestamp'], unit='ms')).agg({
-        'open': 'first',
-        'high': 'max',
-        'low': 'min',
-        'close': 'last',
-        'volume': 'sum',
-        'timestamp': 'last'
-    }).reset_index(drop=True)
-    higher_df['timestamp'] = higher_df['timestamp'].astype(int)
+    df_high_tf = df.copy()
+    df_high_tf['timestamp'] = pd.to_datetime(df_high_tf['timestamp'], unit='ms')
+    higher_df = (
+        df_high_tf
+        .set_index('timestamp')
+        .resample('4H')
+        .agg({
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last',
+            'volume': 'sum'
+        })
+        .dropna()
+        .reset_index()
+    )
+    higher_df['timestamp'] = (higher_df['timestamp'].astype('int64') // 1_000_000).astype(int)
 
     print(f"Higher TF data shape: {higher_df.shape}")
 
