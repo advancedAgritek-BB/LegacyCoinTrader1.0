@@ -253,7 +253,7 @@ run_tests() {
     
     if command_exists pytest; then
         print_status "Running pytest..."
-        if python -m pytest -q; then
+        if python -m pytest -q tests; then
             print_success "All tests passed!"
         else
             print_warning "Some tests failed, but continuing with startup..."

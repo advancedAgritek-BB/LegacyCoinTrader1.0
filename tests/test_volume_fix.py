@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 """Test script to verify volume calculation fix."""
 
+import sys
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
+
+# Ensure local packages can be imported when running the script directly
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from crypto_bot.risk.risk_manager import RiskManager, RiskConfig
 
 def test_volume_calculation():

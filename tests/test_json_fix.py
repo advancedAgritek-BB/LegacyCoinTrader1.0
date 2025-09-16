@@ -2,10 +2,12 @@
 """Test script to verify JSON parsing fix."""
 
 import sys
-import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
+
 import json
 
 # Import the safe_json_load function from the frontend app
