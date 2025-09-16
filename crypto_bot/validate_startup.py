@@ -6,7 +6,6 @@ Runs configuration validation and fixes common issues before startup.
 
 import sys
 import os
-import yaml
 import logging
 import time
 from pathlib import Path
@@ -33,8 +32,7 @@ logger = logging.getLogger(__name__)
 def load_config(config_path: str) -> dict:
     """Load configuration from YAML file."""
     try:
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
+        config = load_bot_config(config_path)
         logger.info(f"Loaded configuration from {config_path}")
         return config
     except Exception as e:
@@ -44,8 +42,7 @@ def load_config(config_path: str) -> dict:
 def save_config(config: dict, config_path: str) -> bool:
     """Save configuration to YAML file."""
     try:
-        with open(config_path, 'w') as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        save_bot_config(config, config_path)
         logger.info(f"Saved updated configuration to {config_path}")
         return True
     except Exception as e:
@@ -135,9 +132,9 @@ def main():
     
     parser = argparse.ArgumentParser(description='Validate and fix crypto bot configuration')
     parser.add_argument(
-        '--config', 
-        default='crypto_bot/config.yaml',
-        help='Path to configuration file (default: crypto_bot/config.yaml)'
+        '--config',
+        default=str(resolve_config_path()),
+        help='Path to configuration file (default: BOT_CONFIG_FILE or crypto_bot/config.yaml)'
     )
     parser.add_argument(
         '--no-auto-fix',
@@ -158,9 +155,10 @@ def main():
     
     # Check if config file exists
     if not os.path.exists(args.config):
-        logger.error(f"Configuration file not found: {args.config}")
-        sys.exit(1)
-    
+        logger.warning(
+            f"Configuration override not found at {args.config}; validating defaults."
+        )
+
     # Validate and fix configuration
     auto_fix = not args.no_auto_fix
     success = validate_and_fix_config(args.config, auto_fix)
@@ -174,3 +172,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+from crypto_bot.config import (
+    load_config as load_bot_config,
+    save_config as save_bot_config,
+    resolve_config_path,
+)

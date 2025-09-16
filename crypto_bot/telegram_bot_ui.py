@@ -4,7 +4,6 @@ import asyncio
 import threading
 import time
 import json
-import yaml
 import os
 from pathlib import Path
 from typing import Dict, List, Optional, Union
@@ -41,6 +40,7 @@ from crypto_bot.portfolio_rotator import PortfolioRotator
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 from crypto_bot.utils.telegram import TelegramNotifier, is_admin
 from crypto_bot.log_reader import trade_summary
+from crypto_bot.config import load_config as load_bot_config, save_config, resolve_config_path
 
 # Remove duplicate imports that cause circular dependencies
 # from crypto_bot import log_reader, console_monitor
@@ -69,7 +69,7 @@ PNL_STATS = "PNL_STATS"
 ASSET_SCORES_FILE = LOG_DIR / "asset_scores.json"
 SIGNALS_FILE = LOG_DIR / "asset_scores.json"
 TRADES_FILE = LOG_DIR / "trades.csv"
-CONFIG_FILE = Path("crypto_bot/config.yaml")
+CONFIG_FILE = Path(resolve_config_path())
 
 # Text sent via ``TelegramNotifier`` when the bot starts.
 MENU_TEXT = "Select a command:"
@@ -655,7 +655,7 @@ class TelegramBotUI:
         cfg = {}
         if CONFIG_FILE.exists():
             try:
-                cfg = yaml.safe_load(CONFIG_FILE.read_text()) or {}
+                cfg = load_bot_config(CONFIG_FILE)
             except Exception:
                 cfg = {}
         text = (
@@ -705,14 +705,11 @@ class TelegramBotUI:
         cfg = {}
         if CONFIG_FILE.exists():
             try:
-                cfg = yaml.safe_load(CONFIG_FILE.read_text()) or {}
+                cfg = load_bot_config(CONFIG_FILE)
             except Exception:
                 cfg = {}
         cfg[key] = val
-        if hasattr(yaml, "safe_dump"):
-            CONFIG_FILE.write_text(yaml.safe_dump(cfg, sort_keys=False))
-        else:
-            CONFIG_FILE.write_text(json.dumps(cfg))
+        save_config(cfg, CONFIG_FILE)
         await self.controller.reload_config()
         await self._reply(update, f"{key} updated to {val}")
         return ConversationHandler.END

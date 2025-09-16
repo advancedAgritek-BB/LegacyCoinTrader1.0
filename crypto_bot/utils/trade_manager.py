@@ -675,32 +675,10 @@ class TradeManager:
     def _setup_position_risk_management(self, position: Position) -> None:
         """Set up stop losses and take profits for a position based on configuration."""
         try:
-            # Load configuration
-            import yaml
-            from pathlib import Path
+            from crypto_bot.config import load_config as load_bot_config, resolve_config_path
 
-            config_path = Path(__file__).parent.parent / "config.yaml"
-            if not config_path.exists():
-                # Try alternative config locations
-                alt_paths = [
-                    Path(__file__).parent.parent.parent / "config.yaml",
-                    Path(__file__).parent.parent.parent
-                    / "crypto_bot"
-                    / "config.yaml",
-                ]
-                for alt_path in alt_paths:
-                    if alt_path.exists():
-                        config_path = alt_path
-                        break
-
-            if not config_path.exists():
-                logger.warning(
-                    f"Could not find config.yaml for position risk management setup"
-                )
-                return
-
-            with open(config_path) as f:
-                config = yaml.safe_load(f) or {}
+            config_path = resolve_config_path()
+            config = load_bot_config(config_path)
 
             # Get risk management parameters
             risk_cfg = config.get("risk", {})

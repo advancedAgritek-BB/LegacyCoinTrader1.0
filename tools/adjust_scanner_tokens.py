@@ -4,24 +4,29 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-import yaml
 import ccxt.async_support as ccxt
 
+from crypto_bot.config import (
+    load_config as load_bot_config,
+    resolve_config_path,
+    save_config,
+)
 from crypto_bot.utils.symbol_utils import fix_symbol
 
-CONFIG_PATH = Path(__file__).resolve().parents[1] / "crypto_bot" / "config.yaml"
+CONFIG_PATH = resolve_config_path()
 
 
 def load_config() -> dict:
-    if CONFIG_PATH.exists():
-        with open(CONFIG_PATH) as f:
-            data = yaml.safe_load(f) or {}
-    else:
+    try:
+        data = load_bot_config(CONFIG_PATH)
+    except Exception:
         data = {}
 
     strat_dir = CONFIG_PATH.parent.parent / "config" / "strategies"
     trend_file = strat_dir / "trend_bot.yaml"
     if trend_file.exists():
+        import yaml
+
         with open(trend_file) as sf:
             overrides = yaml.safe_load(sf) or {}
         trend_cfg = data.get("trend", {})
@@ -63,8 +68,7 @@ async def adjust(config: dict) -> None:
     else:
         max_tokens = 5
     config.setdefault("solana_scanner", {})["max_tokens_per_scan"] = max_tokens
-    with open(CONFIG_PATH, "w") as f:
-        yaml.safe_dump(config, f)
+    save_config(config, CONFIG_PATH)
     print(f"Set max_tokens_per_scan to {max_tokens} (BTC balance: {balance:.4f})")
 
 

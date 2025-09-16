@@ -17,6 +17,7 @@ from typing import Dict, Any
 project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
+from crypto_bot.config import load_config as load_bot_config, resolve_config_path
 from crypto_bot.enhanced_scan_integration import (
     start_enhanced_scan_integration,
     stop_enhanced_scan_integration,
@@ -39,16 +40,12 @@ class EnhancedScanCLI:
     def _load_config(self) -> Dict[str, Any]:
         """Load bot configuration."""
         try:
-            config_path = project_root / "crypto_bot" / "config.yaml"
-            if config_path.exists():
-                import yaml
-                with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f)
-                logger.info("Loaded bot configuration")
-                return config
-            else:
-                logger.warning("Bot config not found, using defaults")
-                return {"telegram": {"enabled": False}}
+            config_path = resolve_config_path()
+            if not Path(config_path).exists():
+                logger.warning("Bot config override not found, using defaults")
+            config = load_bot_config(config_path)
+            logger.info("Loaded bot configuration")
+            return config
         except Exception as exc:
             logger.error(f"Failed to load config: {exc}")
             return {"telegram": {"enabled": False}}

@@ -16,13 +16,14 @@ except Exception:  # pragma: no cover - telegram not installed
 from .utils.logger import LOG_DIR, setup_logger
 from .utils.open_trades import get_open_trades
 from .utils.telegram import TelegramNotifier
+from .config import resolve_config_path
 
 logger = setup_logger(__name__, LOG_DIR / "telegram_ctl.log")
 
 STRATEGY_FILE = LOG_DIR / "strategy_stats.json"
 TRADES_FILE = LOG_DIR / "trades.csv"
 LOG_FILE = LOG_DIR / "bot.log"
-CONFIG_FILE = Path("crypto_bot/config.yaml")
+CONFIG_FILE = Path(resolve_config_path())
 
 
 async def _maybe_call(func: Any) -> Any:

@@ -7,15 +7,15 @@ from pathlib import Path
 from typing import Dict, Iterable, List
 
 import pandas as pd
-import yaml
 
 from crypto_bot.fund_manager import auto_convert_funds
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 from crypto_bot.utils.telegram import TelegramNotifier
+from crypto_bot.config import load_config as load_bot_config, resolve_config_path
 
 
 
-CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
+CONFIG_PATH = resolve_config_path()
 LOG_FILE = LOG_DIR / "rotations.json"
 SCORE_FILE = LOG_DIR / "asset_scores.json"
 
@@ -24,8 +24,10 @@ class PortfolioRotator:
     """Score assets and rebalance holdings toward the top performers."""
 
     def __init__(self) -> None:
-        with open(CONFIG_PATH) as f:
-            cfg = yaml.safe_load(f)
+        try:
+            cfg = load_bot_config(CONFIG_PATH)
+        except Exception:
+            cfg = {}
         self.config = cfg.get("portfolio_rotation", {})
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
         SCORE_FILE.parent.mkdir(parents=True, exist_ok=True)

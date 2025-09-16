@@ -393,23 +393,22 @@ def calculate_dynamic_allocation() -> Dict[str, float]:
 
 def get_allocation_comparison() -> Dict[str, Dict[str, float]]:
     """Get both static and dynamic allocation for comparison."""
-    import yaml
     from pathlib import Path
-    
+    from crypto_bot.config import load_config as load_bot_config, resolve_config_path
+
     # Get dynamic allocation
     dynamic_allocation = calculate_dynamic_allocation()
-    
+
     # Get static allocation from config
     static_allocation = {}
-    config_file = Path('crypto_bot/config.yaml')
+    config_file = Path(resolve_config_path())
     if config_file.exists():
         try:
-            with open(config_file) as f:
-                cfg = yaml.safe_load(f) or {}
-                static_allocation = cfg.get('strategy_allocation', {})
-        except (yaml.YAMLError, FileNotFoundError):
+            cfg = load_bot_config(config_file)
+            static_allocation = cfg.get('strategy_allocation', {})
+        except Exception:
             pass
-    
+
     return {
         'dynamic': dynamic_allocation,
         'static': static_allocation

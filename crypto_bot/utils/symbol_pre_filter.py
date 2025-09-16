@@ -14,7 +14,6 @@ import ccxt
 import aiohttp
 import numpy as np
 import pandas as pd
-import yaml
 from cachetools import TTLCache
 
 from .logger import LOG_DIR, setup_logger
@@ -27,11 +26,11 @@ from .correlation import incremental_correlation
 from .symbol_scoring import score_symbol
 from .telemetry import telemetry
 from .pair_cache import PAIR_FILE, load_liquid_map
+from crypto_bot.config import load_config as load_bot_config, resolve_config_path
 
-CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
+CONFIG_PATH = resolve_config_path()
 try:
-    with open(CONFIG_PATH) as f:
-        cfg = yaml.safe_load(f) or {}
+    cfg = load_bot_config(CONFIG_PATH)
 except Exception:
     cfg = {}
 SEMA = asyncio.Semaphore(cfg.get("max_concurrent_ohlcv", 4))

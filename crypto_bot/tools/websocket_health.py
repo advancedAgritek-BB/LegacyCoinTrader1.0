@@ -4,7 +4,6 @@ WebSocket health monitoring script for the crypto bot.
 Monitors WebSocket connections and identifies common issues.
 """
 
-import yaml
 import asyncio
 import time
 import json
@@ -13,11 +12,13 @@ from typing import Dict, Any, List
 import websocket
 import threading
 
+from crypto_bot.config import load_config as load_bot_config, resolve_config_path
+
+
 def load_config(config_path: str) -> Dict[str, Any]:
-    """Load configuration from YAML file."""
+    """Load configuration overrides and defaults."""
     try:
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f)
+        return load_bot_config(config_path)
     except Exception as e:
         print(f"Error loading config: {e}")
         return {}
@@ -228,15 +229,13 @@ class WebSocketHealthChecker:
 
 def main():
     """Main health check function."""
-    config_path = "config.yaml"
-    
+    config_path = resolve_config_path()
     if not Path(config_path).exists():
-        print(f"❌ Configuration file not found: {config_path}")
-        return
-    
+        print(f"ℹ️ Override configuration not found at {config_path}; using defaults.")
+
     print("🔌 WebSocket Health Check")
     print("=" * 40)
-    
+
     config = load_config(config_path)
     if not config:
         print("❌ Failed to load configuration")

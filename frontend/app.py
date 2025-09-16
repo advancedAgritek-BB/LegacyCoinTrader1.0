@@ -26,6 +26,7 @@ from frontend.auth import get_auth, login_required
 from crypto_bot.utils.price_fetcher import (
     get_current_price_for_symbol as _get_current_price_for_symbol,
 )
+from crypto_bot.config import load_config as load_bot_config, save_config, resolve_config_path
 
 # Suppress urllib3 OpenSSL warning
 warnings.filterwarnings(
@@ -975,7 +976,7 @@ SCAN_FILE = LOG_DIR / "asset_scores.json"
 MODEL_REPORT = Path("crypto_bot/ml_signal_model/models/model_report.json")
 TRADE_FILE = LOG_DIR / "trades.csv"
 ERROR_FILE = LOG_DIR / "errors.log"
-CONFIG_FILE = Path("crypto_bot/config.yaml")
+CONFIG_FILE = Path(resolve_config_path())
 REGIME_FILE = LOG_DIR / "regime_history.txt"
 POSITIONS_FILE = LOG_DIR / "positions.log"
 
@@ -1365,15 +1366,10 @@ def get_open_positions() -> list:
                         )
 
                         # Use the same config loading logic
-                        config_path = (
-                            Path(__file__).parent.parent
-                            / "crypto_bot"
-                            / "config.yaml"
-                        )
-                        if config_path.exists():
-                            with open(config_path, "r") as f:
-                                config = yaml.safe_load(f) or {}
-                        else:
+                        config_path = resolve_config_path()
+                        try:
+                            config = load_bot_config(config_path)
+                        except Exception:
                             config = {}
 
                         exchange, _ = get_exchange(config)
@@ -2896,9 +2892,11 @@ def dashboard():
 
     # Fallback to static config if no dynamic data available
     if not allocation and CONFIG_FILE.exists():
-        with open(CONFIG_FILE) as f:
-            cfg = yaml.safe_load(f) or {}
+        try:
+            cfg = load_bot_config(CONFIG_FILE)
             allocation = cfg.get("strategy_allocation", {})
+        except Exception:
+            allocation = {}
 
     # Final fallback to weights.json if no allocation in config
     if not allocation and (LOG_DIR / "weights.json").exists():
@@ -3346,8 +3344,10 @@ def config_settings_page():
     # Load current configuration
     config_data = {}
     if CONFIG_FILE.exists():
-        with open(CONFIG_FILE) as f:
-            config_data = yaml.safe_load(f) or {}
+        try:
+            config_data = load_bot_config(CONFIG_FILE)
+        except Exception:
+            config_data = {}
 
     return render_template("config_settings.html", config_data=config_data)
 
@@ -3399,8 +3399,10 @@ def save_config_settings():
         # Load existing config
         current_config = {}
         if CONFIG_FILE.exists():
-            with open(CONFIG_FILE) as f:
-                current_config = yaml.safe_load(f) or {}
+            try:
+                current_config = load_bot_config(CONFIG_FILE)
+            except Exception:
+                current_config = {}
 
         # Update with new values (merge nested structures)
         def deep_merge(d1, d2):
@@ -3418,8 +3420,7 @@ def save_config_settings():
         updated_config = deep_merge(current_config, data)
 
         # Save back to file
-        with open(CONFIG_FILE, "w") as f:
-            yaml.dump(updated_config, f, default_flow_style=False)
+        save_config(updated_config, CONFIG_FILE)
 
         return jsonify(
             {
@@ -4484,13 +4485,11 @@ def api_balance():
                     total_position_value += position_value
 
             # Calculate available balance (get from config or use default)
-            import yaml
-            config_path = Path("config.yaml")
             starting_balance = 10000.0  # Default fallback
-            if config_path.exists():
+            config_path = resolve_config_path()
+            if Path(config_path).exists():
                 try:
-                    with open(config_path, "r") as f:
-                        config = yaml.safe_load(f)
+                    config = load_bot_config(config_path)
                     starting_balance = config.get("risk", {}).get("starting_balance", 10000.0)
                 except Exception as e:
                     logger.warning(f"Could not load starting balance from config: {e}")
@@ -5085,24 +5084,10 @@ def get_allocation_data():
     """Get allocation data for dashboard metrics."""
     try:
         # Try to get allocation data from config
-        import yaml
-        from pathlib import Path
-
-        config_paths = [
-            Path("config.yaml"),
-            Path("crypto_bot/config.yaml"),
-            Path("../config.yaml"),
-        ]
-
-        for config_path in config_paths:
-            if config_path.exists():
-                with open(config_path, "r") as f:
-                    config = yaml.safe_load(f) or {}
-
-                allocation = config.get("allocation", {})
-                if allocation:
-                    return allocation
-                break
+        config = load_bot_config(resolve_config_path())
+        allocation = config.get("allocation", {})
+        if allocation:
+            return allocation
 
         # Fallback to default allocation
         return {"trend_following": 0.4, "mean_reversion": 0.3, "breakout": 0.3}

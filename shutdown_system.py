@@ -298,8 +298,7 @@ class ComprehensiveShutdown:
                 "logs/trades.csv",
                 "logs/positions.log",
                 "logs/strategy_stats.json",
-                "config.yaml",
-                "crypto_bot/config.yaml"
+                "crypto_bot/config"
             ]
             
             for file_path in critical_files:

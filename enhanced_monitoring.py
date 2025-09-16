@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent / "crypto_bot"))
 try:
     from crypto_bot.pipeline_monitor import PipelineMonitor
     from crypto_bot.utils.logger import setup_logger, LOG_DIR
-    from crypto_bot.config import load_config
+    from crypto_bot.config import load_config, resolve_config_path
     logger = setup_logger(__name__, LOG_DIR / "enhanced_monitoring.log")
 except ImportError as e:
     print(f"Import error: {e}")
@@ -31,7 +31,11 @@ class EnhancedMonitor:
     """Enhanced monitoring system with automated recovery capabilities."""
 
     def __init__(self, config_path: Optional[str] = None):
-        self.config_path = config_path or "crypto_bot/config.yaml"
+        self.config_path = (
+            Path(config_path)
+            if config_path
+            else resolve_config_path()
+        )
         self.config = self._load_config()
         self.pipeline_monitor: Optional[PipelineMonitor] = None
         self.running = False

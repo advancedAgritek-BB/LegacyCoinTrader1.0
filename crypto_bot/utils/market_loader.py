@@ -22,6 +22,7 @@ from .logger import LOG_DIR, setup_logger
 from .symbol_validator import get_production_validator, validate_symbols_production
 from .token_validator import _is_valid_base_token
 from crypto_bot.execution.kraken_ws import KrakenWSClient
+from crypto_bot.config import load_config as load_bot_config, resolve_config_path
 from .circuit_breaker import (
     get_circuit_breaker_manager,
     EXCHANGE_API_CONFIG,
@@ -374,7 +375,7 @@ def get_api_config_value(key_path: str, default=None):
     except (KeyError, TypeError):
         return default
 MAX_WS_LIMIT = 500
-CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
+CONFIG_PATH = resolve_config_path()
 UNSUPPORTED_SYMBOL = object()
 STATUS_UPDATES = True
 SEMA: Optional[asyncio.Semaphore] = None
@@ -454,8 +455,7 @@ def configure(
             )
     if max_ws_limit is None:
         try:
-            with open(CONFIG_PATH) as f:
-                cfg = yaml.safe_load(f) or {}
+            cfg = load_bot_config(CONFIG_PATH)
             cfg_val = cfg.get("max_ws_limit")
             if cfg_val is not None:
                 max_ws_limit = cfg_val
@@ -474,8 +474,7 @@ def configure(
         STATUS_UPDATES = bool(status_updates)
     if max_concurrent is None:
         try:
-            with open(CONFIG_PATH) as f:
-                cfg = yaml.safe_load(f) or {}
+            cfg = load_bot_config(CONFIG_PATH)
             cfg_val = cfg.get("max_concurrent_ohlcv")
             if cfg_val is not None:
                 max_concurrent = cfg_val

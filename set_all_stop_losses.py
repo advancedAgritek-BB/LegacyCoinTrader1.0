@@ -16,6 +16,7 @@ import json
 # Add the project root to the path
 sys.path.append(str(Path(__file__).parent))
 
+from crypto_bot.config import load_config as load_bot_config, resolve_config_path
 from crypto_bot.utils.trade_manager import TradeManager
 from crypto_bot.utils.logger import setup_logger
 
@@ -25,16 +26,18 @@ class StopLossSetter:
     """Set stop losses on all open positions."""
 
     def __init__(self, config_path: Path = None):
-        self.config_path = config_path or Path("crypto_bot/config.yaml")
+        self.config_path = (
+            Path(config_path)
+            if config_path is not None
+            else resolve_config_path()
+        )
         self.config = self.load_config()
         self.trade_manager = TradeManager()
 
     def load_config(self):
         """Load configuration from YAML file."""
         try:
-            import yaml
-            with open(self.config_path, 'r') as f:
-                config = yaml.safe_load(f)
+            config = load_bot_config(self.config_path)
 
             # Extract relevant stop loss settings
             self.stop_loss_pct = Decimal(str(config.get('exits', {}).get('default_sl_pct', 0.008)))

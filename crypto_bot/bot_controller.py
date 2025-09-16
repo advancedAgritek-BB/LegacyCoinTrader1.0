@@ -9,8 +9,7 @@ from typing import Dict, List, Union, Optional
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 
-
-import yaml
+from crypto_bot.config import load_config as load_bot_config, resolve_config_path
 from crypto_bot.utils.symbol_utils import fix_symbol
 
 from .portfolio_rotator import PortfolioRotator
@@ -23,7 +22,7 @@ class TradingBotController:
 
     def __init__(
         self,
-        config_path: Union[str, Path] = "crypto_bot/config.yaml",
+        config_path: Union[str, Path] = resolve_config_path(),
         trades_file: Union[str, Path] = LOG_DIR / "trades.csv",
         log_file: Union[str, Path] = LOG_DIR / "bot.log",
     ) -> None:
@@ -55,15 +54,16 @@ class TradingBotController:
 
 
     def _load_config(self) -> dict:
-        if self.config_path.exists():
-            with open(self.config_path) as f:
-                data = yaml.safe_load(f) or {}
-        else:
+        try:
+            data = load_bot_config(self.config_path)
+        except Exception:
             data = {}
 
         strat_dir = self.config_path.parent.parent / "config" / "strategies"
         trend_file = strat_dir / "trend_bot.yaml"
         if trend_file.exists():
+            import yaml
+
             with open(trend_file) as sf:
                 overrides = yaml.safe_load(sf) or {}
             trend_cfg = data.get("trend", {})

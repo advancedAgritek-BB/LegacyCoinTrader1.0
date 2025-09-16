@@ -350,8 +350,8 @@ class LegacyCoinTraderManager:
         # Check critical files
         critical_files = [
             "crypto_bot/main.py",
-            "config.yaml",
-            "requirements.txt"
+            "crypto_bot/config/settings.py",
+            "requirements.txt",
         ]
         
         missing_files = []
@@ -392,8 +392,7 @@ class LegacyCoinTraderManager:
             backup_items = [
                 "logs",
                 "config",
-                "config.yaml",
-                "crypto_bot/config.yaml"
+                "crypto_bot/config",
             ]
             
             import shutil

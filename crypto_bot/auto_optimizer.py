@@ -5,21 +5,20 @@ from pathlib import Path
 from typing import Dict, Iterable
 
 
-import yaml
+from crypto_bot.config import load_config as load_bot_config, resolve_config_path
 from crypto_bot.utils.symbol_utils import fix_symbol
 
 from crypto_bot.backtest.backtest_runner import BacktestRunner, BacktestConfig
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 
-CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
+CONFIG_PATH = resolve_config_path()
 LOG_FILE = LOG_DIR / "optimized_params.json"
 
 logger = setup_logger(__name__, LOG_DIR / "optimizer.log")
 
 
 def _load_config() -> dict:
-    with open(CONFIG_PATH) as f:
-        data = yaml.safe_load(f) or {}
+    data = load_bot_config(CONFIG_PATH)
     if "symbol" in data:
         data["symbol"] = fix_symbol(data["symbol"])
     if "symbols" in data:
