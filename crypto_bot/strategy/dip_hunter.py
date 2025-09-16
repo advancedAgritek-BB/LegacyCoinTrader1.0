@@ -9,7 +9,7 @@ from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils import stats
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
-from crypto_bot.cooldown_manager import in_cooldown
+from crypto_bot.cooldown_manager import in_cooldown, mark_cooldown
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def generate_signal(
     cooldown_enabled = bool(params.get("cooldown_enabled", False))
 
     if cooldown_enabled and symbol and in_cooldown(symbol, "buy"):
-        score_logger.info(
+        logger.info(
             "Signal for %s:%s -> %.3f, %s",
             symbol or "unknown",
             timeframe or "N/A",
@@ -147,7 +147,7 @@ def generate_signal(
     is_dip = dip_size <= -dip_pct
 
     if cooldown_enabled and symbol and in_cooldown(symbol, "buy"):
-        score_logger.info(
+        logger.info(
             "Signal for %s:%s -> %.3f, %s",
             symbol or "unknown",
             timeframe or "N/A",
@@ -210,7 +210,7 @@ def generate_signal(
             score = normalize_score_by_volatility(df, score)
 
         score = max(0.0, min(score, 1.0))
-        score_logger.info(
+        logger.info(
             "Signal for %s:%s -> %.3f, %s",
             symbol or "unknown",
             timeframe or "N/A",
