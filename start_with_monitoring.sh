@@ -52,7 +52,7 @@ echo -e "${GREEN}🚀 Starting all systems...${NC}"
 
 # Start bot with monitoring (this will start both bot and monitoring)
 echo "🤖 Starting trading bot with monitoring..."
-python3 start_bot_auto.py &
+python3 start_bot.py auto &
 BOT_PID=$!
 
 # Wait for bot to initialize

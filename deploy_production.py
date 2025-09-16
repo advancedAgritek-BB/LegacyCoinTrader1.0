@@ -68,7 +68,7 @@ class ProductionDeployment:
                 "backup_enabled": True
             },
             "processes": {
-                "bot": {"enabled": True, "script": "start_bot_auto.py"},
+                "bot": {"enabled": True, "script": "start_bot.py auto"},
                 "monitor": {"enabled": True, "script": "production_monitor.py"},
                 "web": {"enabled": True, "script": "start_frontend.py"}
             },
@@ -316,7 +316,7 @@ class ProductionDeployment:
         try:
             logger.info("Starting trading bot...")
 
-            script_path = self.project_root / "start_bot_auto.py"
+            script_path = self.project_root / "start_bot.py"
             if not script_path.exists():
                 logger.error(f"Bot script not found: {script_path}")
                 return False
@@ -325,6 +325,7 @@ class ProductionDeployment:
             self.bot_process = await asyncio.create_subprocess_exec(
                 sys.executable,
                 str(script_path),
+                "auto",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.project_root

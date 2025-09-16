@@ -167,16 +167,9 @@ class PipelineMonitor:
         try:
             # Check if strategy evaluation is running
             process_running = (
-                self._is_process_running("start_bot_noninteractive") or
+                self._is_process_running("start_bot.py") or
                 self._is_process_running("crypto_bot.main") or
-                self._is_process_running("start_bot") or
-                self._is_process_running("start_bot_final") or
-                self._is_process_running("start_bot_auto") or
-                self._is_process_running("start_bot_clean") or
-                self._is_process_running("start_bot_auto.py") or
-                self._is_process_running("Python start_bot_auto.py") or
-                self._is_process_running("python start_bot_auto.py") or
-                self._is_process_running("python3 start_bot_auto.py")
+                self._is_process_running("crypto_bot/main.py")
             )
 
             # Check recent strategy evaluations - updated to match current log patterns

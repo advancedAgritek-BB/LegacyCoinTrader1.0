@@ -73,7 +73,7 @@ else
 fi
 
 # Check startup script
-check_process "start_bot_auto.py" "Startup Script" "Integrated system launcher"
+check_process "start_bot.py" "Startup CLI" "Integrated system launcher"
 
 echo ""
 echo -e "${BLUE}🌐 Web Services:${NC}"

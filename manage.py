@@ -87,50 +87,52 @@ class LegacyCoinTraderManager:
     def _start_all_services(self, **kwargs) -> bool:
         """Start all services."""
         script_path = self.project_root / "start_all_services.py"
-        if not script_path.exists():
-            print("❌ Start script not found. Falling back to basic startup.")
-            script_path = self.project_root / "start_bot_auto.py"
-        
+
         try:
-            result = self._run_command([
-                self.python_cmd, 
-                str(script_path)
-            ])
+            if script_path.exists():
+                command = [self.python_cmd, str(script_path)]
+            else:
+                print("❌ Start script not found. Falling back to basic startup.")
+                fallback_script = self.project_root / "start_bot.py"
+                if not fallback_script.exists():
+                    print(f"❌ Start script not found: {fallback_script}")
+                    return False
+                command = [self.python_cmd, str(fallback_script), "auto"]
+
+            result = self._run_command(command)
             return result.returncode == 0
         except Exception as e:
             print(f"❌ Failed to start services: {e}")
             return False
-    
+
     def _start_service(self, service: str, **kwargs) -> bool:
         """Start a specific service."""
         service_scripts = {
-            "bot": "start_bot_auto.py",
-            "trading": "start_bot_auto.py",
-            "frontend": "frontend/app.py",
-            "web": "frontend/app.py",
-            "monitor": "enhanced_monitoring.py",
-            "monitoring": "enhanced_monitoring.py",
-            "scanner": "crypto_bot/solana/enhanced_scanner.py",
-            "telegram": "telegram_ctl.py"
+            "bot": ["start_bot.py", "auto"],
+            "trading": ["start_bot.py", "auto"],
+            "frontend": ["frontend/app.py"],
+            "web": ["frontend/app.py"],
+            "monitor": ["enhanced_monitoring.py"],
+            "monitoring": ["enhanced_monitoring.py"],
+            "scanner": ["crypto_bot/solana/enhanced_scanner.py"],
+            "telegram": ["telegram_ctl.py"],
         }
-        
-        script_name = service_scripts.get(service.lower())
-        if not script_name:
+
+        script_entry = service_scripts.get(service.lower())
+        if not script_entry:
             print(f"❌ Unknown service: {service}")
             print(f"Available services: {', '.join(service_scripts.keys())}")
             return False
-        
-        script_path = self.project_root / script_name
+
+        script_path = self.project_root / script_entry[0]
         if not script_path.exists():
             print(f"❌ Service script not found: {script_path}")
             return False
-        
+
         try:
             print(f"🚀 Starting {service} service...")
-            result = self._run_command([
-                self.python_cmd,
-                str(script_path)
-            ])
+            command = [self.python_cmd, str(script_path), *script_entry[1:]]
+            result = self._run_command(command)
             return result.returncode == 0
         except Exception as e:
             print(f"❌ Failed to start {service}: {e}")

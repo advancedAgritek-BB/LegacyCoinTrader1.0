@@ -13,6 +13,6 @@ This project runs multiple services simultaneously, so improving runtime efficie
 - Record before/after metrics (latency, fills per minute) when applying optimizations.
 
 ## Deep Dives
-- Profile Python hotspots with `cProfile` on `start_bot_debug.py`.
+- Profile Python hotspots with `cProfile` using `python start_bot.py debug`.
 - Audit indicator calculations under `ta/` for redundant pandas operations.
 - Verify network timeouts and retries in `config/` to avoid cascading delays.

@@ -209,7 +209,7 @@ class EnhancedMonitor:
                 subprocess.run(['pkill', '-f', 'crypto_bot.main'], check=False)
                 await asyncio.sleep(2)
                 # Start new bot process
-                subprocess.Popen(['python3', 'start_bot_auto.py'])
+                subprocess.Popen(['python3', 'start_bot.py', 'auto'])
             except Exception as e:
                 logger.error(f"Failed to restart bot: {e}")
 

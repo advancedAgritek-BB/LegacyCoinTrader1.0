@@ -29,8 +29,7 @@ def get_bot_status():
             # Check for main bot process - look for multiple possible process names
             bot_process_patterns = [
                 'main.py',
-                'start_bot_final.py',
-                'start_bot_',
+                'start_bot.py',
                 'crypto_bot'
             ]
             
