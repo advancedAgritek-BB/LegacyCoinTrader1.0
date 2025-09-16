@@ -77,6 +77,7 @@ from crypto_bot.strategy import (
     momentum_exploiter,
     volatility_harvester,
     STRATEGIES,
+    StrategyProtocol,
 )
 
 import random
