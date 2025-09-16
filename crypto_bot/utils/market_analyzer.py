@@ -10,6 +10,7 @@ from crypto_bot.utils.strategy_utils import compute_strategy_weights
 
 from crypto_bot.regime.pattern_detector import detect_patterns
 from crypto_bot.regime.regime_classifier import (
+    SHORT_HISTORY_CONFIDENCE,
     classify_regime_async,
     classify_regime_cached,
 )
@@ -182,14 +183,24 @@ async def analyze_symbol(
     
     # Handle different return types from classify_regime_async
     if isinstance(probs, dict):
-        base_conf = float(probs.get(sub_regime, 0.0))
+        probs = {str(k): float(v) for k, v in probs.items()}
+        base_conf = float(
+            probs.get(sub_regime, probs.get(regime, probs.get("unknown", 0.0)))
+        )
+        if base_conf == 0.0 and len(probs) == 1:
+            base_conf = float(next(iter(probs.values())))
     elif isinstance(probs, set):
         # Convert set to dict with default confidence
-        base_conf = 0.5 if sub_regime in probs else 0.0
-        probs = {k: 0.5 for k in probs}
+        base_conf = SHORT_HISTORY_CONFIDENCE if sub_regime in probs else 0.0
+        probs = {k: SHORT_HISTORY_CONFIDENCE for k in probs}
+        if not probs:
+            probs = {sub_regime: SHORT_HISTORY_CONFIDENCE}
+            base_conf = SHORT_HISTORY_CONFIDENCE
     else:
         # Fallback for other types
         base_conf = float(probs) if isinstance(probs, (int, float)) else 0.0
+        if base_conf <= 0:
+            base_conf = SHORT_HISTORY_CONFIDENCE
         probs = {sub_regime: base_conf}
     bias_cfg = config.get("sentiment_filter", {})
     try:
