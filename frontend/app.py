@@ -88,6 +88,14 @@ def health():
 config = get_config()
 auth = get_auth()
 
+AUTH_ERROR_MESSAGES = {
+    "invalid_credentials": "Invalid credentials provided.",
+    "password_expired": "Password expired. Rotate credentials using services/portfolio/manage_users.py.",
+    "account_disabled": "Account disabled. Contact an administrator.",
+    "role_not_configured": "User role is not permitted for this interface.",
+    "authentication_error": "Authentication service is temporarily unavailable.",
+}
+
 # Disable template caching for development - CRITICAL for template updates
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
@@ -278,7 +286,11 @@ def login():
             flash("Login successful!", "success")
             return redirect(url_for("dashboard"))
         else:
-            flash("Invalid credentials", "error")
+            error_code = auth.get_last_error()
+            message = AUTH_ERROR_MESSAGES.get(
+                error_code, "Invalid credentials provided."
+            )
+            flash(message, "error")
 
     return render_template("login.html")
 
@@ -320,7 +332,17 @@ def api_login():
             }
         )
     else:
-        return jsonify({"error": "Invalid credentials"}), 401
+        error_code = auth.get_last_error()
+        message = AUTH_ERROR_MESSAGES.get(
+            error_code, "Invalid credentials provided."
+        )
+        status_code = (
+            403
+            if error_code
+            in {"password_expired", "account_disabled", "role_not_configured"}
+            else 401
+        )
+        return jsonify({"error": message, "code": error_code}), status_code
 
 
 @app.route("/api/auth/logout", methods=["POST"])
@@ -343,7 +365,12 @@ def auth_status():
         return jsonify(
             {
                 "authenticated": True,
-                "user": {"username": user["username"], "role": user["role"]},
+                "user": {
+                    "username": user["username"],
+                    "role": user["role"],
+                    "permissions": user.get("permissions", []),
+                    "password_expires_at": user.get("password_expires_at"),
+                },
             }
         )
     else:

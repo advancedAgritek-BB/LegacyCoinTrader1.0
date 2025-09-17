@@ -9,6 +9,8 @@ from dataclasses import dataclass
 DEFAULT_DATABASE_URL = "postgresql+psycopg2://portfolio:portfolio@localhost:5432/portfolio"
 DEFAULT_REST_PORT = 8003
 DEFAULT_GRPC_PORT = 50053
+DEFAULT_API_KEY_SECRET = "legacycointrader-change-me"
+DEFAULT_PASSWORD_ROTATION_DAYS = 90
 
 
 @dataclass
@@ -20,6 +22,8 @@ class PortfolioConfig:
     rest_port: int = DEFAULT_REST_PORT
     grpc_host: str = "0.0.0.0"
     grpc_port: int = DEFAULT_GRPC_PORT
+    api_key_secret: str = DEFAULT_API_KEY_SECRET
+    password_rotation_days: int = DEFAULT_PASSWORD_ROTATION_DAYS
 
     @classmethod
     def from_env(cls) -> "PortfolioConfig":
@@ -31,6 +35,15 @@ class PortfolioConfig:
             rest_port=int(os.getenv("PORTFOLIO_REST_PORT", DEFAULT_REST_PORT)),
             grpc_host=os.getenv("PORTFOLIO_GRPC_HOST", "0.0.0.0"),
             grpc_port=int(os.getenv("PORTFOLIO_GRPC_PORT", DEFAULT_GRPC_PORT)),
+            api_key_secret=os.getenv(
+                "PORTFOLIO_API_KEY_SECRET", DEFAULT_API_KEY_SECRET
+            ),
+            password_rotation_days=int(
+                os.getenv(
+                    "PORTFOLIO_PASSWORD_ROTATION_DAYS",
+                    DEFAULT_PASSWORD_ROTATION_DAYS,
+                )
+            ),
         )
 
 

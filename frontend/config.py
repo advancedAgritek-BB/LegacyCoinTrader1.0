@@ -7,6 +7,8 @@ import os
 import secrets
 from typing import List, Optional, Dict, Any
 
+from services.portfolio.rbac import load_role_definitions
+
 
 class SecurityConfig:
     """Security configuration with enterprise-grade settings."""
@@ -74,9 +76,23 @@ class SecurityConfig:
         except (ValueError, TypeError):
             self.session_timeout: int = 3600
 
+        try:
+            self.password_rotation_days: int = int(
+                os.getenv(
+                    "PASSWORD_ROTATION_DAYS",
+                    os.getenv("PORTFOLIO_PASSWORD_ROTATION_DAYS", "90"),
+                )
+            )
+        except (ValueError, TypeError):
+            self.password_rotation_days = 90
+
         # API Security
         self.api_key_header: str = os.getenv("API_KEY_HEADER", "X-API-Key")
         self.allowed_methods: List[str] = self._parse_allowed_methods()
+        try:
+            self.role_definitions = load_role_definitions()
+        except ValueError as exc:
+            raise ValueError(f"Invalid ROLE_DEFINITIONS configuration: {exc}") from exc
 
     def _parse_allowed_methods(self) -> List[str]:
         """Parse and validate allowed HTTP methods from environment."""
@@ -171,6 +187,8 @@ class AppConfig:
                 "allowed_methods": self.security.allowed_methods,
                 "rate_limit_requests": self.security.rate_limit_requests,
                 "session_secret_key": self.security.session_secret_key,
+                "password_rotation_days": self.security.password_rotation_days,
+                "role_definitions": self.security.role_definitions,
             },
             "database_url": self.database_url,
             "redis_host": self.redis_host,

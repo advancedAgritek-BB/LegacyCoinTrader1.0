@@ -130,3 +130,25 @@ class PortfolioStatisticModel(Base):
     total_fees: Mapped[Decimal] = mapped_column(DECIMAL_TYPE, default=Decimal("0"))
     total_realized_pnl: Mapped[Decimal] = mapped_column(DECIMAL_TYPE, default=Decimal("0"))
     last_updated: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class UserAccountModel(Base):
+    """Authentication and authorization metadata for the platform."""
+
+    __tablename__ = "user_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    role: Mapped[str] = mapped_column(String(32), default="viewer")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    password_rotated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    password_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    api_key_hash: Mapped[Optional[str]] = mapped_column(String(128), unique=True)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_failed_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
