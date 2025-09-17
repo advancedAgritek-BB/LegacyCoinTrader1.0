@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -16,6 +16,7 @@ from services.monitoring.config import get_monitoring_settings
 from services.monitoring.instrumentation import instrument_fastapi_app
 from services.monitoring.logging import configure_logging
 
+from .audit import AuditClient, AuditEvent
 from .auth import AuthManager, TokenPayload
 from .config import GatewaySettings, ServiceRouteConfig, load_gateway_settings
 from .identity import (
@@ -28,6 +29,7 @@ from .identity import (
 )
 from .proxy import ProxyGateway
 from .rate_limiter import RateLimitResult, RateLimiter
+from .tenant import TenantPlan, TenantServiceClient, TenantUsageTracker
 
 LOGGER = logging.getLogger("api_gateway")
 
@@ -129,6 +131,10 @@ class GatewayState:
         self.rate_limiter: RateLimiter | None = None
         self.proxy_gateway: ProxyGateway | None = None
         self.identity_service: IdentityService | None = None
+        self.tenant_service: TenantServiceClient | None = None
+        self.tenant_usage_tracker: TenantUsageTracker | None = None
+        self.audit_client: AuditClient | None = None
+        self.tenant_default_plan: TenantPlan | None = None
 
 
 async def get_state(request: Request) -> GatewayState:
@@ -152,6 +158,36 @@ def register_events(app: FastAPI, state: GatewayState) -> None:
             state.http_client,
         )
         state.identity_service = IdentityService(state.settings, state.http_client)
+        default_tenant = state.settings.identity_default_tenant or "global"
+        state.tenant_default_plan = TenantPlan.from_defaults(
+            tenant_id=default_tenant,
+            plan=state.settings.tenant_default_plan,
+            rate_limit_per_minute=state.settings.tenant_default_rate_limit_per_minute,
+            burst_limit=state.settings.tenant_default_burst_limit,
+            burst_window_seconds=state.settings.tenant_default_burst_window_seconds,
+        )
+        state.tenant_service = TenantServiceClient(
+            state.settings.tenant_service_url,
+            cache_seconds=state.settings.tenant_metadata_cache_seconds,
+            service_token=state.settings.tenant_service_token,
+            service_token_header=state.settings.tenant_service_token_header,
+            timeout=state.settings.tenant_service_timeout,
+            http_client=state.http_client,
+        )
+        state.tenant_usage_tracker = TenantUsageTracker(
+            redis_client=state.redis,
+            kafka_bootstrap_servers=state.settings.kafka_bootstrap_servers,
+            kafka_topic=state.settings.kafka_usage_topic,
+        )
+        await state.tenant_usage_tracker.start()
+        state.audit_client = AuditClient(
+            state.settings.audit_service_url,
+            service_token=state.settings.audit_service_token,
+            service_token_header=state.settings.audit_service_token_header,
+            tenant_header=state.settings.identity_tenant_header,
+            timeout=state.settings.audit_service_timeout,
+            http_client=state.http_client,
+        )
 
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
@@ -160,6 +196,12 @@ def register_events(app: FastAPI, state: GatewayState) -> None:
             await state.http_client.aclose()
         if state.redis:
             await state.redis.close()
+        if state.tenant_usage_tracker:
+            await state.tenant_usage_tracker.stop()
+        if state.tenant_service:
+            await state.tenant_service.close()
+        if state.audit_client:
+            await state.audit_client.close()
 
 
 async def _init_redis(settings: GatewaySettings) -> redis_asyncio.Redis | None:
@@ -187,17 +229,138 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
             )
         return state.identity_service
 
+    def _tenant_fallback_plan(tenant_id: str) -> TenantPlan:
+        template = state.tenant_default_plan
+        if template is not None:
+            return TenantPlan(
+                tenant_id=tenant_id,
+                plan=template.plan,
+                rate_limit_per_minute=template.rate_limit_per_minute,
+                burst_limit=template.burst_limit,
+                burst_window_seconds=template.burst_window_seconds,
+                route_overrides=dict(template.route_overrides),
+                burst_overrides={
+                    key: dict(value) for key, value in template.burst_overrides.items()
+                },
+                metadata=dict(template.metadata),
+            )
+        return TenantPlan.from_defaults(
+            tenant_id=tenant_id,
+            plan=state.settings.tenant_default_plan,
+            rate_limit_per_minute=state.settings.tenant_default_rate_limit_per_minute,
+            burst_limit=state.settings.tenant_default_burst_limit,
+            burst_window_seconds=state.settings.tenant_default_burst_window_seconds,
+        )
+
+    async def _get_tenant_plan(tenant_id: str) -> TenantPlan:
+        fallback_plan = _tenant_fallback_plan(tenant_id)
+        if state.tenant_service is None:
+            return fallback_plan
+        try:
+            return await state.tenant_service.get_tenant_plan(tenant_id, fallback=fallback_plan)
+        except Exception as exc:  # pragma: no cover - defensive guardrail
+            LOGGER.warning("Falling back to default tenant plan for %s: %s", tenant_id, exc)
+            return fallback_plan
+
+    def _resolve_tenant_id(request: Request, token: TokenPayload) -> str:
+        header_value = request.headers.get(state.settings.identity_tenant_header, "") or ""
+        header_value = header_value.strip()
+        if header_value and token.tenant_id and header_value.lower() != token.tenant_id.lower():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Token tenant does not match request tenant header",
+            )
+        if token.tenant_id:
+            return token.tenant_id
+        if header_value:
+            return header_value
+        if state.settings.identity_default_tenant:
+            return state.settings.identity_default_tenant
+        if state.tenant_default_plan:
+            return state.tenant_default_plan.tenant_id
+        return "global"
+
+    async def _record_usage(
+        *,
+        tenant_id: str,
+        route_name: str,
+        result: RateLimitResult,
+        burst_result: Optional[RateLimitResult],
+        allowed: bool,
+        plan: TenantPlan,
+        token: TokenPayload,
+    ) -> None:
+        tracker = state.tenant_usage_tracker
+        if tracker is None:
+            return
+        metadata = {
+            "plan": plan.plan,
+            "token_type": token.token_type,
+            "subject": token.subject,
+        }
+        burst_limit = burst_result.limit if burst_result else None
+        burst_allowed = burst_result.allowed if burst_result else None
+        burst_remaining = burst_result.remaining if burst_result else None
+        await tracker.record_request(
+            tenant_id=tenant_id,
+            route_name=route_name,
+            rate_limit=result.limit,
+            allowed=allowed,
+            remaining=result.remaining,
+            burst_limit=burst_limit,
+            burst_allowed=burst_allowed,
+            burst_remaining=burst_remaining,
+            metadata=metadata,
+        )
+
+    async def _emit_audit_event(
+        *,
+        tenant_id: str,
+        actor: str,
+        action: str,
+        resource: str,
+        outcome: str,
+        severity: str = "info",
+        correlation_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        client = state.audit_client
+        if client is None:
+            return
+        tenant_value = tenant_id or state.settings.identity_default_tenant or "global"
+        event = AuditEvent(
+            tenant_id=tenant_value,
+            actor=actor,
+            action=action,
+            resource=resource,
+            source=state.settings.audit_event_source,
+            outcome=outcome,
+            severity=severity,
+            correlation_id=correlation_id,
+            metadata=metadata or {},
+        )
+        try:
+            await client.emit(event)
+        except Exception:  # pragma: no cover - defensive guardrail
+            LOGGER.debug("Failed to emit audit event", exc_info=True)
+
     def _token_has_required_roles(token: TokenPayload, required_roles: List[str]) -> bool:
         if not required_roles:
             return True
         scopes = set(token.scopes or [])
-        if "admin" in scopes or "internal" in scopes:
+        roles = set(token.roles or [])
+        if {"admin", "internal"} & (scopes | roles):
             return True
         if token.token_type == "service" and token.service_name:
             if token.service_name in required_roles:
                 return True
         for role in required_roles:
-            if role in scopes or f"service:{role}" in scopes:
+            if (
+                role in scopes
+                or f"service:{role}" in scopes
+                or role in roles
+                or f"service:{role}" in roles
+            ):
                 return True
         return False
 
@@ -207,21 +370,61 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
         request: Request,
         state: GatewayState = Depends(get_state),
     ) -> TokenResponse:
-        del request  # request metadata reserved for future auditing
+        tenant_id = (
+            request.headers.get(state.settings.identity_tenant_header, "") or ""
+        ).strip() or state.settings.identity_default_tenant or "global"
         identity_service = _get_identity_service(state)
         try:
             issued = await identity_service.issue_token(payload.username, payload.password)
         except InvalidCredentialsError:
+            await _emit_audit_event(
+                tenant_id=tenant_id,
+                actor=payload.username,
+                action="auth.token.issue",
+                resource="identity",
+                outcome="denied",
+                severity="warning",
+                metadata={"reason": "invalid_credentials"},
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid username or password",
             ) from None
         except InactiveAccountError as exc:
+            await _emit_audit_event(
+                tenant_id=tenant_id,
+                actor=payload.username,
+                action="auth.token.issue",
+                resource="identity",
+                outcome="denied",
+                severity="warning",
+                metadata={"reason": "inactive_account"},
+            )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
         except PasswordExpiredError as exc:
+            await _emit_audit_event(
+                tenant_id=tenant_id,
+                actor=payload.username,
+                action="auth.token.issue",
+                resource="identity",
+                outcome="denied",
+                severity="warning",
+                metadata={"reason": "password_expired"},
+            )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
         refresh_token = issued.refresh_token or ""
+        await _emit_audit_event(
+            tenant_id=tenant_id,
+            actor=payload.username,
+            action="auth.token.issue",
+            resource="identity",
+            outcome="success",
+            metadata={
+                "roles": issued.roles,
+                "expires_at": issued.expires_at.isoformat(),
+            },
+        )
         return TokenResponse(
             access_token=issued.access_token,
             refresh_token=refresh_token,
@@ -247,10 +450,36 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
                 payload.username, payload.current_password, payload.new_password
             )
         except InvalidCredentialsError as exc:
+            await _emit_audit_event(
+                tenant_id=state.settings.identity_default_tenant or "global",
+                actor=payload.username,
+                action="auth.password.rotate",
+                resource="identity",
+                outcome="denied",
+                severity="warning",
+                metadata={"reason": "invalid_credentials"},
+            )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
         except InactiveAccountError as exc:
+            await _emit_audit_event(
+                tenant_id=state.settings.identity_default_tenant or "global",
+                actor=payload.username,
+                action="auth.password.rotate",
+                resource="identity",
+                outcome="denied",
+                severity="warning",
+                metadata={"reason": "inactive_account"},
+            )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
+        await _emit_audit_event(
+            tenant_id=identity.tenant or state.settings.identity_default_tenant or "global",
+            actor=payload.username,
+            action="auth.password.rotate",
+            resource="identity",
+            outcome="success",
+            metadata={"roles": identity.roles},
+        )
         return PasswordRotationResponse(
             username=identity.username,
             roles=identity.roles,
@@ -271,14 +500,49 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
         try:
             identity = await identity_service.validate_api_key(payload.api_key)
         except ApiKeyRotationRequiredError as exc:
+            await _emit_audit_event(
+                tenant_id=state.settings.identity_default_tenant or "global",
+                actor="api-key",
+                action="auth.api_key.validate",
+                resource="identity",
+                outcome="denied",
+                severity="warning",
+                metadata={"reason": "rotation_required"},
+            )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
         except InactiveAccountError as exc:
+            await _emit_audit_event(
+                tenant_id=state.settings.identity_default_tenant or "global",
+                actor="api-key",
+                action="auth.api_key.validate",
+                resource="identity",
+                outcome="denied",
+                severity="warning",
+                metadata={"reason": "inactive_account"},
+            )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
         except ApiKeyValidationError:
+            await _emit_audit_event(
+                tenant_id=state.settings.identity_default_tenant or "global",
+                actor="api-key",
+                action="auth.api_key.validate",
+                resource="identity",
+                outcome="denied",
+                severity="warning",
+                metadata={"reason": "invalid_api_key"},
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key"
             ) from None
 
+        await _emit_audit_event(
+            tenant_id=identity.tenant or state.settings.identity_default_tenant or "global",
+            actor=identity.username,
+            action="auth.api_key.validate",
+            resource="identity",
+            outcome="success",
+            metadata={"roles": identity.roles},
+        )
         return ApiKeyValidationResponse(
             username=identity.username,
             roles=identity.roles,
@@ -340,6 +604,48 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
             for name, route in state.settings.service_routes.items()
         }
 
+    @app.get("/admin/routes", tags=["Administration"])
+    async def admin_route_catalog(
+        request: Request,
+        tenant: Optional[str] = None,
+        state: GatewayState = Depends(get_state),
+    ) -> Dict[str, Any]:
+        assert state.auth_manager is not None
+        token = await state.auth_manager.authenticate_request(request, ["jwt", "service"])
+        if not _token_has_required_roles(token, ["admin"]):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Administrator privileges required",
+            )
+        tenant_id = tenant or _resolve_tenant_id(request, token)
+        tenant_plan = await _get_tenant_plan(tenant_id)
+        routes: Dict[str, Any] = {}
+        for name, route in state.settings.service_routes.items():
+            limit = tenant_plan.limit_for_route(name, route.rate_limit_per_minute)
+            burst_limit, burst_window = tenant_plan.burst_for_route(
+                name,
+                state.settings.tenant_default_burst_limit,
+                state.settings.tenant_default_burst_window_seconds,
+            )
+            routes[name] = {
+                "prefix": route.prefix,
+                "target": route.url,
+                "auth": route.allowed_auth_modes,
+                "required_roles": route.required_roles,
+                "tenant_limit_per_minute": limit,
+                "burst_limit": burst_limit,
+                "burst_window_seconds": burst_window,
+            }
+        await _emit_audit_event(
+            tenant_id=tenant_id,
+            actor=token.subject,
+            action="admin.routes.inspect",
+            resource="gateway",
+            outcome="success",
+            metadata={"plan": tenant_plan.plan},
+        )
+        return {"tenant": tenant_id, "plan": tenant_plan.plan, "routes": routes}
+
     def _register_proxy_endpoint(route: ServiceRouteConfig) -> None:
         async def auth_and_rate_limit(
             request: Request,
@@ -356,19 +662,121 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Insufficient role privileges",
                 )
-            identifier = f"{route.name}:{token.rate_limit_key}"
-            result = await state.rate_limiter.check(identifier, route.rate_limit_per_minute)
+            tenant_id = _resolve_tenant_id(request, token)
+            tenant_plan = await _get_tenant_plan(tenant_id)
+            effective_limit = tenant_plan.limit_for_route(
+                route.name, route.rate_limit_per_minute
+            )
+            identifier = f"{tenant_id}:{route.name}:{token.rate_limit_key}"
+            result = await state.rate_limiter.check(
+                identifier,
+                effective_limit,
+                namespace="tenant",
+            )
             if not result.allowed:
+                await _record_usage(
+                    tenant_id=tenant_id,
+                    route_name=route.name,
+                    result=result,
+                    burst_result=None,
+                    allowed=False,
+                    plan=tenant_plan,
+                    token=token,
+                )
+                await _emit_audit_event(
+                    tenant_id=tenant_id,
+                    actor=token.subject,
+                    action="gateway.rate_limit",
+                    resource=route.name,
+                    outcome="denied",
+                    severity="warning",
+                    metadata={
+                        "limit": result.limit,
+                        "remaining": result.remaining,
+                        "plan": tenant_plan.plan,
+                        "type": "steady",
+                    },
+                )
                 raise HTTPException(
                     status_code=429,
                     detail="Rate limit exceeded",
                     headers={
-                        "Retry-After": str(result.retry_after or state.settings.rate_limit_window_seconds),
+                        "Retry-After": str(
+                            result.retry_after or state.settings.rate_limit_window_seconds
+                        ),
                         "X-RateLimit-Limit": str(result.limit),
                         "X-RateLimit-Remaining": "0",
+                        "X-RateLimit-Reset": str(result.reset_after),
                     },
                 )
+
+            burst_result: Optional[RateLimitResult] = None
+            burst_limit, burst_window = tenant_plan.burst_for_route(
+                route.name,
+                state.settings.tenant_default_burst_limit,
+                state.settings.tenant_default_burst_window_seconds,
+            )
+            if burst_limit > effective_limit:
+                burst_identifier = f"{tenant_id}:{route.name}"
+                burst_result = await state.rate_limiter.check(
+                    burst_identifier,
+                    burst_limit,
+                    window_seconds=burst_window,
+                    namespace="burst",
+                )
+                if not burst_result.allowed:
+                    await _record_usage(
+                        tenant_id=tenant_id,
+                        route_name=route.name,
+                        result=result,
+                        burst_result=burst_result,
+                        allowed=False,
+                        plan=tenant_plan,
+                        token=token,
+                    )
+                    await _emit_audit_event(
+                        tenant_id=tenant_id,
+                        actor=token.subject,
+                        action="gateway.rate_limit",
+                        resource=route.name,
+                        outcome="denied",
+                        severity="warning",
+                        metadata={
+                            "limit": burst_result.limit,
+                            "remaining": burst_result.remaining,
+                            "plan": tenant_plan.plan,
+                            "type": "burst",
+                        },
+                    )
+                    raise HTTPException(
+                        status_code=429,
+                        detail="Burst limit exceeded",
+                        headers={
+                            "Retry-After": str(
+                                burst_result.retry_after
+                                or state.settings.tenant_default_burst_window_seconds
+                            ),
+                            "X-RateLimit-Limit": str(burst_result.limit),
+                            "X-RateLimit-Remaining": "0",
+                            "X-RateLimit-Reset": str(burst_result.reset_after),
+                        },
+                    )
+
+            await _record_usage(
+                tenant_id=tenant_id,
+                route_name=route.name,
+                result=result,
+                burst_result=burst_result,
+                allowed=True,
+                plan=tenant_plan,
+                token=token,
+            )
             request.state.rate_limit_result = result
+            if burst_result is not None:
+                request.state.burst_rate_limit_result = burst_result
+            request.state.tenant_plan = tenant_plan
+            request.state.tenant_id = tenant_id
+            request.state.tenant_roles = token.roles
             return token
 
         async def proxy_endpoint(
@@ -384,6 +792,35 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
                 response.headers["X-RateLimit-Limit"] = str(rate_limit_result.limit)
                 response.headers["X-RateLimit-Remaining"] = str(rate_limit_result.remaining)
                 response.headers["X-RateLimit-Reset"] = str(rate_limit_result.reset_after)
+            burst_result: Optional[RateLimitResult] = getattr(
+                request.state, "burst_rate_limit_result", None
+            )
+            if burst_result:
+                response.headers["X-RateLimit-Burst-Limit"] = str(burst_result.limit)
+                response.headers["X-RateLimit-Burst-Remaining"] = str(burst_result.remaining)
+                response.headers["X-RateLimit-Burst-Reset"] = str(burst_result.reset_after)
+
+            tenant_id = getattr(request.state, "tenant_id", None) or token.tenant_id or state.settings.identity_default_tenant or "global"
+            tenant_plan: Optional[TenantPlan] = getattr(request.state, "tenant_plan", None)
+            outcome = "success" if response.status_code < 400 else "error"
+            metadata = {
+                "route": route.name,
+                "method": request.method,
+                "status": response.status_code,
+                "plan": tenant_plan.plan if tenant_plan else state.settings.tenant_default_plan,
+                "limit": rate_limit_result.limit if rate_limit_result else None,
+                "remaining": rate_limit_result.remaining if rate_limit_result else None,
+                "burst_limit": burst_result.limit if burst_result else None,
+                "burst_remaining": burst_result.remaining if burst_result else None,
+            }
+            await _emit_audit_event(
+                tenant_id=tenant_id,
+                actor=token.subject,
+                action="gateway.proxy",
+                resource=f"{route.name}:{path or '/'}",
+                outcome=outcome,
+                metadata=metadata,
+            )
             return response
 
         app.router.add_api_route(

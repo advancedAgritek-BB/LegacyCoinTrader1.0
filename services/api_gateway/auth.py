@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional
 
 import jwt
@@ -22,6 +22,8 @@ class TokenPayload:
     token_type: str
     subject: str
     scopes: List[str]
+    tenant_id: Optional[str] = None
+    roles: List[str] = field(default_factory=list)
     raw_token: Optional[str] = None
     service_name: Optional[str] = None
     claims: Optional[Dict[str, object]] = None
@@ -29,13 +31,14 @@ class TokenPayload:
 
     @property
     def rate_limit_key(self) -> str:
+        tenant_prefix = f"tenant:{self.tenant_id}:" if self.tenant_id else ""
         if self.token_type == "jwt":
-            return f"user:{self.subject}"
+            return f"{tenant_prefix}user:{self.subject}"
         if self.token_type == "service" and self.service_name:
-            return f"service:{self.service_name}"
+            return f"{tenant_prefix}service:{self.service_name}"
         if self.client_host:
-            return f"ip:{self.client_host}"
-        return "anonymous"
+            return f"{tenant_prefix}ip:{self.client_host}"
+        return f"{tenant_prefix}anonymous" if tenant_prefix else "anonymous"
 
 
 class AuthManager:
@@ -76,7 +79,11 @@ class AuthManager:
         if not self.settings.require_authentication:
             client_host = request.client.host if request.client else None
             return TokenPayload(
-                token_type="anonymous", subject="anonymous", scopes=[], client_host=client_host
+                token_type="anonymous",
+                subject="anonymous",
+                scopes=[],
+                roles=[],
+                client_host=client_host,
             )
 
         modes = list(allowed_modes)
@@ -94,7 +101,11 @@ class AuthManager:
         if "anonymous" in modes:
             client_host = request.client.host if request.client else None
             return TokenPayload(
-                token_type="anonymous", subject="anonymous", scopes=[], client_host=client_host
+                token_type="anonymous",
+                subject="anonymous",
+                scopes=[],
+                roles=[],
+                client_host=client_host,
             )
 
         raise HTTPException(
@@ -112,10 +123,12 @@ class AuthManager:
                     LOGGER.warning("Rejected request with invalid service token")
                     break
                 scopes = ["internal", f"service:{service_name}"]
+                roles = [f"service:{service_name}"]
                 return TokenPayload(
                     token_type="service",
                     subject=service_name,
                     scopes=scopes,
+                    roles=roles,
                     service_name=service_name,
                     raw_token=token,
                     client_host=request.client.host if request.client else None,
@@ -150,10 +163,14 @@ class AuthManager:
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid or expired token",
                 ) from exc
+            scopes = list(claims.scopes)
+            self._ensure_tenant_scope(claims.tenant, scopes)
             return TokenPayload(
                 token_type="jwt",
                 subject=claims.subject or "user",
-                scopes=claims.scopes,
+                scopes=scopes,
+                tenant_id=claims.tenant,
+                roles=list(claims.roles),
                 raw_token=token,
                 claims=claims.raw_claims,
                 client_host=request.client.host if request.client else None,
@@ -179,12 +196,37 @@ class AuthManager:
             scopes = [scope for scope in scopes.split() if scope]
 
         subject = str(payload.get("sub") or payload.get("user_id") or "user")
+        tenant = payload.get("tenant") or payload.get("tid")
+        tenant_id = str(tenant) if tenant else None
+        roles_raw = payload.get("roles") or payload.get("role") or []
+        if isinstance(roles_raw, str):
+            roles = [role for role in roles_raw.split() if role]
+        else:
+            roles = [str(role) for role in roles_raw]
+        scopes_list = list(scopes)
+        self._ensure_tenant_scope(tenant_id, scopes_list)
         return TokenPayload(
             token_type="jwt",
             subject=subject,
-            scopes=list(scopes),
+            scopes=scopes_list,
+            tenant_id=tenant_id,
+            roles=roles,
             raw_token=token,
             claims=payload,
             client_host=request.client.host if request.client else None,
+        )
+
+    @staticmethod
+    def _ensure_tenant_scope(tenant: Optional[str], scopes: List[str]) -> None:
+        if not tenant:
+            return
+        normalised = {scope.lower() for scope in scopes}
+        if f"tenant:{tenant}".lower() in normalised:
+            return
+        if "tenant:*" in normalised or "tenant:all" in normalised:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Token lacks required tenant scope",
         )
 
