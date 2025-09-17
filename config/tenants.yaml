@@ -1,0 +1,50 @@
+tenants:
+  alpha:
+    name: Alpha Quant Fund
+    redis_namespace: tenant:{tenant}
+    risk:
+      max_active_cycles: 2
+      risk_budget: 250000.0
+    execution:
+      network_segment: segment-alpha
+      failover_endpoints:
+        - https://alpha-primary.exchange.example
+        - https://alpha-secondary.exchange.example
+      credentials:
+        api_key:
+          source: env
+          name: ALPHA_EXCHANGE_KEY
+        api_secret:
+          source: env
+          name: ALPHA_EXCHANGE_SECRET
+        passphrase:
+          source: env
+          name: ALPHA_EXCHANGE_PASSPHRASE
+    config_overrides:
+      risk:
+        starting_balance: 250000.0
+      strategy:
+        default_profile: alpha-low-latency
+
+  beta:
+    name: Beta Digital Assets
+    redis_namespace: tenant:{tenant}
+    risk:
+      max_active_cycles: 1
+      risk_budget: 100000.0
+    execution:
+      network_segment: segment-beta
+      failover_endpoints:
+        - https://beta-edge.exchange.example
+      credentials:
+        api_key:
+          source: env
+          name: BETA_EXCHANGE_KEY
+        api_secret:
+          source: env
+          name: BETA_EXCHANGE_SECRET
+    config_overrides:
+      risk:
+        starting_balance: 100000.0
+      strategy:
+        default_profile: beta-swing

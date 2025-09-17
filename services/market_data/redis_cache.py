@@ -21,15 +21,15 @@ def _safe_exchange(exchange_id: str) -> str:
 
 
 def _cache_key(namespace: str, exchange_id: str, timeframe: str, symbol: str) -> str:
-    return f"market-data:{namespace}:{_safe_exchange(exchange_id)}:{timeframe}:{_safe_symbol(symbol)}"
+    return f"{namespace}:{_safe_exchange(exchange_id)}:{timeframe}:{_safe_symbol(symbol)}"
 
 
-def _order_book_key(exchange_id: str, symbol: str) -> str:
-    return f"market-data:order-book:{_safe_exchange(exchange_id)}:{_safe_symbol(symbol)}"
+def _order_book_key(namespace: str, exchange_id: str, symbol: str) -> str:
+    return f"{namespace}:{_safe_exchange(exchange_id)}:{_safe_symbol(symbol)}"
 
 
-def _symbols_key(exchange_id: str) -> str:
-    return f"market-data:symbols:{_safe_exchange(exchange_id)}"
+def _symbols_key(namespace: str, exchange_id: str) -> str:
+    return f"{namespace}:{_safe_exchange(exchange_id)}"
 
 
 def _candles_to_dataframe(candles: Iterable[Iterable[float]]) -> pd.DataFrame:
@@ -155,12 +155,13 @@ async def store_multi_timeframe_cache(
 
 async def store_order_book(
     redis_client: Redis,
+    namespace: str,
     exchange_id: str,
     symbol: str,
     order_book: Mapping[str, object],
     ttl: int,
 ) -> None:
-    key = _order_book_key(exchange_id, symbol)
+    key = _order_book_key(namespace, exchange_id, symbol)
     payload = {
         "exchange": exchange_id,
         "symbol": symbol,
@@ -174,11 +175,12 @@ async def store_order_book(
 
 async def store_symbols(
     redis_client: Redis,
+    namespace: str,
     exchange_id: str,
     symbols: Iterable[str],
     ttl: int,
 ) -> None:
-    key = _symbols_key(exchange_id)
+    key = _symbols_key(namespace, exchange_id)
     payload = {
         "exchange": exchange_id,
         "symbols": list(symbols),

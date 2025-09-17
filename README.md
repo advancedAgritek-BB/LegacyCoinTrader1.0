@@ -35,6 +35,14 @@ docker compose up -d \
 python -m crypto_bot.main status
 ```
 
+## 🧩 Tenant Configuration
+
+Multi-tenant deployments are described in `config/tenants.yaml`. The API
+gateway forwards the `X-Tenant-ID` header to downstream services so they can
+load tenant-specific strategy, risk, and execution settings. The market data,
+trading engine, and execution services expose tenant-aware health endpoints to
+surface per-tenant workloads.
+
 ## 🕸 Microservice API Gateway
 
 LegacyCoinTrader's microservice rollout is fronted by a FastAPI-powered API gateway

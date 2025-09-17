@@ -65,13 +65,32 @@ class ExecutionService:
         """Ensure an exchange session is available and return it."""
         with self._session_lock:
             if self._session is None:
+                exchange_config = dict(self._config.exchange)
+                failover_endpoints = exchange_config.pop("failover_endpoints", None)
+                if failover_endpoints:
+                    endpoint = self._select_failover_endpoint(failover_endpoints)
+                    if endpoint:
+                        exchange_config.setdefault("api_endpoint", endpoint)
+                        exchange_config.setdefault("rest_base_url", endpoint)
                 credentials = self._secret_loader.load_credentials(self._config.credentials)
                 self._session = self._exchange_factory.create_session(
-                    self._config.exchange,
+                    exchange_config,
                     credentials,
                     self._nonce_manager,
                 )
         return self._session
+
+    @staticmethod
+    def _select_failover_endpoint(endpoints: Any) -> Optional[str]:
+        if isinstance(endpoints, str):
+            return endpoints
+        try:
+            for candidate in endpoints or []:
+                if candidate:
+                    return str(candidate)
+        except TypeError:  # pragma: no cover - defensive
+            return None
+        return None
 
     # ------------------------------------------------------------------
     # Public API

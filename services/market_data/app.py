@@ -10,6 +10,14 @@ from typing import Any, Dict, Iterable, Mapping, Optional
 import redis.asyncio as redis
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 
+from services.common.tenant import (
+    TenantContext,
+    TenantContextClient,
+    TenantContextMiddleware,
+    TenantNotFoundError,
+    get_tenant_context,
+)
+
 from services.monitoring.config import get_monitoring_settings
 from services.monitoring.instrumentation import instrument_fastapi_app
 from services.monitoring.logging import configure_logging
@@ -69,6 +77,17 @@ def _json_default(value: Any) -> Any:
 
 def _serialize_event(data: Mapping[str, Any]) -> str:
     return json.dumps(dict(data), default=_json_default)
+
+
+async def _count_namespace_keys(redis_client: redis.Redis, pattern: str) -> int:
+    cursor: int = 0
+    total = 0
+    while True:
+        cursor, keys = await redis_client.scan(cursor=cursor, match=pattern, count=250)
+        total += len(keys)
+        if cursor == 0:
+            break
+    return total
 
 
 def _prepare_exchange_config(exchange_id: str, config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -152,11 +171,37 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Market Data Service", lifespan=lifespan)
 instrument_fastapi_app(app, settings=monitoring_settings)
+app.add_middleware(TenantContextMiddleware)
 
 
 @app.get("/health")
 async def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/health/tenant")
+async def tenant_health(
+    redis_client: redis.Redis = Depends(get_redis_dependency),
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> Dict[str, Any]:
+    ohlcv_pattern = f"{tenant.redis_namespace('ohlcv')}:*"
+    regime_pattern = f"{tenant.redis_namespace('regime')}:*"
+    order_pattern = f"{tenant.redis_namespace('order-book')}:*"
+    symbols_pattern = f"{tenant.redis_namespace('symbols')}:*"
+    ohlcv_keys = await _count_namespace_keys(redis_client, ohlcv_pattern)
+    regime_keys = await _count_namespace_keys(redis_client, regime_pattern)
+    order_book_keys = await _count_namespace_keys(redis_client, order_pattern)
+    symbol_keys = await _count_namespace_keys(redis_client, symbols_pattern)
+    return {
+        "status": "ok",
+        "tenant_id": tenant.tenant_id,
+        "namespaces": {
+            "ohlcv_keys": ohlcv_keys,
+            "regime_keys": regime_keys,
+            "order_book_keys": order_book_keys,
+            "symbols_keys": symbol_keys,
+        },
+    }
 
 
 @app.get("/readiness")
@@ -177,6 +222,7 @@ async def load_symbols(
     payload: LoadSymbolsPayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
+    tenant: TenantContext = Depends(get_tenant_context),
 ) -> SymbolListResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
@@ -188,15 +234,24 @@ async def load_symbols(
     finally:
         await _close_exchange(exchange)
     symbols = list(symbols or [])
-    await store_symbols(redis_client, payload.exchange_id, symbols, settings.cache_ttl_seconds)
+    await store_symbols(
+        redis_client,
+        tenant.redis_namespace("symbols"),
+        payload.exchange_id,
+        symbols,
+        settings.cache_ttl_seconds,
+    )
     updated_at = datetime.now(timezone.utc)
     event = {
         "type": "symbols_update",
         "exchange": payload.exchange_id,
         "symbols": symbols,
         "updated_at": updated_at,
+        "tenant_id": tenant.tenant_id,
     }
-    await redis_client.publish(settings.symbols_channel, _serialize_event(event))
+    await redis_client.publish(
+        tenant.channel(settings.symbols_channel), _serialize_event(event)
+    )
     return SymbolListResponse(symbols=symbols, updated_at=updated_at)
 
 
@@ -205,12 +260,13 @@ async def update_ohlcv_endpoint(
     payload: OHLCVUpdatePayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
+    tenant: TenantContext = Depends(get_tenant_context),
 ) -> TimeframeResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
         existing_cache = await load_timeframe_cache(
             redis_client,
-            "ohlcv",
+            tenant.redis_namespace("ohlcv"),
             payload.exchange_id,
             payload.timeframe,
             payload.symbols,
@@ -231,7 +287,7 @@ async def update_ohlcv_endpoint(
 
     serialized = await store_timeframe_cache(
         redis_client,
-        "ohlcv",
+        tenant.redis_namespace("ohlcv"),
         payload.exchange_id,
         payload.timeframe,
         updated_cache,
@@ -244,8 +300,11 @@ async def update_ohlcv_endpoint(
         "timeframe": payload.timeframe,
         "symbols": list(serialized.keys()),
         "updated_at": updated_at,
+        "tenant_id": tenant.tenant_id,
     }
-    await redis_client.publish(settings.ohlcv_channel, _serialize_event(event))
+    await redis_client.publish(
+        tenant.channel(settings.ohlcv_channel), _serialize_event(event)
+    )
     return TimeframeResponse(timeframe=payload.timeframe, data=serialized, updated_at=updated_at)
 
 
@@ -254,6 +313,7 @@ async def update_multi_timeframe(
     payload: MultiOHLCVUpdatePayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
+    tenant: TenantContext = Depends(get_tenant_context),
 ) -> MultiTimeframeResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
@@ -262,7 +322,7 @@ async def update_multi_timeframe(
         all_timeframes = sorted({*base_timeframes, *additional})
         existing_cache = await load_multi_timeframe_cache(
             redis_client,
-            "ohlcv",
+            tenant.redis_namespace("ohlcv"),
             payload.exchange_id,
             all_timeframes,
             payload.symbols,
@@ -285,7 +345,7 @@ async def update_multi_timeframe(
 
     serialized = await store_multi_timeframe_cache(
         redis_client,
-        "ohlcv",
+        tenant.redis_namespace("ohlcv"),
         payload.exchange_id,
         updated,
         settings.cache_ttl_seconds,
@@ -297,8 +357,11 @@ async def update_multi_timeframe(
         "timeframes": list(serialized.keys()),
         "symbols": list({sym for tf in serialized.values() for sym in tf.keys()}),
         "updated_at": updated_at,
+        "tenant_id": tenant.tenant_id,
     }
-    await redis_client.publish(settings.ohlcv_channel, _serialize_event(event))
+    await redis_client.publish(
+        tenant.channel(settings.ohlcv_channel), _serialize_event(event)
+    )
     return MultiTimeframeResponse(timeframes=serialized, updated_at=updated_at)
 
 
@@ -307,6 +370,7 @@ async def update_regime(
     payload: RegimeUpdatePayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
+    tenant: TenantContext = Depends(get_tenant_context),
 ) -> RegimeResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
@@ -315,7 +379,7 @@ async def update_regime(
             return RegimeResponse(timeframes={}, updated_at=datetime.now(timezone.utc))
         existing_cache = await load_multi_timeframe_cache(
             redis_client,
-            "regime",
+            tenant.redis_namespace("regime"),
             payload.exchange_id,
             regime_tfs,
             payload.symbols,
@@ -323,7 +387,7 @@ async def update_regime(
         df_timeframes = payload.df_timeframes or regime_tfs
         df_map = await load_multi_timeframe_cache(
             redis_client,
-            "ohlcv",
+            tenant.redis_namespace("ohlcv"),
             payload.exchange_id,
             df_timeframes,
             payload.symbols,
@@ -345,7 +409,7 @@ async def update_regime(
 
     serialized = await store_multi_timeframe_cache(
         redis_client,
-        "regime",
+        tenant.redis_namespace("regime"),
         payload.exchange_id,
         updated,
         settings.cache_ttl_seconds,
@@ -357,8 +421,11 @@ async def update_regime(
         "timeframes": list(serialized.keys()),
         "symbols": list({sym for tf in serialized.values() for sym in tf.keys()}),
         "updated_at": updated_at,
+        "tenant_id": tenant.tenant_id,
     }
-    await redis_client.publish(settings.regime_channel, _serialize_event(event))
+    await redis_client.publish(
+        tenant.channel(settings.regime_channel), _serialize_event(event)
+    )
     return RegimeResponse(timeframes=serialized, updated_at=updated_at)
 
 
@@ -367,6 +434,7 @@ async def order_book_snapshot(
     payload: OrderBookPayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
+    tenant: TenantContext = Depends(get_tenant_context),
 ) -> OrderBookResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
@@ -379,6 +447,7 @@ async def order_book_snapshot(
         await _close_exchange(exchange)
     await store_order_book(
         redis_client,
+        tenant.redis_namespace("order-book"),
         payload.exchange_id,
         payload.symbol,
         order_book or {},
@@ -390,8 +459,11 @@ async def order_book_snapshot(
         "exchange": payload.exchange_id,
         "symbol": payload.symbol,
         "updated_at": updated_at,
+        "tenant_id": tenant.tenant_id,
     }
-    await redis_client.publish(settings.order_book_channel, _serialize_event(event))
+    await redis_client.publish(
+        tenant.channel(settings.order_book_channel), _serialize_event(event)
+    )
     return OrderBookResponse(symbol=payload.symbol, order_book=order_book, updated_at=updated_at)
 
 
@@ -411,7 +483,18 @@ async def websocket_ohlcv(
     symbol: str,
     timeframe: str = "1m",
     limit: int = 100,
+    tenant_id: Optional[str] = None,
 ):
+    candidate_tenant = tenant_id or websocket.headers.get("x-tenant-id")
+    if not candidate_tenant:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    tenant_client = TenantContextClient()
+    try:
+        tenant = tenant_client.get(candidate_tenant)
+    except TenantNotFoundError:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     await websocket.accept()
     settings = get_settings()
     exchange = await _create_exchange(exchange_id, {})
@@ -442,6 +525,7 @@ async def websocket_ohlcv(
                     "timeframe": timeframe,
                     "data": candles or [],
                     "fetched_at": datetime.now(timezone.utc).isoformat(),
+                    "tenant_id": tenant.tenant_id,
                 }
                 await websocket.send_text(json.dumps(message))
             except Exception as exc:  # pragma: no cover - runtime failures

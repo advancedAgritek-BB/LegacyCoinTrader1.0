@@ -24,6 +24,7 @@ class CycleState:
     last_timings: Dict[str, float] = field(default_factory=dict)
     last_error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    tenant_id: Optional[str] = None
 
     @staticmethod
     def _dt_to_iso(value: Optional[datetime]) -> Optional[str]:
@@ -47,6 +48,7 @@ class CycleState:
             "last_timings": self.last_timings,
             "last_error": self.last_error,
             "metadata": self.metadata,
+            "tenant_id": self.tenant_id,
         }
 
     @classmethod
@@ -60,6 +62,7 @@ class CycleState:
             last_timings=dict(data.get("last_timings", {})),
             last_error=data.get("last_error"),
             metadata=dict(data.get("metadata", {})),
+            tenant_id=data.get("tenant_id"),
         )
 
     def predict_next_run(self) -> Optional[datetime]:
@@ -72,18 +75,39 @@ class CycleState:
 class RedisCycleStateStore:
     """Persist ``CycleState`` using Redis."""
 
-    def __init__(self, client: Redis, key_prefix: str = "trading_engine") -> None:
+    def __init__(
+        self, client: Redis, key_prefix: str = "trading_engine", tenant_id: str | None = None
+    ) -> None:
         self._client = client
-        self._state_key = f"{key_prefix}:state"
+        self._base_prefix = key_prefix
+        self._tenant_id = tenant_id
+        self._state_key = self._compose_key("state")
+
+    def _compose_prefix(self, tenant_id: Optional[str] = None) -> str:
+        prefix = self._base_prefix
+        target = tenant_id or self._tenant_id
+        if target:
+            prefix = f"{prefix}:{target}"
+        return prefix
+
+    def _compose_key(self, suffix: str, tenant_id: Optional[str] = None) -> str:
+        return f"{self._compose_prefix(tenant_id)}:{suffix}"
+
+    def for_tenant(self, tenant_id: str) -> "RedisCycleStateStore":
+        return RedisCycleStateStore(self._client, self._base_prefix, tenant_id)
 
     async def load_state(self) -> CycleState:
         raw = await self._client.get(self._state_key)
         if not raw:
-            return CycleState()
+            return CycleState(tenant_id=self._tenant_id)
         payload = json.loads(raw)
-        return CycleState.from_dict(payload)
+        state = CycleState.from_dict(payload)
+        state.tenant_id = state.tenant_id or self._tenant_id
+        return state
 
     async def save_state(self, state: CycleState) -> CycleState:
+        if state.tenant_id is None:
+            state.tenant_id = self._tenant_id
         await self._client.set(self._state_key, json.dumps(state.to_dict()))
         return state
 
@@ -101,6 +125,8 @@ class RedisCycleStateStore:
         for key, value in fields.items():
             if hasattr(state, key):
                 setattr(state, key, value)
+        if "metadata" in fields and not isinstance(state.metadata, dict):
+            state.metadata = dict(state.metadata or {})
         await self.save_state(state)
         return state
 
