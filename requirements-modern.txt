@@ -3,6 +3,7 @@
 # Core Python (existing versions)
 python-dotenv>=1.0.0
 pydantic>=1.10.0,<2.0.0
+pydantic-settings>=2.0.0,<2.1.0
 
 # Async and Concurrency (existing compatible)
 aiohttp>=3.8.0,<4.0.0
@@ -49,6 +50,10 @@ python-multipart>=0.0.5
 prometheus-client>=0.16.0,<0.18.0
 structlog>=22.1.0,<23.2.0
 sentry-sdk[fastapi]>=1.15.0,<1.38.0
+opensearch-py>=2.2.0,<3.0.0
+opentelemetry-api>=1.19.0,<1.25.0
+opentelemetry-sdk>=1.19.0,<1.25.0
+opentelemetry-exporter-otlp-proto-http>=1.19.0,<1.25.0
 
 # Testing and Quality Assurance (NEW)
 pytest>=7.0.0,<8.0.0

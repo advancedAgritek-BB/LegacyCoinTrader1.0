@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: trading-engine
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['trading-engine:8001']
+  - job_name: portfolio
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['portfolio:8003']
+  - job_name: frontend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['frontend:8000']

@@ -31,9 +31,14 @@ uvicorn
 rich
 scikit-optimize
 pydantic>=2.4,<2.7
+pydantic-settings>=2.0,<2.2
 numba
 cachetools
 prometheus-client
+opensearch-py
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http
 solders
 pythclient
 redis

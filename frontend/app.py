@@ -26,6 +26,9 @@ from frontend.auth import get_auth, login_required
 from crypto_bot.utils.price_fetcher import (
     get_current_price_for_symbol as _get_current_price_for_symbol,
 )
+from services.monitoring.config import get_monitoring_settings
+from services.monitoring.instrumentation import instrument_flask_app
+from services.monitoring.logging import configure_logging
 from crypto_bot.config import load_config as load_bot_config, save_config, resolve_config_path
 
 try:
@@ -74,8 +77,6 @@ except (
 # Fix LOG_DIR path to point to the correct crypto_bot/logs directory
 LOG_DIR = Path(__file__).resolve().parents[1] / "crypto_bot" / "logs"
 
-logger = logging.getLogger(__name__)
-
 app = Flask(__name__)
 # Lightweight healthcheck for container orchestration
 @app.route("/health", methods=["GET"])  # Simple 200 OK health endpoint
@@ -87,6 +88,19 @@ def health():
 # Get configuration and authentication instances
 settings = get_settings()
 auth = get_auth()
+
+monitoring_settings = get_monitoring_settings().for_service(
+    "frontend",
+    environment=config.environment,
+)
+monitoring_settings.metrics.default_labels.setdefault("component", "frontend")
+configure_logging(monitoring_settings)
+try:
+    instrument_flask_app(app, settings=monitoring_settings)
+except RuntimeError as exc:  # pragma: no cover - instrumentation optional in some tests
+    logging.getLogger(__name__).warning("Observability instrumentation disabled: %s", exc)
+
+logger = logging.getLogger(__name__)
 
 # Disable template caching for development - CRITICAL for template updates
 app.config["TEMPLATES_AUTO_RELOAD"] = True
