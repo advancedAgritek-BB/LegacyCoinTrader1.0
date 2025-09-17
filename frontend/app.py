@@ -21,7 +21,7 @@ from crypto_bot import log_reader
 from crypto_bot import ml_signal_model as ml
 import frontend.utils as utils
 from crypto_bot.utils.trade_manager import is_test_position
-from frontend.config import get_config
+from frontend.config import get_settings
 from frontend.auth import get_auth, login_required
 from crypto_bot.utils.price_fetcher import (
     get_current_price_for_symbol as _get_current_price_for_symbol,
@@ -85,18 +85,18 @@ def health():
 # Import secure configuration and authentication, login_required
 
 # Get configuration and authentication instances
-config = get_config()
+settings = get_settings()
 auth = get_auth()
 
 # Disable template caching for development - CRITICAL for template updates
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 # Set secure session configuration
-app.config["SECRET_KEY"] = config.security.session_secret_key
+app.config["SECRET_KEY"] = settings.security.session_secret_key
 app.config["SESSION_TYPE"] = "filesystem"
 app.config["SESSION_PERMANENT"] = True
-app.config["PERMANENT_SESSION_LIFETIME"] = config.security.session_timeout
-app.config["SESSION_COOKIE_SECURE"] = config.environment == "production"
+app.config["PERMANENT_SESSION_LIFETIME"] = settings.security.session_timeout
+app.config["SESSION_COOKIE_SECURE"] = settings.environment == "production"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
@@ -114,7 +114,7 @@ def is_rate_limited():
 
     # Clean old entries
     if client_ip in request_windows:
-        window_time = config.security.rate_limit_window
+        window_time = settings.security.rate_limit_window
         if current_time - request_windows[client_ip] > window_time:
             request_counts[client_ip] = 0
             request_windows[client_ip] = current_time
@@ -202,7 +202,7 @@ def fetch_positions_from_service() -> list[dict[str, Any]]:
 
     request_counts[client_ip] += 1
 
-    return request_counts[client_ip] > config.security.rate_limit_requests
+    return request_counts[client_ip] > settings.security.rate_limit_requests
 
 
 @app.before_request
@@ -225,12 +225,12 @@ def add_secure_headers(response):
 
     # Generate secure CSP header
     response.headers["Content-Security-Policy"] = (
-        config.security.get_csp_header()
+        settings.security.get_csp_header()
     )
 
     # Generate secure CORS headers
     if origin:
-        cors_headers = config.security.get_cors_headers(origin)
+        cors_headers = settings.security.get_cors_headers(origin)
         response.headers.update(cors_headers)
 
     # Additional security headers
@@ -239,7 +239,7 @@ def add_secure_headers(response):
     response.headers["X-XSS-Protection"] = "1; mode=block"
 
     # HSTS header for production
-    if config.environment == "production":
+    if settings.environment == "production":
         hsts_value = "max-age=31536000; includeSubDomains"
         response.headers["Strict-Transport-Security"] = hsts_value
     else:
@@ -248,7 +248,7 @@ def add_secure_headers(response):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
     # Cache control for security
-    if config.environment == "development":
+    if settings.environment == "development":
         response.headers["Cache-Control"] = (
             "no-cache, no-store, must-revalidate"
         )

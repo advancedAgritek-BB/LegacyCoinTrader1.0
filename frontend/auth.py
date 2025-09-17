@@ -124,10 +124,11 @@ class SimpleAuth:
         """Decorator to require API key for API routes."""
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            from frontend.config import get_config
-            config = get_config()
+            from frontend.config import get_settings
 
-            api_key = request.headers.get(config.security.api_key_header)
+            settings = get_settings()
+
+            api_key = request.headers.get(settings.security.api_key_header)
             if not api_key:
                 return jsonify({'error': 'API key required'}), 401
 
@@ -146,11 +147,12 @@ _auth_instance = None
 def get_auth() -> SimpleAuth:
     """Get the global authentication instance."""
     global _auth_instance
-    from frontend.config import get_config
-    config = get_config()
+    from frontend.config import get_settings
+
+    settings = get_settings()
 
     if _auth_instance is None:
-        _auth_instance = SimpleAuth(config.security.session_secret_key)
+        _auth_instance = SimpleAuth(settings.security.session_secret_key)
 
     return _auth_instance
 
