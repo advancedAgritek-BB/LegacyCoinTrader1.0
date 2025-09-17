@@ -16,6 +16,12 @@ from pathlib import Path
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional, Dict, Any
+
+from asgiref.wsgi import WsgiToAsgi
+from limits import parse as parse_rate_limit
+from limits.storage import storage_from_string
+from limits.strategies import FixedWindowRateLimiter
+from werkzeug.exceptions import HTTPException
 from crypto_bot import log_reader
 from crypto_bot import ml_signal_model as ml
 import frontend.utils as utils
@@ -73,10 +79,134 @@ except (
 LOG_DIR = Path(__file__).resolve().parents[1] / "crypto_bot" / "logs"
 
 app = Flask(__name__)
+
+
+class APIError(Exception):
+    """Base exception for API errors that should return JSON responses."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int = 400,
+        error_code: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+        self.error_code = error_code
+        self.details = details
+
+
+def json_response(payload: Dict[str, Any], status_code: int = 200):
+    """Return a JSON response with consistent headers."""
+
+    return app.response_class(
+        json.dumps(payload, default=str),
+        status=status_code,
+        mimetype="application/json",
+    )
+
+
+def json_error(
+    message: str,
+    *,
+    status_code: int = 400,
+    error_code: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
+):
+    """Return a standardized JSON error response."""
+
+    payload: Dict[str, Any] = {
+        "success": False,
+        "error": {"message": message},
+    }
+    if error_code:
+        payload["error"]["code"] = error_code
+    if details:
+        payload["error"]["details"] = details
+    return json_response(payload, status_code)
+
+
+def wants_json_response() -> bool:
+    """Return True if the current request prefers a JSON response."""
+
+    from flask import request
+
+    if request.path.startswith("/api/"):
+        return True
+    accept = request.headers.get("Accept", "")
+    return "application/json" in accept.lower()
+
+
+def _standardize_error_response(response):
+    """Ensure JSON error payloads follow the standard shape."""
+
+    if (
+        getattr(response, "mimetype", "")
+        and response.mimetype.startswith("application/json")
+        and response.status_code >= 400
+    ):
+        try:
+            payload = json.loads(response.get_data(as_text=True) or "null")
+        except (TypeError, ValueError):
+            return response
+
+        if (
+            isinstance(payload, dict)
+            and payload.get("success") is False
+            and isinstance(payload.get("error"), dict)
+            and payload["error"].get("message")
+        ):
+            return response
+
+        message = None
+        error_code = None
+        details: Optional[Dict[str, Any]] = None
+
+        if isinstance(payload, dict):
+            if isinstance(payload.get("error"), dict) and payload["error"].get("message"):
+                # Already partially standardised, include any missing fields
+                message = payload["error"].get("message")
+                error_code = payload["error"].get("code")
+                remaining = {
+                    key: value
+                    for key, value in payload["error"].items()
+                    if key not in {"message", "code"}
+                }
+                details = remaining or None
+            else:
+                message = payload.get("error") or payload.get("message")
+                error_code = payload.get("code")
+                remaining = {
+                    key: value
+                    for key, value in payload.items()
+                    if key not in {"error", "message", "code"}
+                }
+                details = remaining or None
+        else:
+            details = {"data": payload}
+
+        standard_payload = {
+            "success": False,
+            "error": {"message": str(message or "Request failed")},
+        }
+        if error_code:
+            standard_payload["error"]["code"] = error_code
+        if details:
+            standard_payload["error"]["details"] = details
+
+        response.set_data(json.dumps(standard_payload, default=str))
+        response.mimetype = "application/json"
+
+    return response
+
+
 # Lightweight healthcheck for container orchestration
 @app.route("/health", methods=["GET"])  # Simple 200 OK health endpoint
 def health():
-    return (json.dumps({"status": "ok"}), 200, {"Content-Type": "application/json"})
+    return json_response({"status": "ok"})
 
 # Import secure configuration and authentication, login_required
 
@@ -109,29 +239,155 @@ app.config["SESSION_COOKIE_SECURE"] = settings.environment == "production"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
-# Rate limiting (simple in-memory implementation)
-request_counts = {}
-request_windows = {}
+# Rate limiting (Redis-backed implementation)
+_rate_limiter_enabled = bool(getattr(settings.security, "rate_limit_enabled", True))
+_rate_limiter: Optional[FixedWindowRateLimiter] = None
+_rate_limit_item = None
 
 
-def is_rate_limited():
-    """Check if current request exceeds rate limit."""
+def _get_rate_limit_identifier() -> str:
+    """Return a unique identifier for the caller and route."""
+
     from flask import request
 
-    client_ip = request.remote_addr
-    current_time = time.time()
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+    else:
+        client_ip = request.remote_addr or "unknown"
 
-    # Clean old entries
-    if client_ip in request_windows:
-        window_time = settings.security.rate_limit_window
-        if current_time - request_windows[client_ip] > window_time:
-            request_counts[client_ip] = 0
-            request_windows[client_ip] = current_time
+    endpoint = request.endpoint or request.path
+    prefix = getattr(settings.security, "rate_limit_prefix", "frontend")
+    return f"{prefix}:{client_ip}:{endpoint}"
 
-    # Check rate limit
-    if client_ip not in request_counts:
-        request_counts[client_ip] = 0
-        request_windows[client_ip] = current_time
+
+def is_rate_limited() -> bool:
+    """Return True when the caller exceeded the configured rate limit."""
+
+    global _rate_limiter
+
+    if not _rate_limiter_enabled or _rate_limiter is None or _rate_limit_item is None:
+        return False
+
+    identifier = _get_rate_limit_identifier()
+    try:
+        allowed = _rate_limiter.hit(_rate_limit_item, identifier)
+    except Exception as exc:  # pragma: no cover - backend failures are runtime specific
+        logger.error("Rate limiter backend failure for %s: %s", identifier, exc)
+        return False
+
+    return not allowed
+
+
+@app.before_request
+def check_rate_limit():
+    """Check rate limit before processing request."""
+
+    if not _rate_limiter_enabled:
+        return None
+
+    if is_rate_limited():
+        retry_after = None
+        if _rate_limit_item is not None:
+            try:
+                retry_after = int(_rate_limit_item.get_expiry())
+            except Exception:  # pragma: no cover - defensive
+                retry_after = None
+
+        response = json_error(
+            "Rate limit exceeded",
+            status_code=429,
+            error_code="rate_limit_exceeded",
+            details={"retry_after": retry_after} if retry_after else None,
+        )
+        if retry_after:
+            response.headers["Retry-After"] = str(retry_after)
+        return response
+
+    return None
+
+
+_rate_limit_storage_url = (
+    settings.security.rate_limit_storage_url
+    or f"redis://{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
+)
+
+if _rate_limiter_enabled:
+    try:
+        storage = storage_from_string(_rate_limit_storage_url)
+        _rate_limiter = FixedWindowRateLimiter(storage)
+        limit_expression = (
+            f"{settings.security.rate_limit_requests}/{settings.security.rate_limit_window} seconds"
+        )
+        _rate_limit_item = parse_rate_limit(limit_expression)
+        logger.debug(
+            "Rate limiter configured with %s using backend %s",
+            limit_expression,
+            _rate_limit_storage_url,
+        )
+    except Exception as exc:  # pragma: no cover - backend availability depends on runtime
+        logger.error(
+            "Failed to configure Redis rate limiter using %s: %s",
+            _rate_limit_storage_url,
+            exc,
+        )
+        _rate_limiter_enabled = False
+
+
+@app.errorhandler(APIError)
+def handle_api_error(exc: APIError):
+    """Return a standardized response for APIError exceptions."""
+
+    return json_error(
+        exc.message,
+        status_code=exc.status_code,
+        error_code=exc.error_code,
+        details=exc.details,
+    )
+
+
+@app.errorhandler(ApiGatewayError)
+def handle_api_gateway_error(exc: ApiGatewayError):
+    """Convert API gateway failures into standardized JSON errors."""
+
+    return json_error(str(exc), status_code=502, error_code="gateway_error")
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(exc: HTTPException):
+    """Provide JSON responses for HTTP errors when appropriate."""
+
+    if wants_json_response():
+        description = exc.description or exc.name or "HTTP error"
+        error_code = (exc.name or "http_error").lower().replace(" ", "_")
+        return json_error(description, status_code=exc.code or 500, error_code=error_code)
+
+    return exc
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_exception(exc: Exception):
+    """Catch-all exception handler that returns a JSON response when required."""
+
+    if isinstance(exc, APIError):
+        return handle_api_error(exc)
+    if isinstance(exc, ApiGatewayError):
+        return handle_api_gateway_error(exc)
+    if isinstance(exc, HTTPException):
+        return handle_http_exception(exc)
+
+    logger.exception("Unhandled exception while processing request", exc_info=exc)
+
+    if wants_json_response():
+        return json_error(
+            "An internal server error occurred.",
+            status_code=500,
+            error_code="internal_server_error",
+        )
+
+    raise exc
+
+
 PORTFOLIO_POSITIONS_PATH = "/portfolio/positions"
 PORTFOLIO_WALLET_STATUS_PATH = "/portfolio/wallet-status"
 TRADING_ENGINE_STATE_PATH = "/trading-engine/cycles/status"
@@ -224,25 +480,13 @@ def fetch_wallet_status() -> Dict[str, Any]:
         logger.warning("Failed to fetch wallet status from API gateway: %s", exc)
     return {}
 
-    request_counts[client_ip] += 1
-
-    return request_counts[client_ip] > settings.security.rate_limit_requests
-
-
-@app.before_request
-def check_rate_limit():
-    """Check rate limit before processing request."""
-    if is_rate_limited():
-        from flask import jsonify
-
-        return jsonify({"error": "Rate limit exceeded"}), 429
-
-
 # Secure headers middleware
 @app.after_request
 def add_secure_headers(response):
     """Add secure headers to all responses."""
     from flask import request
+
+    response = _standardize_error_response(response)
 
     # Get the origin from the request
     origin = request.headers.get("Origin")
@@ -4321,6 +4565,9 @@ def get_paper_wallet_balance() -> float:
             return 10000.0  # Default fallback balance
 
 
+asgi_app = WsgiToAsgi(app)
+
+
 if __name__ == "__main__":
     """Run the Flask app directly with port information for startup scripts."""
     import socket
@@ -4345,13 +4592,17 @@ if __name__ == "__main__":
     except Exception:
         port = find_free_port()
     print(f"FLASK_PORT={port}")  # This is what startup scripts look for
-    print(f"Starting Flask app on port {port}...")
+    print(f"Starting ASGI app on port {port} using Uvicorn...")
     print("Press Ctrl+C to stop the server")
 
     try:
-        app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+        import uvicorn
+
+        config = uvicorn.Config(asgi_app, host="0.0.0.0", port=port, log_level="info")
+        server = uvicorn.Server(config)
+        server.run()
     except KeyboardInterrupt:
-        print("\nFlask server stopped by user")
+        print("\nASGI server stopped by user")
     except Exception as e:
-        print(f"Error running Flask app: {e}")
+        print(f"Error running ASGI app: {e}")
         sys.exit(1)

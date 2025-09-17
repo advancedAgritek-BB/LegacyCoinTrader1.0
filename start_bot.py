@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 from typing import Awaitable, Callable, Dict, Iterable, Optional, Tuple
 
+import uvicorn
+
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -243,18 +245,18 @@ def start_web_server(
     open_browser: bool = True,
     wait_seconds: float = 3.0,
 ) -> Tuple[Optional[threading.Thread], Optional[int]]:
-    """Start the Flask web server in a separate thread."""
+    """Start the frontend web server in a separate thread."""
 
     prefix = "   " if debug_logging else ""
     print("🌐 Starting integrated web server...")
     if debug_logging:
-        print(f"{prefix}Step 1: Importing Flask app...")
+        print(f"{prefix}Step 1: Importing frontend app...")
 
     try:
-        from frontend.app import app
-        print(f"{prefix}✅ Flask app imported successfully")
+        from frontend.app import asgi_app, app as legacy_wsgi_app
+        print(f"{prefix}✅ Frontend app imported successfully")
     except Exception as exc:
-        print(f"{prefix}❌ Failed to import Flask app: {exc}")
+        print(f"{prefix}❌ Failed to import frontend app: {exc}")
         if debug_logging:
             import traceback
 
@@ -288,7 +290,7 @@ def start_web_server(
     port = find_free_port()
     print(f"{prefix}✅ Found free port: {port}")
 
-    def run_flask(port_num: int) -> None:
+    def run_frontend(port_num: int) -> None:
         try:
             print(f"🌐 Web server running on http://localhost:{port_num}")
             print(f"📊 Monitoring dashboard: http://localhost:{port_num}/monitoring")
@@ -299,9 +301,17 @@ def start_web_server(
             if use_run_simple:
                 from werkzeug.serving import run_simple
 
-                run_simple("0.0.0.0", port_num, app, use_reloader=False, threaded=True)
+                run_simple(
+                    "0.0.0.0",
+                    port_num,
+                    legacy_wsgi_app,
+                    use_reloader=False,
+                    threaded=True,
+                )
             else:
-                app.run(host="0.0.0.0", port=port_num, debug=False, use_reloader=False)
+                config = uvicorn.Config(asgi_app, host="0.0.0.0", port=port_num, log_level="info")
+                server = uvicorn.Server(config)
+                server.run()
         except Exception as exc:
             print(f"❌ Web server error: {exc}")
             import traceback
@@ -309,13 +319,13 @@ def start_web_server(
             traceback.print_exc()
 
     if debug_logging:
-        print(f"{prefix}Step 2: Starting Flask thread...")
-    flask_thread = threading.Thread(target=run_flask, args=(port,), daemon=True)
-    flask_thread.start()
-    print(f"{prefix}✅ Flask thread started")
+        print(f"{prefix}Step 2: Starting ASGI server thread...")
+    frontend_thread = threading.Thread(target=run_frontend, args=(port,), daemon=True)
+    frontend_thread.start()
+    print(f"{prefix}✅ Frontend thread started")
     if debug_logging:
         print("✅ Web server started successfully")
-        print(f"{prefix}Step 3: Waiting for Flask to initialize...")
+        print(f"{prefix}Step 3: Waiting for server to initialize...")
     else:
         print("⏳ Waiting for web server to initialize...")
 
@@ -345,7 +355,7 @@ def start_web_server(
             print(f"⚠️ Could not open browser automatically: {exc}")
             print(f"🌐 Please manually navigate to: http://localhost:{port}")
 
-    return flask_thread, port
+    return frontend_thread, port
 
 
 async def run_integrated_mode(header_lines: Iterable[str], wait_time: float, **web_config: object) -> None:
