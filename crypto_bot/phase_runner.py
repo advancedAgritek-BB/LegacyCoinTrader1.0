@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Dict, Iterable, Optional, List, Any
 import logging
 
+from crypto_bot.services.interfaces import ServiceContainer
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,6 +26,7 @@ class BotContext:
     paper_wallet: Optional[object] = None
     position_guard: Optional[object] = None
     trade_manager: Optional[object] = None  # Centralized trade manager
+    services: Optional[ServiceContainer] = None
     balance: float = 0.0
     current_batch: List[str] = field(default_factory=list)
     analysis_results: Optional[list] = field(default_factory=list)

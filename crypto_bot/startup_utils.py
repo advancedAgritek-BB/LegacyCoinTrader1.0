@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict
 
+import yaml
 from pydantic import ValidationError
 
 from schema.scanner import PythConfig, ScannerConfig, SolanaScannerConfig
@@ -15,6 +16,15 @@ from crypto_bot.cooldown_manager import configure as cooldown_configure
 from crypto_bot.open_position_guard import OpenPositionGuard
 from crypto_bot.portfolio_rotator import PortfolioRotator
 from crypto_bot.risk.risk_manager import RiskConfig, RiskManager
+from crypto_bot.services.adapters import (
+    ExecutionAdapter,
+    MarketDataAdapter,
+    MonitoringAdapter,
+    PortfolioAdapter,
+    StrategyAdapter,
+    TokenDiscoveryAdapter,
+)
+from crypto_bot.services.interfaces import ServiceContainer
 from crypto_bot.utils.market_loader import configure as market_loader_configure
 from crypto_bot.utils.symbol_utils import fix_symbol
 
@@ -34,6 +44,7 @@ __all__ = [
     "maybe_reload_config",
     "reload_config",
     "set_last_config_mtime",
+    "create_service_container",
 ]
 
 
@@ -224,3 +235,16 @@ def set_last_config_mtime(mtime: float) -> None:
     """Update the cached configuration modification time."""
     global _LAST_CONFIG_MTIME
     _LAST_CONFIG_MTIME = mtime
+
+
+def create_service_container() -> ServiceContainer:
+    """Instantiate the default in-process service adapters."""
+
+    return ServiceContainer(
+        market_data=MarketDataAdapter(),
+        strategy=StrategyAdapter(),
+        portfolio=PortfolioAdapter(),
+        execution=ExecutionAdapter(),
+        token_discovery=TokenDiscoveryAdapter(),
+        monitoring=MonitoringAdapter(),
+    )
