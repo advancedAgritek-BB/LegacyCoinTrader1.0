@@ -9,6 +9,9 @@ import pandas as pd
 import pytest
 
 
+pytestmark = pytest.mark.regression
+
+
 def _load_strategy(name: str):
     try:
         return importlib.import_module(f"crypto_bot.strategy.{name}")

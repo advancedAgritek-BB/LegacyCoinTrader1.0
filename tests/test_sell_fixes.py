@@ -4,10 +4,14 @@ Test script to validate the sell request processing fixes.
 """
 
 import json
-import os
 import tempfile
-from pathlib import Path
 from datetime import datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+
+pytestmark = pytest.mark.regression
 
 def test_duplicate_prevention():
     """Test that duplicate sell requests are prevented."""
