@@ -42,8 +42,16 @@ class CycleExecutionResult:
 class TradingCycleInterface:
     """Execute a sequence of asynchronous phases and capture timings."""
 
-    def __init__(self, phases: Optional[Iterable[PhaseCallable]] = None) -> None:
+    def __init__(
+        self,
+        phases: Optional[Iterable[PhaseCallable]] = None,
+        *,
+        clock: Optional[Callable[[], datetime]] = None,
+        timer: Optional[Callable[[], float]] = None,
+    ) -> None:
         self._phases: List[PhaseCallable] = list(phases or [])
+        self._clock: Callable[[], datetime] = clock or (lambda: datetime.now(timezone.utc))
+        self._timer: Callable[[], float] = timer or time.perf_counter
 
     @property
     def phases(self) -> List[PhaseCallable]:
@@ -68,12 +76,14 @@ class TradingCycleInterface:
             raise ValueError("No phases configured for trading cycle execution")
 
         result = CycleExecutionResult()
-        result.started_at = datetime.now(timezone.utc)
-        overall_start = time.perf_counter()
+        clock = self._clock
+        timer = self._timer
+        result.started_at = clock()
+        overall_start = timer()
 
         for phase in phase_sequence:
             phase_name = getattr(phase, "__name__", "unknown_phase")
-            start_time = time.perf_counter()
+            start_time = timer()
 
             memory_manager = getattr(ctx, "memory_manager", None)
             monitor = getattr(memory_manager, "memory_monitoring", None)
@@ -88,7 +98,7 @@ class TradingCycleInterface:
                 logger.exception("Trading cycle phase %s failed", phase_name)
                 raise
             finally:
-                result.timings[phase_name] = time.perf_counter() - start_time
+                result.timings[phase_name] = timer() - start_time
 
             maintenance_result: Optional[Dict[str, Any]] = None
             if hasattr(ctx, "perform_memory_maintenance"):
@@ -104,8 +114,8 @@ class TradingCycleInterface:
             if maintenance_result and maintenance_result.get("memory_pressure"):
                 logger.warning("Memory pressure detected during %s", phase_name)
 
-        result.completed_at = datetime.now(timezone.utc)
-        result.metadata["duration_seconds"] = time.perf_counter() - overall_start
+        result.completed_at = clock()
+        result.metadata["duration_seconds"] = timer() - overall_start
         return result
 
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Dict, Iterable, Optional, List, Any
+from datetime import datetime
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
 import logging
 
 from crypto_bot.services.interfaces import ServiceContainer
@@ -35,6 +37,8 @@ class BotContext:
     analysis_results: Optional[list] = field(default_factory=list)
     timing: Optional[dict] = field(default_factory=dict)
     volatility_factor: float = 1.0
+    rng: Optional[random.Random] = None
+    numpy_rng: Optional[Any] = None
 
     # Migration support
     position_sync_manager: Optional[object] = None
@@ -210,11 +214,33 @@ class BotContext:
 class PhaseRunner:
     """Run a sequence of async phases and record timing with memory monitoring."""
 
-    def __init__(self, phases: Iterable[Callable[[BotContext], Awaitable[None]]]):
+    def __init__(
+        self,
+        phases: Iterable[Callable[[BotContext], Awaitable[None]]],
+        *,
+        clock: Optional[Callable[[], datetime]] = None,
+        timer: Optional[Callable[[], float]] = None,
+        rng: Optional[random.Random] = None,
+        numpy_rng: Optional[Any] = None,
+    ) -> None:
         self.phases = list(phases)
-        self._cycle_interface = TradingCycleInterface(self.phases)
+        self._rng = rng
+        self._numpy_rng = numpy_rng
+        self._cycle_interface = TradingCycleInterface(self.phases, clock=clock, timer=timer)
 
     async def run(self, ctx: BotContext) -> Dict[str, float]:
         self._cycle_interface.set_phases(self.phases)
+        if self._rng is not None:
+            if hasattr(ctx, "rng"):
+                if getattr(ctx, "rng") is None:
+                    ctx.rng = self._rng
+            else:
+                setattr(ctx, "rng", self._rng)
+        if self._numpy_rng is not None:
+            if hasattr(ctx, "numpy_rng"):
+                if getattr(ctx, "numpy_rng") is None:
+                    ctx.numpy_rng = self._numpy_rng
+            else:
+                setattr(ctx, "numpy_rng", self._numpy_rng)
         result = await self._cycle_interface.run_cycle(ctx)
         return result.timings
