@@ -20,11 +20,11 @@ for env_path in ".env" "crypto_bot/.env"; do
     if [[ -f "$env_path" ]]; then
         echo "✅ Found .env file at: $env_path"
         # Check if it contains real API keys (not template values)
-        if grep -q "your_kraken_api_key_here\|your_telegram_token_here\|your_helius_key_here" "$env_path"; then
-            echo "❌ .env file contains template values. Please edit with real API keys."
+        if grep -q "MANAGED:" "$env_path"; then
+            echo "❌ .env file contains managed placeholders. Inject secrets before launching."
             exit 1
         else
-            echo "✅ .env file contains real API keys"
+            echo "✅ .env file contains resolved secrets"
             ENV_FOUND=true
             break
         fi

@@ -9,7 +9,9 @@ and prevent overwriting of real API keys with templates.
 import os
 import shutil
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple
+
+from services.configuration import load_manifest
 
 # Define possible .env file locations
 ENV_LOCATIONS = [
@@ -17,31 +19,38 @@ ENV_LOCATIONS = [
     Path("crypto_bot/.env"),  # crypto_bot subdirectory
 ]
 
-# Template placeholder values to detect template files
-TEMPLATE_PLACEHOLDERS = [
-    "your_kraken_api_key_here",
-    "your_telegram_token_here", 
-    "your_helius_key_here",
-    "your_kraken_api_secret_here",
-    "your_coinbase_api_key_here",
-    "your_coinbase_api_secret_here",
-    "your_wallet_address_here",
-    "your_solana_private_key_here",
-    "your_supabase_url_here",
-    "your_supabase_key_here",
-    "your_lunarcrush_api_key_here"
-]
+MANAGED_MANIFEST = load_manifest()
+REQUIRED_ENV_VARS = set(MANAGED_MANIFEST.required_environment_variables())
+MANAGED_ENV_VARS = set(MANAGED_MANIFEST.environment_variable_names())
+
+
+def parse_env_file(env_path: Path) -> Dict[str, str]:
+    """Parse a .env file into a dictionary."""
+
+    env_data: Dict[str, str] = {}
+    if not env_path.exists():
+        return env_data
+
+    content = env_path.read_text()
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        env_data[key.strip()] = value.strip()
+    return env_data
 
 def is_template_file(env_path: Path) -> bool:
     """Check if a .env file contains template placeholder values."""
-    if not env_path.exists():
+    env_data = parse_env_file(env_path)
+    if not env_data:
         return False
-    
-    try:
-        content = env_path.read_text()
-        return any(placeholder in content for placeholder in TEMPLATE_PLACEHOLDERS)
-    except Exception:
-        return False
+
+    for key in REQUIRED_ENV_VARS:
+        value = env_data.get(key, "")
+        if not value or value.startswith("${MANAGED:"):
+            return True
+    return False
 
 def find_env_files() -> List[Tuple[Path, bool, bool]]:
     """Find all .env files and determine if they're templates or contain real keys."""
@@ -63,40 +72,31 @@ def get_real_env_file() -> Optional[Path]:
 
 def create_env_template(target_path: Path) -> None:
     """Create a new .env template file."""
-    template_content = """# .env File for LegacyCoinTrader
-# Updated with actual API keys and configuration
+    required_lines = "\n".join(
+        f"{name}=${{MANAGED:{name}}}"
+        for name in sorted(REQUIRED_ENV_VARS)
+    ) or "# (no required managed secrets defined)"
+    optional_names = sorted(MANAGED_ENV_VARS - REQUIRED_ENV_VARS)
+    optional_lines = "\n".join(
+        f"{name}=${{MANAGED:{name}}}"
+        for name in optional_names
+    ) or "# (no optional managed secrets defined)"
 
-# Exchange Configuration
+    template_content = f"""# .env File for LegacyCoinTrader
+# Managed secrets are injected via Vault/SSM/Secrets Manager at deploy time.
+# Replace MANAGED placeholders only when creating local overrides for testing.
+
+# Required managed secrets
+{required_lines}
+
+# Optional managed secrets
+{optional_lines}
+
+# Secret rotation metadata
+SECRETS_ROTATED_AT=
+
+# Runtime configuration
 EXCHANGE=kraken
-API_KEY=your_kraken_api_key_here
-API_SECRET=your_kraken_api_secret_here
-KRAKEN_API_KEY=your_kraken_api_key_here
-KRAKEN_API_SECRET=your_kraken_api_secret_here
-
-# Alternative Exchange (Coinbase)
-COINBASE_API_KEY=your_coinbase_api_key_here
-COINBASE_API_SECRET=your_coinbase_api_secret_here
-# COINBASE_PASSPHRASE=your_coinbase_passphrase_here
-
-# Telegram Configuration
-TELEGRAM_TOKEN=your_telegram_token_here
-TELEGRAM_CHAT_ID=your_chat_id_here
-TELE_CHAT_ADMINS=your_admin_chat_id_here
-
-# Solana Configuration
-HELIUS_KEY=your_helius_key_here
-WALLET_ADDRESS=your_wallet_address_here
-SOLANA_PRIVATE_KEY=your_solana_private_key_here
-
-# Supabase Configuration
-SUPABASE_URL=your_supabase_url_here
-SUPABASE_KEY=your_supabase_key_here
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
-
-# LunarCrush Sentiment Analysis (Optional)
-LUNARCRUSH_API_KEY=your_lunarcrush_api_key_here
-
-# Trading Mode
 MODE=cex
 EXECUTION_MODE=dry_run
 
@@ -105,7 +105,7 @@ CT_MODELS_BUCKET=models
 CT_REGIME_PREFIX=
 CT_SYMBOL=XRPUSD
 """
-    
+
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(template_content)
 
@@ -151,32 +151,27 @@ def validate_env_file(env_path: Path) -> bool:
     if not env_path.exists():
         print(f"❌ {env_path} does not exist")
         return False
-    
+
     try:
-        content = env_path.read_text()
-        lines = content.split('\n')
-        
-        required_keys = [
-            "API_KEY", "API_SECRET", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"
-        ]
-        
+        env_data = parse_env_file(env_path)
+
         missing_keys = []
-        for key in required_keys:
-            if not any(line.startswith(f"{key}=") for line in lines):
+        for key in REQUIRED_ENV_VARS:
+            value = env_data.get(key, "")
+            if not value or value.startswith("${MANAGED:"):
                 missing_keys.append(key)
-        
+
         if missing_keys:
             print(f"❌ {env_path} is missing required keys: {', '.join(missing_keys)}")
             return False
-        
-        # Check for template values
+
         if is_template_file(env_path):
-            print(f"❌ {env_path} contains template placeholder values")
+            print(f"❌ {env_path} still contains managed placeholders; inject real secrets before use")
             return False
-        
+
         print(f"✅ {env_path} is valid and contains real API keys")
         return True
-        
+
     except Exception as e:
         print(f"❌ Error reading {env_path}: {e}")
         return False

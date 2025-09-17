@@ -11,7 +11,7 @@ from enum import Enum
 import requests
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
-from pathlib import Path
+from services.configuration import ManagedSecretsClient, load_manifest
 
 
 logger = setup_logger(__name__, LOG_DIR / "sentiment.log")
@@ -20,7 +20,9 @@ logger = setup_logger(__name__, LOG_DIR / "sentiment.log")
 FNG_URL = "https://api.alternative.me/fng/?limit=1"
 # LunarCrush is the primary sentiment source - Twitter sentiment has been removed
 LUNARCRUSH_BASE_URL = "https://lunarcrush.com/api4/public"
-LUNARCRUSH_API_KEY = os.getenv("LUNARCRUSH_API_KEY", "hpn7960ebtf31fplz8j0eurxqmdn418mequk61bq")
+_MANAGED_MANIFEST = load_manifest()
+_MANAGED_SECRETS = ManagedSecretsClient(_MANAGED_MANIFEST)
+LUNARCRUSH_API_KEY = _MANAGED_SECRETS.get("LUNARCRUSH_API_KEY")
 
 
 class SentimentDirection(Enum):
@@ -59,15 +61,23 @@ class SentimentData:
 class LunarCrushClient:
     """Client for LunarCrush API sentiment analysis."""
     
-    def __init__(self, api_key: str = LUNARCRUSH_API_KEY):
-        self.api_key = api_key
+    def __init__(self, api_key: Optional[str] = None):
+        if api_key is None:
+            api_key = _MANAGED_SECRETS.get("LUNARCRUSH_API_KEY")
+
+        self.api_key = api_key or ""
         self.base_url = LUNARCRUSH_BASE_URL
         self._cache: Dict[str, SentimentData] = {}
         self._session = requests.Session()
-        self._session.headers.update({
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        })
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        else:
+            logger.warning(
+                "LUNARCRUSH_API_KEY is not configured; sentiment requests will "
+                "return cached data or defaults."
+            )
+        self._session.headers.update(headers)
     
     def _get_cache_key(self, symbol: str) -> str:
         """Get cache key for symbol."""
@@ -75,6 +85,12 @@ class LunarCrushClient:
     
     async def get_sentiment(self, symbol: str, force_refresh: bool = False) -> SentimentData:
         """Get sentiment data for a symbol."""
+        if not self.api_key:
+            logger.debug(
+                "Skipping LunarCrush sentiment fetch for %s because the API key is not configured.",
+                symbol,
+            )
+            return SentimentData()
         cache_key = self._get_cache_key(symbol)
         
         # Return cached data if fresh and not forcing refresh
@@ -94,6 +110,10 @@ class LunarCrushClient:
     
     async def _fetch_sentiment(self, symbol: str) -> SentimentData:
         """Fetch sentiment data from LunarCrush API."""
+        if not self.api_key:
+            raise RuntimeError(
+                "LUNARCRUSH_API_KEY must be configured to fetch sentiment data"
+            )
         # Clean symbol for API call
         clean_symbol = symbol.replace("/USD", "").replace("/USDT", "").replace("/BTC", "").lower()
         
@@ -146,6 +166,11 @@ class LunarCrushClient:
     
     async def get_trending_tokens(self, limit: int = 20) -> List[Dict]:
         """Get trending tokens based on social sentiment and volume."""
+        if not self.api_key:
+            logger.debug(
+                "Skipping LunarCrush trending tokens fetch because the API key is not configured."
+            )
+            return []
         try:
             url = f"{self.base_url}/trending"
             response = self._session.get(url, timeout=10)

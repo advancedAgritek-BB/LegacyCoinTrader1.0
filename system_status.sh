@@ -120,8 +120,8 @@ echo -e "${BLUE}📁 Configuration:${NC}"
 if [[ -f ".env" ]]; then
     echo -e "${GREEN}✅ .env file: PRESENT${NC}"
     # Check for API keys (basic check)
-    if grep -q "your_kraken_api_key_here\|your_telegram_token_here" .env 2>/dev/null; then
-        echo -e "${YELLOW}⚠️  .env file: CONTAINS PLACEHOLDER VALUES${NC}"
+    if grep -q "MANAGED:" .env 2>/dev/null; then
+        echo -e "${YELLOW}⚠️  .env file: CONTAINS MANAGED PLACEHOLDERS${NC}"
     else
         echo -e "${GREEN}✅ .env file: CONFIGURED${NC}"
     fi

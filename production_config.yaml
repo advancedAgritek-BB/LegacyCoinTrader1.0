@@ -9,13 +9,17 @@ production:
   log_level: INFO
 
 environment:
-  KRAKEN_API_KEY: "your_kraken_api_key_here"
-  KRAKEN_API_SECRET: "your_kraken_api_secret_here"
-  API_KEY: "your_kraken_api_key_here"  # Compatibility mapping
-  API_SECRET: "your_kraken_api_secret_here"  # Compatibility mapping
-  EXCHANGE: "kraken"
-  FLASK_ENV: "production"
-  PRODUCTION: "true"
+  managed: true
+  manifest: config/managed_secrets.yaml
+
+secret_management:
+  provider: environment
+  manifest: config/managed_secrets.yaml
+  rotation_policy:
+    enabled: true
+    rotate_every_days: 30
+    timestamp_env: SECRETS_ROTATED_AT
+    enforcement: Secrets older than 30 days must be rotated via Vault/SSM/Secrets Manager.
 
 performance:
   memory:
