@@ -5,10 +5,16 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Dict, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 import redis.asyncio as redis
+
+from crypto_bot.execution.cex_executor import get_exchange
+from crypto_bot.open_position_guard import OpenPositionGuard
+from crypto_bot.paper_wallet import PaperWallet
+from crypto_bot.risk.risk_manager import RiskManager
+from crypto_bot.startup_utils import create_service_container, load_config
 
 from services.monitoring.config import get_monitoring_settings
 from services.monitoring.logging import configure_logging
@@ -49,8 +55,65 @@ async def lifespan(app: FastAPI):
 
     state_store = RedisCycleStateStore(redis_client, key_prefix=settings.state_key_prefix)
     await state_store.ensure_defaults(settings.default_cycle_interval)
+
+    config = load_config()
+    services = create_service_container()
+
+    try:
+        exchange, ws_client = get_exchange(config)
+    except Exception:  # pragma: no cover - connectivity issues are surfaced via logs
+        logger.warning("Exchange initialisation failed", exc_info=True)
+        exchange = None
+        ws_client = None
+
+    try:
+        risk_manager: Optional[RiskManager] = RiskManager.from_config(config.get("risk", {}))
+    except Exception:  # pragma: no cover - risk manager is optional
+        logger.warning("Risk manager initialisation failed", exc_info=True)
+        risk_manager = None
+
+    position_guard = OpenPositionGuard(
+        config.get("max_open_trades")
+        or config.get("paper_wallet", {}).get("max_open_trades", 5)
+    )
+
+    paper_wallet: Optional[PaperWallet] = None
+    if str(config.get("execution_mode", "dry_run")).lower() == "dry_run":
+        wallet_cfg = config.get("paper_wallet", {})
+        initial_balance = wallet_cfg.get("initial_balance")
+        if initial_balance is None:
+            initial_balance = config.get("risk", {}).get("starting_balance", 0.0)
+        try:
+            paper_wallet = PaperWallet(
+                float(initial_balance or 0.0),
+                max_open_trades=int(wallet_cfg.get("max_open_trades", 5)),
+                allow_short=bool(wallet_cfg.get("allow_short", True)),
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.warning("Paper wallet initialisation failed", exc_info=True)
+            paper_wallet = None
+
+    trade_manager = None
+    portfolio_service = getattr(services, "portfolio", None)
+    if portfolio_service is not None:
+        try:
+            trade_manager = portfolio_service.get_trade_manager()
+        except Exception:  # pragma: no cover - defensive
+            logger.warning("Trade manager initialisation failed", exc_info=True)
+
+    interface = TradingEngineInterface(
+        services=services,
+        config=config,
+        exchange=exchange,
+        ws_client=ws_client,
+        risk_manager=risk_manager,
+        paper_wallet=paper_wallet,
+        position_guard=position_guard,
+        trade_manager=trade_manager,
+    )
+
     scheduler = CycleScheduler(
-        interface=TradingEngineInterface(),
+        interface=interface,
         state_store=state_store,
         default_interval=settings.default_cycle_interval,
     )
@@ -58,11 +121,14 @@ async def lifespan(app: FastAPI):
     app.state.redis = redis_client
     app.state.scheduler = scheduler
     app.state.settings = settings
+    app.state.trading_interface = interface
+    app.state.service_container = services
 
     try:
         yield
     finally:
         await scheduler.shutdown()
+        await interface.shutdown()
         await redis_client.close()
 
 
