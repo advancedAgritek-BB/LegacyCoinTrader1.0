@@ -11,6 +11,9 @@ from crypto_bot.services.interfaces import ServiceContainer
 logger = logging.getLogger(__name__)
 
 
+from services.interface_layer.cycle import TradingCycleInterface
+
+
 @dataclass
 class BotContext:
     """Shared state for bot phases with enhanced memory management."""
@@ -209,26 +212,9 @@ class PhaseRunner:
 
     def __init__(self, phases: Iterable[Callable[[BotContext], Awaitable[None]]]):
         self.phases = list(phases)
+        self._cycle_interface = TradingCycleInterface(self.phases)
 
     async def run(self, ctx: BotContext) -> Dict[str, float]:
-        timings: Dict[str, float] = {}
-        
-        for phase in self.phases:
-            start = time.perf_counter()
-            
-            # Monitor memory during phase execution
-            if ctx.memory_manager:
-                with ctx.memory_manager.memory_monitoring(f"phase_{phase.__name__}"):
-                    await phase(ctx)
-            else:
-                await phase(ctx)
-            
-            timings[phase.__name__] = time.perf_counter() - start
-            
-            # Perform memory maintenance after each phase
-            if ctx.memory_manager:
-                maintenance_results = ctx.perform_memory_maintenance()
-                if maintenance_results.get("memory_pressure"):
-                    logger.warning(f"Memory pressure detected during {phase.__name__}")
-        
-        return timings
+        self._cycle_interface.set_phases(self.phases)
+        result = await self._cycle_interface.run_cycle(ctx)
+        return result.timings

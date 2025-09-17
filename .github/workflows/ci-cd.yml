@@ -80,7 +80,8 @@ jobs:
       - name: Build Trading Engine
         uses: docker/build-push-action@v5
         with:
-          context: ./services/trading_engine
+          context: .
+          file: services/trading_engine/Dockerfile
           push: false
           tags: legacy-coin-trader/trading-engine:latest
           cache-from: type=gha

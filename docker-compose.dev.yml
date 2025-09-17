@@ -19,7 +19,8 @@ services:
       - TRADING_ENGINE_LOG_LEVEL=DEBUG
       - TRADING_ENGINE_CYCLE_INTERVAL=300  # Slower cycles for development
     volumes:
-      - ./services/trading_engine:/app
+      - ./services/trading_engine:/app/services/trading_engine
+      - ./services/interface_layer:/app/services/interface_layer
       - /app/__pycache__
 
   market-data:

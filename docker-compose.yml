@@ -38,7 +38,9 @@ services:
 
   # Trading Engine - Core orchestration service
   trading-engine:
-    build: ./services/trading_engine
+    build:
+      context: .
+      dockerfile: services/trading_engine/Dockerfile
     ports:
       - "8001:8001"
     depends_on:
@@ -52,7 +54,8 @@ services:
       - TRADING_ENGINE_API_GATEWAY_HOST=api-gateway
       - TRADING_ENGINE_API_GATEWAY_PORT=8000
     volumes:
-      - ./services/trading_engine:/app
+      - ./services/trading_engine:/app/services/trading_engine
+      - ./services/interface_layer:/app/services/interface_layer
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s

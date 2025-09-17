@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+"""FastAPI application exposing the trading engine endpoints."""
+
+import logging
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from typing import Dict
+
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+import redis.asyncio as redis
+
+from .config import Settings, get_settings
+from .interface import TradingEngineInterface
+from .redis_state import RedisCycleStateStore
+from .scheduler import CycleScheduler
+from .schemas import CycleStateResponse, RunCycleResponse, StartCycleRequest
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+def lifespan(app: FastAPI):
+    settings = get_settings()
+    logging.getLogger().setLevel(settings.log_level.upper())
+
+    redis_client = redis.from_url(
+        settings.redis_dsn(),
+        encoding="utf-8",
+        decode_responses=True,
+        health_check_interval=30,
+    )
+
+    try:
+        await redis_client.ping()
+    except Exception as exc:  # pragma: no cover - startup failure is fatal
+        logger.error("Unable to connect to Redis: %s", exc)
+        await redis_client.close()
+        raise
+
+    state_store = RedisCycleStateStore(redis_client, key_prefix=settings.state_key_prefix)
+    await state_store.ensure_defaults(settings.default_cycle_interval)
+    scheduler = CycleScheduler(
+        interface=TradingEngineInterface(),
+        state_store=state_store,
+        default_interval=settings.default_cycle_interval,
+    )
+
+    app.state.redis = redis_client
+    app.state.scheduler = scheduler
+    app.state.settings = settings
+
+    try:
+        yield
+    finally:
+        await scheduler.shutdown()
+        await redis_client.close()
+
+
+def get_scheduler(request: Request) -> CycleScheduler:
+    scheduler: CycleScheduler | None = getattr(request.app.state, "scheduler", None)
+    if scheduler is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Scheduler not ready")
+    return scheduler
+
+
+def get_settings_dependency(request: Request) -> Settings:
+    settings: Settings | None = getattr(request.app.state, "settings", None)
+    if settings is None:
+        settings = get_settings()
+    return settings
+
+
+app = FastAPI(title="Trading Engine", lifespan=lifespan)
+
+
+@app.get("/health")
+async def health() -> Dict[str, str]:
+    """Basic health endpoint."""
+
+    return {"status": "ok"}
+
+
+@app.get("/readiness")
+async def readiness(request: Request, settings: Settings = Depends(get_settings_dependency)) -> Dict[str, str]:
+    redis_client: redis.Redis = request.app.state.redis
+    try:
+        await redis_client.ping()
+    except Exception as exc:  # pragma: no cover - readiness should flag failure
+        logger.warning("Readiness check failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Redis unavailable")
+    scheduler: CycleScheduler | None = getattr(request.app.state, "scheduler", None)
+    if scheduler is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Scheduler unavailable")
+    return {"status": "ready", "interval": str(settings.default_cycle_interval)}
+
+
+@app.post("/cycles/start", response_model=CycleStateResponse, status_code=status.HTTP_202_ACCEPTED)
+async def start_cycle(
+    payload: StartCycleRequest,
+    scheduler: CycleScheduler = Depends(get_scheduler),
+) -> CycleStateResponse:
+    state = await scheduler.start(
+        interval_seconds=payload.interval_seconds,
+        immediate=payload.immediate,
+        metadata=payload.metadata,
+    )
+    return CycleStateResponse.from_state(state)
+
+
+@app.post("/cycles/stop", response_model=CycleStateResponse)
+async def stop_cycle(scheduler: CycleScheduler = Depends(get_scheduler)) -> CycleStateResponse:
+    state = await scheduler.stop()
+    return CycleStateResponse.from_state(state)
+
+
+@app.get("/cycles/status", response_model=CycleStateResponse)
+async def cycle_status(scheduler: CycleScheduler = Depends(get_scheduler)) -> CycleStateResponse:
+    state = await scheduler.get_state()
+    return CycleStateResponse.from_state(state)
+
+
+@app.post("/cycles/run", response_model=RunCycleResponse)
+async def run_cycle(
+    scheduler: CycleScheduler = Depends(get_scheduler),
+    payload: StartCycleRequest | None = None,
+) -> RunCycleResponse:
+    metadata = dict(payload.metadata if payload else {})
+    result = await scheduler.run_once(metadata=metadata)
+    started_at = result.started_at or datetime.now(timezone.utc)
+    completed_at = result.completed_at or datetime.now(timezone.utc)
+    merged_metadata = {**metadata, **result.metadata}
+    return RunCycleResponse(
+        status="completed",
+        timings=result.timings,
+        started_at=started_at,
+        completed_at=completed_at,
+        duration=result.duration,
+        metadata=merged_metadata,
+    )
+
+
+@app.get("/settings")
+async def service_settings(settings: Settings = Depends(get_settings_dependency)) -> Dict[str, str | int]:
+    return {
+        "app_name": settings.app_name,
+        "default_cycle_interval": settings.default_cycle_interval,
+        "redis": settings.redis_dsn(),
+    }
+
+
+__all__ = ["app"]
