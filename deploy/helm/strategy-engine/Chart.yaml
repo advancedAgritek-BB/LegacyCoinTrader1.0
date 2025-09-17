@@ -1,0 +1,6 @@
+apiVersion: v2
+name: strategy-engine
+description: Helm chart for the LegacyCoinTrader strategy engine service.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

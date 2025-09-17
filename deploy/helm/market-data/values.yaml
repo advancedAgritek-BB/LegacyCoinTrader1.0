@@ -1,0 +1,86 @@
+replicaCount: 2
+
+image:
+  repository: ghcr.io/example/legacycointrader-market-data
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+commonLabels: {}
+podLabels: {}
+
+podSecurityContext: {}
+securityContext: {}
+
+env: []
+envFrom: []
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8002
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 400m
+    memory: 512Mi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 15
+  periodSeconds: 20
+  timeoutSeconds: 5
+  failureThreshold: 3
+  successThreshold: 1
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 8
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+  successThreshold: 1
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 65
+  targetMemoryUtilizationPercentage: 80
+  behavior: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: market-data.legacycoin.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+extraInitContainers: []
+extraContainers: []
+extraVolumeMounts: []
+extraVolumes: []

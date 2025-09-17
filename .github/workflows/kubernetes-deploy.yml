@@ -1,0 +1,165 @@
+name: Build and Deploy Services to Kubernetes
+
+on:
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  lint-charts:
+    name: Helm chart linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+
+      - name: Lint Helm charts
+        run: |
+          set -euo pipefail
+          for chart in deploy/helm/*; do
+            if [ -d "$chart" ]; then
+              helm lint "$chart"
+            fi
+          done
+
+  build-images:
+    name: Build and publish service images
+    runs-on: ubuntu-latest
+    needs: lint-charts
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api-gateway
+            dockerfile: services/api_gateway/Dockerfile
+          - service: trading-engine
+            dockerfile: services/trading_engine/Dockerfile
+          - service: market-data
+            dockerfile: services/market_data/Dockerfile
+          - service: portfolio
+            dockerfile: services/portfolio/Dockerfile
+          - service: strategy-engine
+            dockerfile: services/strategy_engine/Dockerfile
+          - service: token-discovery
+            dockerfile: services/token_discovery/Dockerfile
+          - service: execution
+            dockerfile: services/execution/Dockerfile
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.service }} image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/legacycointrader-${{ matrix.service }}:${{ env.IMAGE_TAG }}
+            ${{ env.REGISTRY }}/legacycointrader-${{ matrix.service }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy Helm releases
+    runs-on: ubuntu-latest
+    needs: build-images
+    strategy:
+      matrix:
+        include:
+          - environment: staging
+            branch: refs/heads/develop
+            namespace: legacycoin-staging
+            kubeconfigSecret: KUBE_CONFIG_STAGING
+            imagePullSecret: ghcr-credentials
+          - environment: production
+            branch: refs/heads/main
+            namespace: legacycoin-production
+            kubeconfigSecret: KUBE_CONFIG_PRODUCTION
+            imagePullSecret: ghcr-credentials
+    if: github.ref == matrix.branch
+    environment:
+      name: ${{ matrix.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.29.0
+
+      - name: Configure kubeconfig
+        env:
+          KUBECONFIG_DATA: ${{ secrets[matrix.kubeconfigSecret] }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KUBECONFIG_DATA" ]; then
+            echo "Kubernetes configuration secret is not set" >&2
+            exit 1
+          fi
+          mkdir -p ~/.kube
+          if echo "$KUBECONFIG_DATA" | base64 -d >/tmp/kubeconfig 2>/dev/null; then
+            mv /tmp/kubeconfig ~/.kube/config
+          else
+            echo "$KUBECONFIG_DATA" > ~/.kube/config
+          fi
+          chmod 600 ~/.kube/config
+
+      - name: Deploy services with Helm
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          REGISTRY: ${{ env.REGISTRY }}
+          NAMESPACE: ${{ matrix.namespace }}
+          IMAGE_PULL_SECRET: ${{ matrix.imagePullSecret }}
+          ENVIRONMENT: ${{ matrix.environment }}
+        run: |
+          set -euo pipefail
+          declare -a SERVICES=(api-gateway trading-engine market-data portfolio strategy-engine token-discovery execution)
+          for SERVICE in "${SERVICES[@]}"; do
+            CHART_PATH="deploy/helm/${SERVICE}"
+            if [ ! -d "$CHART_PATH" ]; then
+              echo "Skipping $SERVICE because chart $CHART_PATH was not found" >&2
+              continue
+            fi
+            RELEASE="legacycoin-${SERVICE}-${ENVIRONMENT}"
+            IMAGE="${REGISTRY}/legacycointrader-${SERVICE}"
+            if [ -n "$IMAGE_PULL_SECRET" ]; then
+              HELM_PULL_SECRET_ARGS=(--set "imagePullSecrets[0].name=${IMAGE_PULL_SECRET}")
+            else
+              HELM_PULL_SECRET_ARGS=()
+            fi
+            helm upgrade --install "$RELEASE" "$CHART_PATH" \
+              --namespace "$NAMESPACE" \
+              --create-namespace \
+              --set "image.repository=${IMAGE}" \
+              --set "image.tag=${IMAGE_TAG}" \
+              --set "commonLabels.environment=${ENVIRONMENT}" \
+              "${HELM_PULL_SECRET_ARGS[@]}" \
+              --wait \
+              --timeout 5m
+          done
+
+      - name: Show rollout status
+        run: |
+          kubectl -n ${{ matrix.namespace }} get deploy,pods
