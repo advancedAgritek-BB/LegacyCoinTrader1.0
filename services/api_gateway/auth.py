@@ -93,10 +93,11 @@ class AuthManager:
                 if not service_name:
                     LOGGER.warning("Rejected request with invalid service token")
                     break
+                scopes = ["internal", f"service:{service_name}"]
                 return TokenPayload(
                     token_type="service",
                     subject=service_name,
-                    scopes=["internal"],
+                    scopes=scopes,
                     service_name=service_name,
                     raw_token=token,
                     client_host=request.client.host if request.client else None,

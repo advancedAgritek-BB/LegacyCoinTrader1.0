@@ -92,6 +92,7 @@ class ProxyGateway:
             headers["X-Authenticated-User"] = token.subject
             if token.scopes:
                 headers["X-User-Scopes"] = ",".join(token.scopes)
+                headers.setdefault("X-User-Roles", ",".join(token.scopes))
             if token.raw_token:
                 headers.setdefault("Authorization", f"Bearer {token.raw_token}")
         elif token.token_type == "service":

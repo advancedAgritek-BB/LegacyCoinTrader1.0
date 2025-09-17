@@ -130,3 +130,26 @@ class PortfolioStatisticModel(Base):
     total_fees: Mapped[Decimal] = mapped_column(DECIMAL_TYPE, default=Decimal("0"))
     total_realized_pnl: Mapped[Decimal] = mapped_column(DECIMAL_TYPE, default=Decimal("0"))
     last_updated: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class UserAccountModel(Base):
+    """Identity and credential metadata for interactive users."""
+
+    __tablename__ = "user_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    password_salt: Mapped[str] = mapped_column(String(128), nullable=False)
+    password_iterations: Mapped[int] = mapped_column(Integer, default=210000, nullable=False)
+    roles: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    password_rotated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    password_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    api_key_hash: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    api_key_salt: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    api_key_iterations: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    api_key_last_rotated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

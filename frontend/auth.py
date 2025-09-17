@@ -1,171 +1,215 @@
-"""
-Simple Authentication System for LegacyCoinTrader Frontend
-Provides basic authentication and authorization for the web interface.
-"""
+from __future__ import annotations
 
-import hashlib
-import hmac
+"""Authentication helpers for the LegacyCoinTrader frontend."""
+
+import logging
 import time
-from typing import Optional, Dict, Any
+from datetime import datetime, timezone
 from functools import wraps
-from flask import request, session, jsonify, redirect, url_for
+from typing import Any, Dict, Optional
+
+import httpx
+from flask import jsonify, redirect, request, session, url_for
+
+from frontend.gateway import build_gateway_url
+
+LOGGER = logging.getLogger(__name__)
 
 
-class SimpleAuth:
-    """Simple authentication system for development and basic security."""
+class IdentityAuth:
+    """Authenticate users against the API gateway identity service."""
 
-    def __init__(self, secret_key: str, users_file: str = None):
-        self.secret_key = secret_key
-        self.users_file = users_file or "./config/users.json"
-        self.users = self._load_users()
+    def __init__(self, session_timeout: int, http_timeout: float = 5.0) -> None:
+        self.session_timeout = session_timeout
+        self.http_timeout = http_timeout
+        self.token_url = build_gateway_url("/auth/token")
+        self.api_key_validation_url = build_gateway_url("/auth/api-key/validate")
 
-    def _load_users(self) -> Dict[str, Dict[str, Any]]:
-        """Load users from file or create default admin user."""
-        import os
-        import json
-
-        if os.path.exists(self.users_file):
-            try:
-                with open(self.users_file, 'r') as f:
-                    return json.load(f)
-            except Exception:
-                pass
-
-        # Create default admin user for development
-        default_password = "admin123!"  # CHANGE THIS IN PRODUCTION
-        default_user = {
-            "username": "admin",
-            "password_hash": self._hash_password(default_password),
-            "role": "admin",
-            "enabled": True,
-            "created_at": time.time()
-        }
-
-        users = {"admin": default_user}
-
-        # Save to file
-        os.makedirs(os.path.dirname(self.users_file), exist_ok=True)
-        with open(self.users_file, 'w') as f:
-            json.dump(users, f, indent=2)
-
-        print(f"WARNING: Default admin user created with password '{default_password}'")
-        print(f"Please change the password and update {self.users_file}")
-
-        return users
-
-    def _hash_password(self, password: str) -> str:
-        """Hash password with HMAC-SHA256."""
-        return hmac.new(
-            self.secret_key.encode(),
-            password.encode(),
-            hashlib.sha256
-        ).hexdigest()
-
+    # ------------------------------------------------------------------
+    # Core authentication
+    # ------------------------------------------------------------------
     def authenticate(self, username: str, password: str) -> Optional[Dict[str, Any]]:
-        """Authenticate user credentials."""
-        # Validate input parameters
+        """Return a session payload when the provided credentials are valid."""
+
         if not username or not password:
             return None
 
-        user = self.users.get(username)
-        if not user or not user.get('enabled', False):
-            return None
-
         try:
-            if self._hash_password(password) == user['password_hash']:
-                return {
-                    'username': username,
-                    'role': user['role'],
-                    'login_time': time.time()
-                }
-        except (AttributeError, TypeError):
-            # Handle cases where password is None or not a string
+            response = httpx.post(
+                self.token_url,
+                json={"username": username, "password": password},
+                timeout=self.http_timeout,
+            )
+        except httpx.RequestError as exc:  # pragma: no cover - network failures are runtime specific
+            LOGGER.error("Unable to reach identity service: %s", exc)
             return None
 
-        return None
+        if response.status_code != 200:
+            LOGGER.info(
+                "Login attempt failed for user '%s': %s",
+                username,
+                response.text,
+            )
+            return None
 
-    def login_required(self, f):
-        """Decorator to require authentication for routes."""
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            if 'user' not in session:
-                if request.is_json or request.path.startswith('/api/'):
-                    return jsonify({'error': 'Authentication required'}), 401
-                else:
-                    return redirect(url_for('login'))
+        data = response.json()
+        access_token = data.get("access_token")
+        expires_at = data.get("expires_at")
+        roles = data.get("roles") or []
+        if not isinstance(roles, list):
+            roles = [str(roles)]
 
-            # Check session timeout
-            login_time = session.get('login_time', 0)
-            if time.time() - login_time > 3600:  # 1 hour timeout
+        if not access_token:
+            LOGGER.error("Identity service response missing access token")
+            return None
+
+        user_payload = {
+            "username": data.get("username", username),
+            "roles": [str(role).lower() for role in roles],
+            "access_token": access_token,
+            "token_expires_at": expires_at,
+            "password_expires_at": data.get("password_expires_at"),
+            "login_time": time.time(),
+        }
+        return user_payload
+
+    # ------------------------------------------------------------------
+    # Decorators
+    # ------------------------------------------------------------------
+    def login_required(self, func):
+        """Decorator ensuring that a valid session exists."""
+
+        @wraps(func)
+        def decorated(*args, **kwargs):
+            if "user" not in session or not self._session_active():
                 session.clear()
-                if request.is_json or request.path.startswith('/api/'):
-                    return jsonify({'error': 'Session expired'}), 401
-                else:
-                    return redirect(url_for('login'))
+                if request.is_json or request.path.startswith("/api/"):
+                    return jsonify({"error": "Authentication required"}), 401
+                return redirect(url_for("login"))
+            return func(*args, **kwargs)
 
-            return f(*args, **kwargs)
-        return decorated_function
+        return decorated
 
-    def admin_required(self, f):
-        """Decorator to require admin role."""
-        @wraps(f)
+    def admin_required(self, func):
+        """Decorator ensuring the authenticated user has admin privileges."""
+
+        @wraps(func)
         @self.login_required
-        def decorated_function(*args, **kwargs):
-            user = session.get('user', {})
-            if user.get('role') != 'admin':
-                if request.is_json or request.path.startswith('/api/'):
-                    return jsonify({'error': 'Admin access required'}), 403
-                else:
-                    return "Admin access required", 403
-            return f(*args, **kwargs)
-        return decorated_function
+        def decorated(*args, **kwargs):
+            roles = session.get("user", {}).get("roles", [])
+            if "admin" not in roles:
+                if request.is_json or request.path.startswith("/api/"):
+                    return jsonify({"error": "Admin access required"}), 403
+                return "Admin access required", 403
+            return func(*args, **kwargs)
 
-    def api_key_required(self, f):
-        """Decorator to require API key for API routes."""
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
+        return decorated
+
+    def api_key_required(self, func):
+        """Decorator validating API keys against the identity service."""
+
+        @wraps(func)
+        def decorated(*args, **kwargs):
             from frontend.config import get_settings
 
             settings = get_settings()
-
             api_key = request.headers.get(settings.security.api_key_header)
             if not api_key:
-                return jsonify({'error': 'API key required'}), 401
+                return jsonify({"error": "API key required"}), 401
 
-            # In production, validate API key against database
-            # For now, accept any non-empty key for development
-            if not api_key.strip():
-                return jsonify({'error': 'Invalid API key'}), 401
+            try:
+                response = httpx.post(
+                    self.api_key_validation_url,
+                    json={"api_key": api_key},
+                    timeout=self.http_timeout,
+                )
+            except httpx.RequestError as exc:  # pragma: no cover - network specific failures
+                LOGGER.error("API key validation error: %s", exc)
+                return jsonify({"error": "Identity service unavailable"}), 503
 
-            return f(*args, **kwargs)
-        return decorated_function
+            if response.status_code not in (200, 201):
+                message = "Invalid API key"
+                try:
+                    payload = response.json()
+                    message = payload.get("detail") or payload.get("error") or message
+                except ValueError:
+                    pass
+                status_code = 403 if response.status_code == 403 else 401
+                return jsonify({"error": message}), status_code
+
+            data = response.json()
+            session["api_key_identity"] = {
+                "username": data.get("username"),
+                "roles": data.get("roles", []),
+                "validated_at": time.time(),
+            }
+            return func(*args, **kwargs)
+
+        return decorated
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def _session_active(self) -> bool:
+        login_time = session.get("login_time")
+        if not login_time:
+            return False
+
+        if time.time() - float(login_time) > self.session_timeout:
+            LOGGER.debug("Session expired due to inactivity")
+            return False
+
+        expiry_iso = session.get("token_expires_at")
+        if expiry_iso:
+            expires_at = self._parse_iso_datetime(expiry_iso)
+            if expires_at and datetime.now(timezone.utc) >= expires_at:
+                LOGGER.debug("Session expired due to token expiry")
+                return False
+        return True
+
+    @staticmethod
+    def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            text = str(value)
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
 
-# Global auth instance
-_auth_instance = None
+_auth_instance: Optional[IdentityAuth] = None
 
-def get_auth() -> SimpleAuth:
-    """Get the global authentication instance."""
+
+def get_auth() -> IdentityAuth:
+    """Return a lazily instantiated :class:`IdentityAuth`."""
+
     global _auth_instance
-    from frontend.config import get_settings
-
-    settings = get_settings()
-
     if _auth_instance is None:
-        _auth_instance = SimpleAuth(settings.security.session_secret_key)
+        from frontend.config import get_settings
 
+        settings = get_settings()
+        _auth_instance = IdentityAuth(
+            session_timeout=settings.security.session_timeout,
+            http_timeout=5.0,
+        )
     return _auth_instance
 
 
-# Convenience functions
-def login_required(f):
-    """Decorator to require login."""
-    return get_auth().login_required(f)
+# Convenience decorators -----------------------------------------------------
 
-def admin_required(f):
-    """Decorator to require admin role."""
-    return get_auth().admin_required(f)
+def login_required(func):
+    return get_auth().login_required(func)
 
-def api_key_required(f):
-    """Decorator to require API key."""
-    return get_auth().api_key_required(f)
+
+def admin_required(func):
+    return get_auth().admin_required(func)
+
+
+def api_key_required(func):
+    return get_auth().api_key_required(func)
