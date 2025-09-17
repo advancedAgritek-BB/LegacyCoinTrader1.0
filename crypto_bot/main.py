@@ -491,6 +491,7 @@ async def fetch_candidates(ctx: BotContext) -> None:
     # Get mode and exchange ID for routing logic
     ex_id = getattr(ctx.exchange, "id", "").lower()
     mode = ctx.config.get("mode", "cex")
+    strategy_service = ctx.services.strategy if ctx.services else None
     # Use the robust evaluation pipeline integration
     pipeline_integration = get_evaluation_pipeline_integration(ctx.config)
     # Determine batch size based on volatility and configuration
@@ -873,6 +874,7 @@ async def analyse_batch(ctx: BotContext) -> None:
     memory_cleanup_interval = comp_opts.get("memory_cleanup_interval", 50)
     enable_progress = comp_opts.get("enable_progress_tracking", False)
     mode = ctx.config.get("mode", "cex")
+    strategy_service = ctx.services.strategy if ctx.services else None
     all_results = []
     if enable_chunking and len(batch) > chunk_size:
         logger.info(
@@ -895,7 +897,16 @@ async def analyse_batch(ctx: BotContext) -> None:
                     df = cache.get(sym)
                     if df is not None:
                         df_map[tf] = df
-                chunk_tasks.append(analyze_symbol(sym, df_map, mode, ctx.config, ctx.notifier))
+                chunk_tasks.append(
+                    analyze_symbol(
+                        sym,
+                        df_map,
+                        mode,
+                        ctx.config,
+                        ctx.notifier,
+                        strategy_service,
+                    )
+                )
             logger.info(
                 f"PHASE: analyse_batch - running analysis on chunk with {len(chunk_tasks)} tasks"
             )
@@ -928,7 +939,16 @@ async def analyse_batch(ctx: BotContext) -> None:
                 df = cache.get(sym)
                 if df is not None:
                     df_map[tf] = df
-            tasks.append(analyze_symbol(sym, df_map, mode, ctx.config, ctx.notifier))
+            tasks.append(
+                analyze_symbol(
+                    sym,
+                    df_map,
+                    mode,
+                    ctx.config,
+                    ctx.notifier,
+                    strategy_service,
+                )
+            )
         logger.info("PHASE: analyse_batch - running analysis on %d tasks", len(tasks))
         all_results = await asyncio.gather(*tasks)
     ctx.analysis_results = all_results

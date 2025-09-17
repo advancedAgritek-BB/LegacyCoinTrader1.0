@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, MutableMapping, Optional, Protocol, Sequence
 
 
@@ -173,6 +173,60 @@ class StrategyNameResponse:
     name: str
 
 
+@dataclass(slots=True)
+class RankedSignal:
+    """Ranked strategy evaluation outcome."""
+
+    strategy: str
+    score: float
+    direction: str
+
+
+@dataclass(slots=True)
+class StrategyEvaluationResult:
+    """Strategy evaluation details for a single symbol."""
+
+    symbol: str
+    regime: str
+    strategy: str
+    score: float
+    direction: str
+    atr: Optional[float] = None
+    fused_score: Optional[float] = None
+    fused_direction: Optional[str] = None
+    ranked_signals: Sequence[RankedSignal] = field(default_factory=tuple)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    cached: bool = False
+
+
+@dataclass(slots=True)
+class StrategyEvaluationPayload:
+    """Input payload for evaluating a symbol's strategies."""
+
+    symbol: str
+    regime: str
+    mode: str
+    timeframes: Mapping[str, Any]
+    config: Optional[Mapping[str, Any]] = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class StrategyBatchRequest:
+    """Batch of strategy evaluation payloads."""
+
+    items: Sequence[StrategyEvaluationPayload]
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class StrategyBatchResponse:
+    """Response containing evaluated strategy results."""
+
+    results: Sequence[StrategyEvaluationResult]
+    errors: Sequence[str] = field(default_factory=tuple)
+
+
 class StrategyEvaluationService(Protocol):
     """Protocol for strategy evaluation helpers."""
 
@@ -180,6 +234,11 @@ class StrategyEvaluationService(Protocol):
         ...
 
     def resolve_strategy_name(self, request: StrategyNameRequest) -> StrategyNameResponse:
+        ...
+
+    async def evaluate_batch(
+        self, request: StrategyBatchRequest
+    ) -> StrategyBatchResponse:
         ...
 
 
