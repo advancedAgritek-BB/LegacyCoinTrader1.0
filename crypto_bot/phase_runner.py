@@ -48,6 +48,10 @@ class BotContext:
     memory_manager: Optional[object] = None
     managed_caches: Dict[str, object] = field(default_factory=dict)
 
+    # Solana discovery integration
+    solana_feed: Optional[object] = None
+    latest_solana_opportunities: List[Dict[str, Any]] = field(default_factory=list)
+
     def __post_init__(self):
         """Initialize production position sync manager and memory manager if available."""
         # Initialize position sync manager

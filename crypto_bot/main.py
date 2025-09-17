@@ -93,6 +93,10 @@ from crypto_bot.fund_manager import (
 )
 from crypto_bot.regime.regime_classifier import classify_regime_async
 from crypto_bot.volatility_filter import calc_atr
+from crypto_bot.solana.discovery_feed import (
+    FeedSettings as SolanaFeedSettings,
+    SolanaDiscoveryFeed,
+)
 from crypto_bot.solana.exit import monitor_price
 from crypto_bot.utils.memory_manager import get_memory_manager
 from crypto_bot.runtime_signals import (
@@ -121,7 +125,6 @@ from crypto_bot.services.interfaces import (
     RegimeCacheRequest,
     ServiceContainer,
     TimeframeRequest,
-    TokenDiscoveryRequest,
     TradeExecutionRequest,
 )
 # Backwards compatibility for tests - function defined later
@@ -564,25 +567,6 @@ async def fetch_candidates(ctx: BotContext) -> None:
             tokens = ["BTC/USD", "ETH/USD", "SOL/USD", "ADA/USD", "DOT/USD"]
             logger.info(f"🚨 Using ultimate fallback tokens: {len(tokens)}")
     ctx.timing["symbol_time"] = time.perf_counter() - t0
-    # Handle Solana candidates separately if needed
-    solana_tokens: list[str] = []
-    sol_cfg = ctx.config.get("solana_scanner", {})
-    if sol_cfg.get("enabled"):
-        try:
-            # Get additional Solana tokens for separate processing
-            solana_tokens = await get_solana_new_tokens(sol_cfg)
-            # Keep aside for potential onchain executor, avoid CEX fetches
-            if solana_tokens and mode in ("onchain", "auto"):
-                setattr(ctx, "solana_candidates", list(solana_tokens))
-                logger.info(
-                f"Captured {len(solana_tokens)} Solana tokens (kept separate from CEX batch)"
-            )
-            elif solana_tokens:
-                logger.info(
-                f"Found {len(solana_tokens)} Solana tokens but mode='{mode}' - processing through CEX pipeline"
-            )
-        except Exception as exc:
-            logger.error("Solana scanner failed: %s", exc)
     # Set up symbol priority queue with the tokens from pipeline
     global symbol_priority_queue
     async with QUEUE_LOCK:
@@ -599,18 +583,6 @@ async def fetch_candidates(ctx: BotContext) -> None:
             # Convert tokens to (symbol, score) format for priority queue
             symbols_with_scores = [(token, 1.0) for token in tokens]
             symbol_priority_queue = build_priority_queue(symbols_with_scores)
-        # NEVER add Solana tokens to CEX priority queue
-        # Solana tokens must be processed through their own pipeline (scanning → evaluation → execution)
-        # They should never mix with CEX processing
-        if solana_tokens and not hasattr(ctx, 'solana_candidates'):
-            logger.warning(
-                f"Found {len(solana_tokens)} Solana tokens that were not set aside for separate processing. "
-                f"This indicates a configuration issue - Solana tokens should never be processed through CEX pipeline."
-            )
-            # Set them aside to ensure they don't get processed through CEX
-            if not hasattr(ctx, 'solana_candidates'):
-                setattr(ctx, "solana_candidates", list(solana_tokens))
-                logger.info(f"Corrected: Set {len(solana_tokens)} Solana tokens aside for separate processing")
         # Ensure we have enough tokens in queue
         if len(symbol_priority_queue) < batch_size:
             # Add more from pipeline if needed
@@ -640,28 +612,49 @@ async def fetch_candidates(ctx: BotContext) -> None:
 async def process_solana_candidates(ctx: BotContext) -> None:
     """Process Solana candidates that are kept separate from CEX batch."""
     logger.info("PHASE: process_solana_candidates starting")
-    # Check if we have Solana candidates to process
-    if not hasattr(ctx, 'solana_candidates') or not ctx.solana_candidates:
-        logger.info("PHASE: process_solana_candidates - no Solana candidates to process")
+    feed = getattr(ctx, "solana_feed", None)
+    if feed is None:
+        logger.info("PHASE: process_solana_candidates - discovery feed not configured")
         return
-    solana_candidates = ctx.solana_candidates
+
+    candidates = await feed.fetch_tokens()
+    if not candidates:
+        logger.info("PHASE: process_solana_candidates - no Solana candidates to process")
+        ctx.solana_candidates = []
+        return
+
+    ctx.solana_candidates = list(candidates)
     logger.info(
-                f"PHASE: process_solana_candidates - processing {len(solana_candidates)} Solana candidates"
-            )
-    # Process each Solana candidate
-    for token_mint in solana_candidates:
+        "PHASE: process_solana_candidates - processing %d Solana candidates",
+        len(candidates),
+    )
+
+    try:
+        scored = await feed.score_tokens(candidates)
+    except Exception as exc:  # pragma: no cover - feed failures
+        logger.debug("Failed to score Solana candidates: %s", exc)
+        scored = []
+
+    score_map = {item.get("token"): item for item in scored}
+    ctx.latest_solana_opportunities = scored
+
+    for token_mint in candidates:
         try:
-            logger.info(f"Processing Solana candidate: {token_mint}")
-            # Here you would add the logic to:
-            # 1. Analyze the Solana token using Solana-specific data sources
-            # 2. Evaluate trading opportunities
-            # 3. Execute trades using Solana DEX execution
-            # For now, just log that we're processing it
-            logger.info(f"Solana candidate {token_mint} processed (placeholder)")
+            score_info = score_map.get(token_mint, {})
+            score_val = score_info.get("score")
+            if score_val is not None:
+                logger.info(
+                    "Processing Solana candidate %s (score=%.2f)",
+                    token_mint,
+                    float(score_val),
+                )
+            else:
+                logger.info("Processing Solana candidate: %s", token_mint)
+            # Placeholder for Solana-specific execution pipeline
+            logger.debug("Solana candidate %s processed (placeholder)", token_mint)
         except Exception as exc:
-            logger.error(f"Error processing Solana candidate {token_mint}: {exc}")
-    # Clear the candidates after processing
-    ctx.solana_candidates = []
+            logger.error("Error processing Solana candidate %s: %s", token_mint, exc)
+
     logger.info("PHASE: process_solana_candidates completed")
 async def scan_arbitrage(exchange: object, config: dict) -> list[str]:
     """Return symbols with profitable Solana arbitrage opportunities."""
@@ -1682,55 +1675,6 @@ async def _main_impl(
     metrics_path = (
         Path(config.get("metrics_csv")) if config.get("metrics_csv") else None
     )
-    async def solana_scan_loop() -> None:
-        """Periodically fetch new Solana tokens and queue them using enhanced scanner."""
-        cfg = config.get("solana_scanner", {})
-        enhanced_cfg = config.get("enhanced_scanning", {})
-        interval = cfg.get("interval_minutes", 5) * 60
-        # Use enhanced scanner if configured
-        if enhanced_cfg.get("enabled", False):
-            logger.info("Using enhanced Solana scanner")
-            from crypto_bot.solana.enhanced_scanner import get_enhanced_scanner
-            scanner = get_enhanced_scanner(config)
-            # Start the enhanced scanner
-            await scanner.start()
-            while True:
-                try:
-                    # Get top opportunities from enhanced scanner
-                    opportunities = scanner.get_top_opportunities(limit=20)
-                    if opportunities:
-                        async with QUEUE_LOCK:
-                            for opp in reversed(opportunities):
-                                symbol = opp.get("symbol", "")
-                                if symbol:
-                                    symbol_priority_queue.appendleft(symbol)
-                                    logger.info(
-                f"Queued enhanced opportunity: {symbol} (score: {opp.get('score', 0):.2f})"
-            )
-                except asyncio.CancelledError:
-                    await scanner.stop()
-                    break
-                except Exception as exc:  # pragma: no cover - best effort
-                    logger.error("Enhanced Solana scan error: %s", exc)
-                await asyncio.sleep(interval)
-        else:
-            # Fallback to basic scanner
-            logger.info("Using basic Solana scanner")
-            while True:
-                try:
-                    response = await services.token_discovery.discover_tokens(
-                        TokenDiscoveryRequest(config=cfg)
-                    )
-                    tokens = response.tokens
-                    if tokens:
-                        async with QUEUE_LOCK:
-                            for sym in reversed(tokens):
-                                symbol_priority_queue.appendleft(sym)
-                except asyncio.CancelledError:
-                    break
-                except Exception as exc:  # pragma: no cover - best effort
-                    logger.error("Solana scan error: %s", exc)
-                await asyncio.sleep(interval)
     # Load environment variables early to ensure API credentials are available
     # for WebSocket clients created during market loader configuration
     # Initialize production memory manager
@@ -2105,9 +2049,28 @@ async def _main_impl(
             check_balance_change,
         )
     )
-    solana_scan_task: Union[asyncio.Task, None] = None
-    if config.get("solana_scanner", {}).get("enabled"):
-        solana_scan_task = asyncio.create_task(solana_scan_loop())
+
+    feed_cfg = config.get("token_discovery_feed", {})
+    feed_enabled = bool(feed_cfg.get("enabled", True))
+    solana_feed: Optional[SolanaDiscoveryFeed] = None
+    if feed_enabled:
+        try:
+            feed_settings = SolanaFeedSettings.from_dict(feed_cfg)
+        except Exception as exc:
+            logger.warning("Invalid token discovery feed configuration: %s", exc)
+            feed_settings = SolanaFeedSettings.from_dict({})
+        solana_feed = SolanaDiscoveryFeed(feed_settings)
+        try:
+            await solana_feed.start()
+            logger.info(
+                "Solana discovery feed connected (Redis: %s)",
+                feed_settings.redis_dsn(),
+            )
+        except Exception as exc:
+            logger.error("Failed to start Solana discovery feed: %s", exc)
+            solana_feed = None
+    else:
+        logger.info("Token discovery feed disabled via configuration")
     print("Bot running. Type 'stop' to pause, 'start' to resume, 'quit' to exit.")
     # Temporarily disable Telegram bot completely to fix conflicts
     # from crypto_bot.telegram_bot_ui import TelegramBotUI
@@ -2186,6 +2149,7 @@ async def _main_impl(
         rng=rng,
         numpy_rng=numpy_rng,
     )
+    ctx.solana_feed = solana_feed
     ctx.exchange = exchange
     ctx.ws_client = ws_client
     ctx.risk_manager = risk_manager
@@ -2781,12 +2745,11 @@ async def _main_impl(
             else:
                 with contextlib.suppress(Exception):
                     await asyncio.to_thread(exchange.close)
-        if solana_scan_task:
-            solana_scan_task.cancel()
+        if solana_feed:
             try:
-                await solana_scan_task
-            except asyncio.CancelledError:
-                pass
+                await solana_feed.close()
+            except Exception as exc:
+                logger.debug("Error while closing Solana discovery feed: %s", exc)
         if session_state.scan_task:
             session_state.scan_task.cancel()
             try:
