@@ -18,7 +18,6 @@ if "pydantic_settings" not in sys.modules:  # pragma: no cover - test scaffold
     module.SettingsConfigDict = dict
     sys.modules["pydantic_settings"] = module
 
-from crypto_bot.open_position_guard import OpenPositionGuard
 from crypto_bot.services.interfaces import (
     CacheUpdateResponse,
     ServiceContainer,
@@ -106,15 +105,16 @@ class FakeMonitoringService:
         return None
 
 
-class FakeRiskManager:
+class FakeRiskClient:
     def __init__(self) -> None:
         self.checked: list[str | None] = []
+        self.allocated: list[tuple[str, float]] = []
 
-    def allow_trade(self, df: pd.DataFrame, strategy: str | None = None):
+    async def allow_trade(self, df: pd.DataFrame, strategy: str | None = None):
         self.checked.append(strategy)
         return True, ""
 
-    def position_size(
+    async def position_size(
         self,
         confidence: float,
         balance: float,
@@ -124,11 +124,16 @@ class FakeRiskManager:
     ) -> float:
         return balance * 0.2
 
-    def can_allocate(self, strategy: str, amount: float, balance: float) -> bool:
+    async def can_allocate(self, strategy: str, amount: float, balance: float) -> bool:
         return True
 
-    def allocate_capital(self, strategy: str, amount: float) -> None:  # pragma: no cover - simple stub
-        return None
+    async def allocate_capital(self, strategy: str, amount: float) -> None:  # pragma: no cover - simple stub
+        self.allocated.append((strategy, amount))
+
+
+class FakePositionGuard:
+    async def can_open(self, positions: dict[str, Any]) -> bool:
+        return True
 
 
 @pytest.mark.asyncio
@@ -149,15 +154,14 @@ async def test_trading_engine_run_cycle_executes_real_phases() -> None:
         "risk": {"starting_balance": 1000.0},
     }
 
-    risk_manager = FakeRiskManager()
+    risk_client = FakeRiskClient()
 
     interface = TradingEngineInterface(
         services=services,
         config=config,
-        exchange=object(),
-        risk_manager=risk_manager,
+        risk_client=risk_client,
         paper_wallet=None,
-        position_guard=OpenPositionGuard(5),
+        position_guard=FakePositionGuard(),
         trade_manager=None,
     )
 

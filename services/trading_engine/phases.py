@@ -239,6 +239,7 @@ async def execute_signals(context) -> None:
         return
 
     risk_manager = getattr(context, "risk_manager", None)
+    position_guard = getattr(context, "position_guard", None)
     balance = float(getattr(context, "balance", 0.0))
     execution_mode = str((getattr(context, "config", {}) or {}).get("execution_mode", "dry_run"))
     dry_run = execution_mode.lower() != "live"
@@ -254,11 +255,23 @@ async def execute_signals(context) -> None:
             continue
         price = float(df["close"].iloc[-1])
 
+        if position_guard is not None:
+            try:
+                can_open = await position_guard.can_open(getattr(context, "positions", {}))
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("Position guard check failed for %s", result.symbol, exc_info=True)
+                can_open = True
+            if not can_open:
+                context.metadata.setdefault("skipped_trades", []).append(
+                    {"symbol": result.symbol, "reason": "position_guard"}
+                )
+                continue
+
         allowed = True
         reason = ""
         if risk_manager is not None:
             try:
-                allowed, reason = risk_manager.allow_trade(df, result.strategy)
+                allowed, reason = await risk_manager.allow_trade(df, result.strategy)
             except Exception:  # pragma: no cover - best effort
                 logger.debug("Risk allow_trade failed for %s", result.symbol, exc_info=True)
                 allowed = True
@@ -270,7 +283,7 @@ async def execute_signals(context) -> None:
         if risk_manager is not None:
             try:
                 size = float(
-                    risk_manager.position_size(
+                    await risk_manager.position_size(
                         float(result.score or 0.0),
                         float(balance),
                         df=df,
@@ -287,11 +300,13 @@ async def execute_signals(context) -> None:
         if size <= 0:
             continue
 
-        if hasattr(risk_manager, "can_allocate") and hasattr(risk_manager, "allocate_capital"):
+        if risk_manager is not None and hasattr(risk_manager, "can_allocate") and hasattr(
+            risk_manager, "allocate_capital"
+        ):
             try:
-                if not risk_manager.can_allocate(result.strategy or "", size, balance):
+                if not await risk_manager.can_allocate(result.strategy or "", size, balance):
                     continue
-                risk_manager.allocate_capital(result.strategy or "", size)
+                await risk_manager.allocate_capital(result.strategy or "", size)
             except Exception:  # pragma: no cover - advisory
                 logger.debug("Capital allocation failed for %s", result.symbol, exc_info=True)
 
@@ -331,9 +346,9 @@ async def execute_signals(context) -> None:
         if paper_wallet is not None:
             try:
                 if direction == "long":
-                    paper_wallet.buy(result.symbol, amount, price)
+                    await paper_wallet.buy(result.symbol, amount, price)
                 else:
-                    paper_wallet.sell(result.symbol, amount, price)
+                    await paper_wallet.sell(result.symbol, amount, price)
             except Exception:  # pragma: no cover - optional path
                 logger.debug("Paper wallet trade failed for %s", result.symbol, exc_info=True)
 
