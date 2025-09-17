@@ -12,6 +12,9 @@ import yaml
 LOGGER = logging.getLogger(__name__)
 
 
+_DEFAULT_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+
 @dataclass(slots=True)
 class ServiceRouteConfig:
     """Configuration describing how to proxy requests for a downstream service."""
@@ -20,16 +23,7 @@ class ServiceRouteConfig:
     prefix: str
     url: str
     rate_limit_per_minute: int
-    methods: Iterable[str] = field(
-        default_factory=lambda: [
-            "GET",
-            "POST",
-            "PUT",
-            "PATCH",
-            "DELETE",
-            "OPTIONS",
-        ]
-    )
+    methods: Iterable[str] = field(default_factory=lambda: list(_DEFAULT_METHODS))
     allowed_auth_modes: List[str] = field(
         default_factory=lambda: ["jwt", "service"]
     )
@@ -79,6 +73,22 @@ class GatewaySettings:
     identity_issuer: Optional[str]
     identity_audience: Optional[str]
     identity_jwks_cache_seconds: int
+    tenant_service_url: Optional[str]
+    tenant_service_token: Optional[str]
+    tenant_service_token_header: str
+    tenant_service_timeout: float
+    tenant_metadata_cache_seconds: int
+    tenant_default_plan: str
+    tenant_default_rate_limit_per_minute: int
+    tenant_default_burst_limit: int
+    tenant_default_burst_window_seconds: int
+    kafka_bootstrap_servers: Optional[str]
+    kafka_usage_topic: str
+    audit_service_url: Optional[str]
+    audit_service_token: Optional[str]
+    audit_service_token_header: str
+    audit_event_source: str
+    audit_service_timeout: float
 
     @property
     def cors_origins(self) -> List[str]:
@@ -97,6 +107,16 @@ _SERVICE_PREFIX_OVERRIDES: Dict[str, str] = {
     "token_discovery": "/api/v1/token-discovery",
     "execution": "/api/v1/execution",
     "monitoring": "/api/v1/monitoring",
+    "identity": "/api/v1/identity",
+    "tenant_management": "/api/v1/tenants",
+    "audit": "/api/v1/audit",
+}
+
+_SERVICE_AUTH_MODE_OVERRIDES: Dict[str, List[str]] = {
+    "identity": ["anonymous", "jwt", "service"],
+    "tenant_management": ["jwt", "service"],
+    "audit": ["service", "jwt"],
+    "monitoring": ["service", "jwt"],
 }
 
 _SERVICE_ROLE_REQUIREMENTS: Dict[str, List[str]] = {
@@ -107,6 +127,9 @@ _SERVICE_ROLE_REQUIREMENTS: Dict[str, List[str]] = {
     "token_discovery": ["token"],
     "execution": ["execution"],
     "monitoring": ["monitoring"],
+    "identity": ["identity", "admin"],
+    "tenant_management": ["tenant-admin", "admin"],
+    "audit": ["compliance", "admin"],
 }
 
 
@@ -174,27 +197,79 @@ def _build_route_config(
     service_tokens: Dict[str, str],
     default_limit: int,
 ) -> ServiceRouteConfig:
-    prefix = _SERVICE_PREFIX_OVERRIDES.get(
-        service_name, f"/api/v1/{service_name.replace('_', '-')}"
+    gateway_cfg = (
+        service_definition.get("gateway")
+        if isinstance(service_definition.get("gateway"), dict)
+        else {}
+    )
+
+    prefix = str(
+        gateway_cfg.get("prefix")
+        or service_definition.get("prefix")
+        or _SERVICE_PREFIX_OVERRIDES.get(
+            service_name, f"/api/v1/{service_name.replace('_', '-')}"
+        )
     )
     port = int(service_definition.get("port", 0) or 0)
     url = _build_service_url(service_name, port)
+    configured_limit = gateway_cfg.get("rate_limit_per_minute")
+    limit_default = default_limit
+    if configured_limit is not None:
+        try:
+            limit_default = int(configured_limit)
+        except (TypeError, ValueError):
+            LOGGER.debug(
+                "Invalid rate limit override for service %s: %s",
+                service_name,
+                configured_limit,
+            )
     limit_env = os.getenv(
         f"GATEWAY_RATE_LIMIT_{service_name.upper()}",
-        os.getenv("GATEWAY_RATE_LIMIT_PER_MINUTE", str(default_limit)),
+        os.getenv("GATEWAY_RATE_LIMIT_PER_MINUTE", str(limit_default)),
     )
-    auth_modes = ["jwt", "service"]
-    if service_name == "monitoring":
-        auth_modes = ["service", "jwt"]
+
+    methods_cfg = gateway_cfg.get("methods")
+    if isinstance(methods_cfg, str):
+        methods_list = [methods_cfg.upper()]
+    elif isinstance(methods_cfg, (list, tuple, set)):
+        methods_list = [str(method).upper() for method in methods_cfg if str(method)]
+    else:
+        methods_list = list(_DEFAULT_METHODS)
+
+    modes_cfg = gateway_cfg.get("auth_modes")
+    if isinstance(modes_cfg, str):
+        configured_modes = [modes_cfg]
+    elif isinstance(modes_cfg, (list, tuple, set)):
+        configured_modes = [str(mode) for mode in modes_cfg]
+    else:
+        configured_modes = None
+    auth_modes = [
+        str(mode).lower()
+        for mode in (
+            configured_modes
+            if configured_modes
+            else _SERVICE_AUTH_MODE_OVERRIDES.get(service_name, ["jwt", "service"])
+        )
+        if str(mode)
+    ]
+
+    roles_cfg = gateway_cfg.get("required_roles")
+    if isinstance(roles_cfg, str):
+        required_roles = [roles_cfg]
+    elif isinstance(roles_cfg, (list, tuple, set)):
+        required_roles = [str(role) for role in roles_cfg if str(role)]
+    else:
+        required_roles = _SERVICE_ROLE_REQUIREMENTS.get(service_name, ["admin"])
 
     return ServiceRouteConfig(
         name=service_name,
         prefix=prefix,
         url=url,
         rate_limit_per_minute=int(limit_env),
+        methods=methods_list,
         allowed_auth_modes=auth_modes,
         service_token=service_tokens.get(service_name),
-        required_roles=_SERVICE_ROLE_REQUIREMENTS.get(service_name, ["admin"]),
+        required_roles=required_roles,
     )
 
 
@@ -238,6 +313,37 @@ def load_gateway_settings() -> GatewaySettings:
     identity_request_timeout = float(os.getenv("IDENTITY_REQUEST_TIMEOUT", "10"))
     identity_jwks_cache_seconds = int(os.getenv("IDENTITY_JWKS_CACHE_SECONDS", "300"))
 
+    tenant_service_url = os.getenv("TENANT_SERVICE_URL", "http://tenant-management:8010")
+    tenant_service_url = tenant_service_url.rstrip("/") if tenant_service_url else None
+    tenant_service_token = (
+        os.getenv("TENANT_SERVICE_TOKEN") or resolved_tokens.get("tenant_management")
+    )
+    tenant_service_token_header = os.getenv("TENANT_SERVICE_TOKEN_HEADER", "x-service-token")
+    tenant_service_timeout = float(os.getenv("TENANT_SERVICE_TIMEOUT", "5"))
+    tenant_metadata_cache_seconds = int(os.getenv("TENANT_METADATA_CACHE_SECONDS", "120"))
+    tenant_default_plan = os.getenv("TENANT_DEFAULT_PLAN", "standard")
+    tenant_default_rate_limit_per_minute = int(
+        os.getenv("TENANT_DEFAULT_RATE_LIMIT", str(default_rate_limit))
+    )
+    tenant_default_burst_limit = int(
+        os.getenv(
+            "TENANT_DEFAULT_BURST_LIMIT",
+            str(max(tenant_default_rate_limit_per_minute * 2, default_rate_limit)),
+        )
+    )
+    tenant_default_burst_window_seconds = int(
+        os.getenv("TENANT_DEFAULT_BURST_WINDOW", "10")
+    )
+    kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS") or None
+    kafka_usage_topic = os.getenv("TENANT_USAGE_TOPIC", "tenant.usage")
+
+    audit_service_url = os.getenv("AUDIT_SERVICE_URL", "http://audit:8012")
+    audit_service_url = audit_service_url.rstrip("/") if audit_service_url else None
+    audit_service_token = os.getenv("AUDIT_SERVICE_TOKEN") or resolved_tokens.get("audit")
+    audit_service_token_header = os.getenv("AUDIT_SERVICE_TOKEN_HEADER", "x-service-token")
+    audit_event_source = os.getenv("AUDIT_EVENT_SOURCE", "api-gateway")
+    audit_service_timeout = float(os.getenv("AUDIT_SERVICE_TIMEOUT", "5"))
+
     return GatewaySettings(
         host=os.getenv("GATEWAY_HOST", "0.0.0.0"),
         port=int(os.getenv("GATEWAY_PORT", "8000")),
@@ -267,5 +373,21 @@ def load_gateway_settings() -> GatewaySettings:
         identity_issuer=identity_issuer,
         identity_audience=identity_audience,
         identity_jwks_cache_seconds=identity_jwks_cache_seconds,
+        tenant_service_url=tenant_service_url,
+        tenant_service_token=tenant_service_token,
+        tenant_service_token_header=tenant_service_token_header,
+        tenant_service_timeout=tenant_service_timeout,
+        tenant_metadata_cache_seconds=tenant_metadata_cache_seconds,
+        tenant_default_plan=tenant_default_plan,
+        tenant_default_rate_limit_per_minute=tenant_default_rate_limit_per_minute,
+        tenant_default_burst_limit=tenant_default_burst_limit,
+        tenant_default_burst_window_seconds=tenant_default_burst_window_seconds,
+        kafka_bootstrap_servers=kafka_bootstrap_servers,
+        kafka_usage_topic=kafka_usage_topic,
+        audit_service_url=audit_service_url,
+        audit_service_token=audit_service_token,
+        audit_service_token_header=audit_service_token_header,
+        audit_event_source=audit_event_source,
+        audit_service_timeout=audit_service_timeout,
     )
 

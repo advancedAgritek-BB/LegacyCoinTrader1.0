@@ -68,6 +68,64 @@ services:
       - SCIM user provisioning
       - Multi-tenant secret management
     dependencies: []
+    authentication:
+      service_token: IDENTITY_SERVICE_TOKEN
+    gateway:
+      prefix: /api/v1/identity
+      auth_modes:
+        - anonymous
+        - jwt
+        - service
+      required_roles:
+        - identity
+        - admin
+      rate_limit_per_minute: 240
+
+  # Tenant Management Service - Tenant lifecycle and plan management
+  tenant_management:
+    port: 8010
+    responsibilities:
+      - Tenant onboarding and lifecycle automation
+      - Plan and entitlement management
+      - Rate limit policy distribution
+      - Tenant metadata API for gateways
+    dependencies:
+      - identity
+      - audit
+    authentication:
+      service_token: TENANT_MANAGEMENT_SERVICE_TOKEN
+    gateway:
+      prefix: /api/v1/tenants
+      auth_modes:
+        - jwt
+        - service
+      required_roles:
+        - tenant-admin
+        - admin
+      rate_limit_per_minute: 180
+
+  # Audit Service - Compliance events and forensic pipeline
+  audit:
+    port: 8012
+    responsibilities:
+      - Structured audit log ingestion
+      - Compliance evidence retention
+      - Security analytics exports
+      - Downstream webhook dispatch
+    dependencies:
+      - kafka_cluster
+      - redis_cache
+    authentication:
+      service_token: AUDIT_SERVICE_TOKEN
+    gateway:
+      prefix: /api/v1/audit
+      auth_modes:
+        - service
+        - jwt
+      required_roles:
+        - compliance
+        - admin
+      rate_limit_per_minute: 120
 
   # Strategy Engine - Strategy evaluation and routing
   strategy_engine:
@@ -137,6 +195,14 @@ services:
       - Session storage
       - Pub/Sub messaging
       - Rate limiting data
+
+  kafka_cluster:
+    port: 9092
+    type: infrastructure
+    responsibilities:
+      - Streaming audit and compliance events
+      - Tenant usage counters via Kafka topics
+      - Asynchronous messaging backbone
 
 # Inter-Service Communication
 communication:

@@ -92,11 +92,24 @@ class ProxyGateway:
             headers["X-Authenticated-User"] = token.subject
             if token.scopes:
                 headers["X-User-Scopes"] = ",".join(token.scopes)
+            if token.roles:
+                headers["X-User-Roles"] = ",".join(token.roles)
+            elif token.scopes:
                 headers.setdefault("X-User-Roles", ",".join(token.scopes))
             if token.raw_token:
                 headers.setdefault("Authorization", f"Bearer {token.raw_token}")
         elif token.token_type == "service":
             headers["X-Service-Caller"] = token.service_name or token.subject
+
+        tenant_id = getattr(request.state, "tenant_id", None) or token.tenant_id
+        if tenant_id:
+            headers["X-Tenant-ID"] = tenant_id
+        tenant_plan = getattr(request.state, "tenant_plan", None)
+        if tenant_plan and getattr(tenant_plan, "plan", None):
+            headers["X-Tenant-Plan"] = tenant_plan.plan
+        tenant_roles = getattr(request.state, "tenant_roles", None)
+        if tenant_roles:
+            headers["X-Tenant-Roles"] = ",".join(sorted(set(str(role) for role in tenant_roles)))
 
         if route.service_token:
             headers["X-Service-Token"] = route.service_token
