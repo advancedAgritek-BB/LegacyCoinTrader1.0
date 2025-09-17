@@ -8,6 +8,8 @@ import jwt
 from fastapi import HTTPException, Request, status
 from jwt import InvalidTokenError
 
+from services.identity.auth import IdentityTokenValidator
+
 from .config import GatewaySettings
 
 LOGGER = logging.getLogger(__name__)
@@ -44,6 +46,22 @@ class AuthManager:
         self._service_tokens = {
             token: name for name, token in settings.service_tokens.items() if token
         }
+
+        self._token_validator: Optional[IdentityTokenValidator] = None
+        if settings.identity_jwks_url:
+            try:
+                self._token_validator = IdentityTokenValidator(
+                    settings.identity_jwks_url,
+                    issuer=settings.identity_issuer,
+                    audience=settings.identity_audience,
+                    cache_ttl_seconds=settings.identity_jwks_cache_seconds,
+                )
+            except Exception as exc:  # pragma: no cover - defensive guardrail
+                LOGGER.warning("Failed to initialise identity token validator: %s", exc)
+        else:
+            LOGGER.warning(
+                "IDENTITY_JWKS_URL not configured; falling back to local JWT validation"
+            )
 
         if not self.settings.service_tokens:
             LOGGER.warning(
@@ -121,6 +139,24 @@ class AuthManager:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Unsupported authorization scheme",
+            )
+
+        if self._token_validator:
+            try:
+                claims = self._token_validator.validate(token)
+            except InvalidTokenError as exc:
+                LOGGER.warning("JWT validation failed: %s", exc)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or expired token",
+                ) from exc
+            return TokenPayload(
+                token_type="jwt",
+                subject=claims.subject or "user",
+                scopes=claims.scopes,
+                raw_token=token,
+                claims=claims.raw_claims,
+                client_host=request.client.host if request.client else None,
             )
 
         try:

@@ -69,6 +69,16 @@ class GatewaySettings:
     service_routes: Dict[str, ServiceRouteConfig]
     token_ttl_seconds: int
     token_issuer: str
+    identity_service_url: str
+    identity_request_timeout: float
+    identity_default_tenant: Optional[str]
+    identity_service_token: Optional[str]
+    identity_service_token_header: str
+    identity_tenant_header: str
+    identity_jwks_url: Optional[str]
+    identity_issuer: Optional[str]
+    identity_audience: Optional[str]
+    identity_jwks_cache_seconds: int
 
     @property
     def cors_origins(self) -> List[str]:
@@ -217,6 +227,17 @@ def load_gateway_settings() -> GatewaySettings:
     service_routes = _load_service_routes(default_rate_limit)
     resolved_tokens = {name: config.service_token or "" for name, config in service_routes.items()}
 
+    identity_service_url = os.getenv("IDENTITY_SERVICE_URL", "http://identity:8006").rstrip("/")
+    identity_jwks_url = os.getenv("IDENTITY_JWKS_URL") or f"{identity_service_url}/.well-known/jwks.json"
+    identity_service_token = os.getenv("IDENTITY_SERVICE_TOKEN") or resolved_tokens.get("identity")
+    identity_default_tenant = os.getenv("IDENTITY_DEFAULT_TENANT") or None
+    identity_service_token_header = os.getenv("IDENTITY_SERVICE_TOKEN_HEADER", "x-service-token")
+    identity_tenant_header = os.getenv("IDENTITY_TENANT_HEADER", "X-Tenant-ID")
+    identity_issuer = os.getenv("IDENTITY_EXPECTED_ISSUER") or None
+    identity_audience = os.getenv("IDENTITY_EXPECTED_AUDIENCE") or None
+    identity_request_timeout = float(os.getenv("IDENTITY_REQUEST_TIMEOUT", "10"))
+    identity_jwks_cache_seconds = int(os.getenv("IDENTITY_JWKS_CACHE_SECONDS", "300"))
+
     return GatewaySettings(
         host=os.getenv("GATEWAY_HOST", "0.0.0.0"),
         port=int(os.getenv("GATEWAY_PORT", "8000")),
@@ -236,5 +257,15 @@ def load_gateway_settings() -> GatewaySettings:
         service_routes=service_routes,
         token_ttl_seconds=int(os.getenv("GATEWAY_TOKEN_TTL_SECONDS", "3600")),
         token_issuer=os.getenv("GATEWAY_TOKEN_ISSUER", "legacycointrader-gateway"),
+        identity_service_url=identity_service_url,
+        identity_request_timeout=identity_request_timeout,
+        identity_default_tenant=identity_default_tenant,
+        identity_service_token=identity_service_token,
+        identity_service_token_header=identity_service_token_header,
+        identity_tenant_header=identity_tenant_header,
+        identity_jwks_url=identity_jwks_url,
+        identity_issuer=identity_issuer,
+        identity_audience=identity_audience,
+        identity_jwks_cache_seconds=identity_jwks_cache_seconds,
     )
 

@@ -43,8 +43,10 @@ class TokenResponse(BaseModel):
     """JWT payload returned to authenticated clients."""
 
     access_token: str
+    refresh_token: str
     token_type: str = Field(default="bearer")
     expires_at: datetime
+    issued_at: datetime
     username: str
     roles: List[str]
     password_expires_at: Optional[datetime] = None
@@ -149,7 +151,7 @@ def register_events(app: FastAPI, state: GatewayState) -> None:
             state.settings,
             state.http_client,
         )
-        state.identity_service = IdentityService(state.settings)
+        state.identity_service = IdentityService(state.settings, state.http_client)
 
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
@@ -208,7 +210,7 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
         del request  # request metadata reserved for future auditing
         identity_service = _get_identity_service(state)
         try:
-            issued = identity_service.issue_token(payload.username, payload.password)
+            issued = await identity_service.issue_token(payload.username, payload.password)
         except InvalidCredentialsError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -219,9 +221,12 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
         except PasswordExpiredError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
+        refresh_token = issued.refresh_token or ""
         return TokenResponse(
             access_token=issued.access_token,
+            refresh_token=refresh_token,
             expires_at=issued.expires_at,
+            issued_at=issued.issued_at,
             username=issued.username,
             roles=issued.roles,
             password_expires_at=issued.password_expires_at,
@@ -238,7 +243,7 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
     ) -> PasswordRotationResponse:
         identity_service = _get_identity_service(state)
         try:
-            identity = identity_service.rotate_password(
+            identity = await identity_service.rotate_password(
                 payload.username, payload.current_password, payload.new_password
             )
         except InvalidCredentialsError as exc:
@@ -264,7 +269,7 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
     ) -> ApiKeyValidationResponse:
         identity_service = _get_identity_service(state)
         try:
-            identity = identity_service.validate_api_key(payload.api_key)
+            identity = await identity_service.validate_api_key(payload.api_key)
         except ApiKeyRotationRequiredError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
         except InactiveAccountError as exc:

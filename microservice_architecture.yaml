@@ -59,6 +59,16 @@ services:
       - redis_cache
       - monitoring
 
+  # Identity Service - Authentication, authorization, user management
+  identity:
+    port: 8006
+    responsibilities:
+      - OAuth2/OIDC token issuance and introspection
+      - Credential rotation and validation
+      - SCIM user provisioning
+      - Multi-tenant secret management
+    dependencies: []
+
   # Strategy Engine - Strategy evaluation and routing
   strategy_engine:
     port: 8004
