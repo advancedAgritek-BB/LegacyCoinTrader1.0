@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Iterable, List, Optional
@@ -8,6 +7,8 @@ from typing import Iterable, List, Optional
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+from services.common.secrets import SecretRetrievalError, resolve_secret
 
 from .config import PortfolioConfig
 from .database import Base, get_engine, get_session
@@ -216,8 +217,7 @@ class PortfolioIdentityService:
             model = self._require_user(sess, username)
             if not model.is_active:
                 raise InactiveAccountError(f"User '{username}' is disabled")
-
-            api_key = new_api_key or secrets.token_urlsafe(32)
+            api_key = self._resolve_new_api_key(new_api_key)
             secret = hash_secret(api_key)
             now = self._utcnow()
             model.api_key_hash = secret.hash
@@ -256,6 +256,22 @@ class PortfolioIdentityService:
             return False
         due_at = model.api_key_last_rotated_at + timedelta(days=self.api_key_rotation_days)
         return self._utcnow() >= due_at
+
+    def _resolve_new_api_key(self, candidate: Optional[str]) -> str:
+        if candidate and candidate.strip():
+            return candidate
+        try:
+            resolved = resolve_secret(
+                "PORTFOLIO_NEW_API_KEY",
+                env_keys=("PORTFOLIO_ROTATION_API_KEY",),
+            )
+        except SecretRetrievalError as exc:
+            raise ApiKeyValidationError(
+                "A new API key must be supplied via the secrets manager or provided explicitly"
+            ) from exc
+        if not resolved or not resolved.strip():
+            raise ApiKeyValidationError("Resolved API key value is empty")
+        return resolved
 
     @staticmethod
     def _password_secret(model: UserAccountModel) -> HashedSecret:

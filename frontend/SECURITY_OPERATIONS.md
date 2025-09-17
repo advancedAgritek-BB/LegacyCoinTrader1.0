@@ -41,18 +41,43 @@ release.
    Assign only the minimal roles required for the user’s duties.
 
 3. When an API key is required (for headless integrations) rotate it through the
-   same identity service. The call returns the freshly generated secret and
-   updates the hashed representation in the portfolio database:
+   same identity service. Populate `PORTFOLIO_NEW_API_KEY` (or the legacy alias
+   `PORTFOLIO_ROTATION_API_KEY`) via the configured secrets manager or export it
+   for a one-off rotation. The service persists the hashed representation in the
+   portfolio database and returns the clear-text value so it can be stored back
+   in the secure vault:
 
    ```bash
+   export PORTFOLIO_NEW_API_KEY=$(openssl rand -hex 32)
+
    python - <<'PY'
    from services.portfolio.identity import PortfolioIdentityService
 
    service = PortfolioIdentityService()
-   api_key, user = service.rotate_api_key("security-admin")
-   print(f"API key for {user.username} rotated; distribute securely")
+   result = service.rotate_api_key("security-admin")
+   print(
+       "API key for",
+       result.user.username,
+       "rotated; updated secret is available via the managed store."
+   )
    PY
    ```
+
+## Secrets management
+
+* Configure the shared secrets manager by setting `SECRETS_PROVIDER` to
+  `vault`/`hashicorp` or `aws`. The frontend and trading services read
+  additional connection details from:
+  * `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_SECRET_PATH`, `VAULT_VERIFY`,
+    `VAULT_TIMEOUT`
+  * `AWS_SECRET_NAME`, `AWS_REGION`, `AWS_PROFILE`
+* Provision `SESSION_SECRET_KEY` (and any aliases declared in
+  `config/managed_secrets.yaml`) in the secure store. The frontend no longer
+  generates a fallback secret at runtime—initialisation fails unless a value is
+  supplied.
+* Rotate user API keys by loading a fresh value from the secure store (as shown
+  above) or by supplying the `new_api_key` argument directly when calling
+  `rotate_api_key`.
 
 ## Auditing
 
