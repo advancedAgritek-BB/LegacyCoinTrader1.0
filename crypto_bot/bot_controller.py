@@ -3,18 +3,25 @@ from __future__ import annotations
 """Async wrapper controlling the trading bot."""
 
 import asyncio
-import sys
+import os
 from pathlib import Path
-from typing import Dict, List, Union, Optional
+from typing import Dict, List, Optional, Union
+
+import httpx
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 
 from crypto_bot.config import load_config as load_bot_config, resolve_config_path
 from crypto_bot.utils.symbol_utils import fix_symbol
 
+from .execution.cex_executor import execute_trade_async, get_exchange
 from .portfolio_rotator import PortfolioRotator
-from .utils.open_trades import get_open_trades
-from .execution.cex_executor import get_exchange, execute_trade_async
+
+TRADING_ENGINE_START_PATH = "/trading-engine/cycles/start"
+TRADING_ENGINE_STOP_PATH = "/trading-engine/cycles/stop"
+TRADING_ENGINE_STATUS_PATH = "/trading-engine/cycles/status"
+TRADING_ENGINE_CLOSE_ALL_PATH = "/trading-engine/positions/close-all"
+PORTFOLIO_POSITIONS_PATH = "/portfolio/positions"
 
 
 class TradingBotController:
@@ -32,7 +39,6 @@ class TradingBotController:
         self.config = self._load_config()
         self.rotator = PortfolioRotator()
         self.exchange, self.ws_client = get_exchange(self.config)
-        self.proc: Optional[asyncio.subprocess.Process] = None
         self.enabled: Dict[str, bool] = {
             "trend_bot": True,
             "grid_bot": True,
@@ -51,6 +57,8 @@ class TradingBotController:
             "liquidate_all": False,
         }
         self.logger = setup_logger(__name__, LOG_DIR / "bot_controller.log")
+        self.gateway_url = os.getenv("API_GATEWAY_URL", "http://localhost:8000").rstrip("/")
+        self._gateway_timeout = float(os.getenv("API_GATEWAY_TIMEOUT", "10"))
 
 
     def _load_config(self) -> dict:
@@ -79,26 +87,44 @@ class TradingBotController:
             data["symbols"] = [fix_symbol(s) for s in data.get("symbols", [])]
         return data
 
+    async def _gateway_request(self, method: str, path: str, **kwargs) -> httpx.Response:
+        url = f"{self.gateway_url}{path}"
+        async with httpx.AsyncClient(timeout=self._gateway_timeout) as client:
+            response = await client.request(method, url, **kwargs)
+        response.raise_for_status()
+        return response
+
     async def start_trading(self) -> Dict[str, object]:
-        """Launch ``crypto_bot.main`` as a subprocess if not already running."""
-        if self.proc and self.proc.returncode is None:
-            return {"running": True, "status": "already_running"}
-        self.proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-m",
-            "crypto_bot.main",
-        )
-        self.state["running"] = True
-        return {"running": True, "status": "started"}
+        """Signal the trading engine service to start scheduled cycles."""
+
+        payload = {
+            "immediate": True,
+            "metadata": {"mode": self.config.get("execution_mode", "dry_run")},
+        }
+        try:
+            response = await self._gateway_request(
+                "POST", TRADING_ENGINE_START_PATH, json=payload
+            )
+            data = response.json()
+            self.state["running"] = True
+            return {"running": True, "status": data.get("status", "started"), "details": data}
+        except httpx.HTTPError as exc:
+            self.logger.error("Failed to start trading engine: %s", exc)
+            return {"running": False, "status": "error", "error": str(exc)}
 
     async def stop_trading(self) -> Dict[str, object]:
-        """Terminate the subprocess if running."""
-        if self.proc and self.proc.returncode is None:
-            self.proc.terminate()
-            await self.proc.wait()
-            self.proc = None
-        self.state["running"] = False
-        return {"running": False, "status": "stopped"}
+        """Signal the trading engine service to stop scheduled cycles."""
+
+        try:
+            response = await self._gateway_request(
+                "POST", TRADING_ENGINE_STOP_PATH, json={}
+            )
+            data = response.json()
+            self.state["running"] = False
+            return {"running": False, "status": data.get("status", "stopped"), "details": data}
+        except httpx.HTTPError as exc:
+            self.logger.error("Failed to stop trading engine: %s", exc)
+            return {"running": False, "status": "error", "error": str(exc)}
 
     async def close(self) -> None:
         """Close exchange and WebSocket client connections."""
@@ -129,14 +155,30 @@ class TradingBotController:
                 self.ws_client = None
 
     async def get_status(self) -> Dict[str, object]:
-        """Return current running state and enabled strategies."""
-        running = self.proc is not None and self.proc.returncode is None
-        self.state["running"] = running
-        return {
-            "running": running,
-            "mode": self.state.get("mode"),
-            "enabled_strategies": self.enabled.copy(),
-        }
+        """Return current trading engine state and enabled strategies."""
+
+        try:
+            response = await self._gateway_request("GET", TRADING_ENGINE_STATUS_PATH)
+            data = response.json()
+            running = bool(data.get("running"))
+            self.state["running"] = running
+            metadata = data.get("metadata") or {}
+            if "mode" in metadata:
+                self.state["mode"] = metadata.get("mode")
+            return {
+                "running": running,
+                "mode": self.state.get("mode"),
+                "enabled_strategies": self.enabled.copy(),
+                "details": data,
+            }
+        except httpx.HTTPError as exc:
+            self.logger.error("Failed to fetch trading engine status: %s", exc)
+            return {
+                "running": False,
+                "mode": self.state.get("mode"),
+                "enabled_strategies": self.enabled.copy(),
+                "error": str(exc),
+            }
 
     async def list_strategies(self) -> List[str]:
         """Return names of available strategies."""
@@ -150,45 +192,18 @@ class TradingBotController:
         return {"strategy": name, "enabled": self.enabled[name]}
 
     async def list_positions(self) -> List[Dict]:
-        """Return currently open positions from TradeManager (source of truth)."""
+        """Return currently open positions from the portfolio service."""
+
         try:
-            from crypto_bot.utils.trade_manager import get_trade_manager
-            trade_manager = get_trade_manager()
-
-            positions = trade_manager.get_all_positions()
-            result = []
-
-            for pos in positions:
-                if pos.is_open:
-                    # Get current price from TradeManager's cache
-                    current_price = float(trade_manager.price_cache.get(pos.symbol, pos.average_price))
-
-                    # Calculate unrealized P&L
-                    from decimal import Decimal
-                    pnl, pnl_pct = pos.calculate_unrealized_pnl(Decimal(str(current_price)))
-
-                    result.append({
-                        "symbol": pos.symbol,
-                        "side": pos.side,
-                        "amount": float(pos.total_amount),
-                        "price": float(pos.average_price),
-                        "current_price": current_price,
-                        "pnl": float(pnl),
-                        "pnl_percentage": float(pnl_pct),
-                        "entry_time": pos.entry_time.isoformat(),
-                        "source": "trade_manager"
-                    })
-
-            return result
-
-        except Exception as e:
-            self.logger.error(f"Failed to get positions from TradeManager: {e}")
-            # Fallback to CSV-based method (deprecated)
-            try:
-                return get_open_trades(self.trades_file)
-            except Exception as csv_e:
-                self.logger.error(f"Failed to get positions from CSV fallback: {csv_e}")
-                return []
+            response = await self._gateway_request("GET", PORTFOLIO_POSITIONS_PATH)
+            data = response.json()
+            if isinstance(data, list):
+                return data
+        except httpx.HTTPError as exc:
+            self.logger.error("Failed to fetch positions from portfolio service: %s", exc)
+        except Exception as exc:  # pragma: no cover - unexpected structure
+            self.logger.error("Unexpected error fetching positions: %s", exc)
+        return []
 
     async def close_position(self, symbol: str, amount: float) -> Dict:
         """Submit a market order closing ``amount`` of ``symbol``."""
@@ -204,9 +219,17 @@ class TradingBotController:
         )
 
     async def close_all_positions(self) -> Dict[str, str]:
-        """Signal the trading bot to liquidate all open positions."""
-        self.state["liquidate_all"] = True
-        return {"status": "liquidation_scheduled"}
+        """Request liquidation of all open positions via the trading engine."""
+
+        try:
+            response = await self._gateway_request(
+                "POST", TRADING_ENGINE_CLOSE_ALL_PATH, json={}
+            )
+            data = response.json()
+            return {"status": data.get("status", "requested"), "details": data}
+        except httpx.HTTPError as exc:
+            self.logger.error("Failed to request close-all via trading engine: %s", exc)
+            return {"status": "error", "error": str(exc)}
 
     async def fetch_logs(self, lines: int = 20) -> List[str]:
         """Return the last ``lines`` from the bot log."""

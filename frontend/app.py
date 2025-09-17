@@ -5,10 +5,9 @@ process and provides REST API routes used by the UI and tests.
 """
 
 import os
-import signal
+import subprocess
 import sys
 import warnings
-import subprocess
 import json
 import time
 import yaml
@@ -30,11 +29,7 @@ from services.monitoring.config import get_monitoring_settings
 from services.monitoring.instrumentation import instrument_flask_app
 from services.monitoring.logging import configure_logging
 from crypto_bot.config import load_config as load_bot_config, save_config, resolve_config_path
-
-try:
-    from services.portfolio.clients.interface import PortfolioServiceClient
-except Exception:  # pragma: no cover - service may not be available in tests
-    PortfolioServiceClient = None
+from frontend.gateway import ApiGatewayError, get_gateway_json, post_gateway_json
 
 # Suppress urllib3 OpenSSL warning
 warnings.filterwarnings(
@@ -137,82 +132,97 @@ def is_rate_limited():
     if client_ip not in request_counts:
         request_counts[client_ip] = 0
         request_windows[client_ip] = current_time
-
-
-def get_portfolio_service_client() -> Optional[PortfolioServiceClient]:
-    """Return a portfolio service client if available."""
-
-    if PortfolioServiceClient is None:
-        return None
-    try:
-        return PortfolioServiceClient()
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.warning(f"Portfolio service client unavailable: {exc}")
-        return None
+PORTFOLIO_POSITIONS_PATH = "/portfolio/positions"
+PORTFOLIO_WALLET_STATUS_PATH = "/portfolio/wallet-status"
+TRADING_ENGINE_STATE_PATH = "/trading-engine/cycles/status"
+TRADING_ENGINE_START_PATH = "/trading-engine/cycles/start"
+TRADING_ENGINE_STOP_PATH = "/trading-engine/cycles/stop"
+TRADING_ENGINE_RUN_ONCE_PATH = "/trading-engine/cycles/run"
+TRADING_ENGINE_RELOAD_CONFIG_PATH = "/trading-engine/config/reload"
+MONITORING_METRICS_PATH = "/monitoring/metrics"
+STRATEGY_PERFORMANCE_PATH = "/monitoring/strategy/performance"
+STRATEGY_SCORES_PATH = "/monitoring/strategy/scores"
 
 
 def fetch_positions_from_service() -> list[dict[str, Any]]:
-    """Retrieve open positions from the portfolio microservice."""
-
-    client = get_portfolio_service_client()
-    if not client:
-        return []
+    """Retrieve open positions from the portfolio service via the API gateway."""
 
     try:
-        positions = client.list_positions()
-    except Exception as exc:
-        logger.warning(f"Failed to fetch positions from portfolio service: {exc}")
+        payload = get_gateway_json(PORTFOLIO_POSITIONS_PATH)
+    except ApiGatewayError as exc:
+        logger.warning("Failed to fetch positions from API gateway: %s", exc)
+        return []
+
+    if not isinstance(payload, list):
         return []
 
     results: list[dict[str, Any]] = []
-    for position in positions:
+    for item in payload:
         try:
-            if position.total_amount <= 0 or is_test_position(position.symbol):
+            symbol = item.get("symbol")
+            if not symbol or is_test_position(symbol):
                 continue
 
-            current_price = position.mark_price or position.average_price
-            if position.side == "long":
-                pnl_value = (current_price - position.average_price) * position.total_amount
-            else:
-                pnl_value = (position.average_price - current_price) * position.total_amount
+            total_amount = float(item.get("amount") or item.get("total_amount") or 0.0)
+            if total_amount <= 0:
+                continue
 
-            current_value = float(position.total_amount) * float(current_price)
+            entry_price = float(item.get("entry_price") or item.get("average_price") or 0.0)
+            current_price = float(item.get("current_price") or item.get("mark_price") or entry_price)
+            side = item.get("side", "long")
+
+            if side == "long":
+                pnl_value = (current_price - entry_price) * total_amount
+            else:
+                pnl_value = (entry_price - current_price) * total_amount
+
+            position_value = current_price * total_amount
             pnl_pct = (
-                float((pnl_value / (position.average_price * position.total_amount)) * 100)
-                if position.average_price > 0 and position.total_amount > 0
+                (pnl_value / (entry_price * total_amount)) * 100
+                if entry_price and total_amount
                 else 0.0
             )
 
             results.append(
                 {
-                    "symbol": position.symbol,
-                    "side": position.side,
-                    "size": float(position.total_amount),
-                    "amount": float(position.total_amount),
-                    "entry_price": float(position.average_price),
-                    "current_price": float(current_price),
-                    "current_value": current_value,
+                    "symbol": symbol,
+                    "side": side,
+                    "size": total_amount,
+                    "amount": total_amount,
+                    "entry_price": entry_price,
+                    "current_price": current_price,
+                    "current_value": position_value,
                     "pnl": pnl_pct,
-                    "pnl_value": float(pnl_value),
+                    "pnl_value": pnl_value,
                     "pnl_percentage": pnl_pct,
-                    "chart_min": float(current_price) * 0.95,
-                    "chart_max": float(current_price) * 1.05,
+                    "chart_min": current_price * 0.95,
+                    "chart_max": current_price * 1.05,
                     "trend_strength": "strong" if abs(pnl_pct) > 2 else "moderate" if abs(pnl_pct) > 1 else "weak",
                     "r_squared": min(99.9, max(60.0, 70.0 + abs(pnl_pct) * 2)),
-                    "highest_price": float(position.highest_price) if position.highest_price else None,
-                    "lowest_price": float(position.lowest_price) if position.lowest_price else None,
-                    "stop_loss_price": float(position.stop_loss_price) if position.stop_loss_price else None,
-                    "take_profit_price": float(position.take_profit_price) if position.take_profit_price else None,
-                    "entry_time": position.entry_time.isoformat() if position.entry_time else None,
+                    "highest_price": item.get("highest_price"),
+                    "lowest_price": item.get("lowest_price"),
+                    "stop_loss_price": item.get("stop_loss_price"),
+                    "take_profit_price": item.get("take_profit_price"),
+                    "entry_time": item.get("entry_time"),
                 }
             )
-        except Exception as exc:
-            logger.warning(
-                f"Failed to convert portfolio service position {position.symbol}: {exc}"
-            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Unable to normalise position %s: %s", item, exc)
             continue
 
     return results
+
+
+def fetch_wallet_status() -> Dict[str, Any]:
+    """Retrieve wallet status from the portfolio service via the API gateway."""
+
+    try:
+        payload = get_gateway_json(PORTFOLIO_WALLET_STATUS_PATH)
+        if isinstance(payload, dict):
+            return payload
+    except ApiGatewayError as exc:
+        logger.warning("Failed to fetch wallet status from API gateway: %s", exc)
+    return {}
 
     request_counts[client_ip] += 1
 
@@ -1036,10 +1046,10 @@ def get_sync_report(operation_id):
 
 # CORS preflight is now handled by the secure headers middleware above
 
-# Handle the async trading bot process
-bot_proc = None
-bot_start_time = None
-watch_thread = None
+# Cached trading engine state to reduce gateway calls during template rendering
+TRADING_ENGINE_CACHE_TTL = 2.0
+_trading_engine_state_cache: Optional[Dict[str, Any]] = None
+_trading_engine_cache_ts: float = 0.0
 
 # Global controller instance
 CONTROLLER = None
@@ -1081,85 +1091,77 @@ project_root = Path(__file__).parent.parent
 # Environment variables will be loaded in the main block
 
 
-def stop_conflicting_bots() -> None:
-    """Stop any other bot processes that might be running to prevent conflicts."""
+def get_trading_engine_state(force_refresh: bool = False) -> Dict[str, Any]:
+    """Return cached trading engine scheduler state from the API gateway."""
+
+    global _trading_engine_state_cache, _trading_engine_cache_ts
+
+    now = time.time()
+    if (
+        not force_refresh
+        and _trading_engine_state_cache is not None
+        and now - _trading_engine_cache_ts < TRADING_ENGINE_CACHE_TTL
+    ):
+        return _trading_engine_state_cache
+
     try:
-        import psutil
+        state = get_gateway_json(TRADING_ENGINE_STATE_PATH)
+        if isinstance(state, dict):
+            _trading_engine_state_cache = state
+            _trading_engine_cache_ts = now
+            return state
+    except ApiGatewayError as exc:
+        logger.warning("Failed to fetch trading engine state: %s", exc)
 
-        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-            if proc.info["cmdline"] and "crypto_bot.main" in " ".join(
-                proc.info["cmdline"]
-            ):
-                if proc.info["pid"] != os.getpid():  # Don't kill ourselves
-                    print(
-                        f"Stopping conflicting bot process (PID {proc.info['pid']})"
-                    )
-                    try:
-                        proc.terminate()
-                        proc.wait(timeout=5)
-                    except psutil.TimeoutExpired:
-                        proc.kill()
-        time.sleep(2)  # Give processes time to terminate
-    except ImportError:
-        pass
-
-
-def check_existing_bot() -> bool:
-    """Check if there's already a bot process running to prevent conflicts."""
-    try:
-        import psutil
-
-        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-            if proc.info["cmdline"]:
-                cmdline_str = " ".join(proc.info["cmdline"])
-                # Check for various bot startup patterns
-                if any(
-                    pattern in cmdline_str
-                    for pattern in [
-                        "crypto_bot.main",
-                        "crypto_bot/main.py",
-                        "start_bot.py",
-                    ]
-                ):
-                    return True
-        return False
-    except ImportError:
-        # psutil not available, use basic check
-        return False
-
-
-def watch_bot() -> None:
-    """Monitor the trading bot and restart it if the process exits."""
-    global bot_proc, bot_start_time
-    while True:
-        time.sleep(5)
-        if bot_proc is not None and bot_proc.poll() is not None:
-            # Check if there's already another bot process running to avoid conflicts
-            if not check_existing_bot():
-                print("Bot process exited, restarting...")
-                venv_python = (
-                    Path(__file__).parent.parent / "venv" / "bin" / "python3"
-                )
-                bot_script = Path(__file__).parent.parent / "start_bot.py"
-                bot_proc = subprocess.Popen(
-                    [str(venv_python), str(bot_script), "noninteractive"]
-                )
-                bot_start_time = time.time()
-            else:
-                print(
-                    "Another bot process detected, skipping restart to avoid conflicts"
-                )
-                bot_proc = None
+    return _trading_engine_state_cache or {}
 
 
 def is_running() -> bool:
-    """Return True if the bot process is running."""
-    # Check if we have a tracked subprocess
-    if bot_proc and bot_proc.poll() is None:
-        return True
+    """Return True if the trading engine reports that it is running."""
 
-    # Also check for existing bot processes
-    return check_existing_bot()
+    state = get_trading_engine_state()
+    running = bool(state.get("running"))
+    return running
+
+
+def start_trading_engine(
+    mode: str,
+    *,
+    interval_seconds: Optional[int] = None,
+    immediate: bool = True,
+) -> Dict[str, Any]:
+    """Start the trading engine scheduler via the API gateway."""
+
+    metadata: Dict[str, Any] = {"mode": mode}
+    payload: Dict[str, Any] = {"immediate": immediate, "metadata": metadata}
+    if interval_seconds is not None:
+        payload["interval_seconds"] = interval_seconds
+
+    try:
+        response = post_gateway_json(TRADING_ENGINE_START_PATH, json=payload)
+        get_trading_engine_state(force_refresh=True)
+        if isinstance(response, dict):
+            return response
+    except ApiGatewayError as exc:
+        logger.error("Failed to start trading engine: %s", exc)
+        return {"error": str(exc)}
+
+    return {}
+
+
+def stop_trading_engine() -> Dict[str, Any]:
+    """Stop the trading engine scheduler via the API gateway."""
+
+    try:
+        response = post_gateway_json(TRADING_ENGINE_STOP_PATH, json={})
+        get_trading_engine_state(force_refresh=True)
+        if isinstance(response, dict):
+            return response
+    except ApiGatewayError as exc:
+        logger.error("Failed to stop trading engine: %s", exc)
+        return {"error": str(exc)}
+
+    return {}
 
 
 def set_execution_mode(mode: str) -> None:
@@ -1173,46 +1175,27 @@ def load_execution_mode() -> str:
 
 
 def calculate_wallet_balance_from_trade_manager() -> float:
-    """Calculate wallet balance from TradeManager (source of truth)."""
+    """Retrieve wallet balance from the portfolio service."""
+
+    wallet = fetch_wallet_status()
+    if not wallet:
+        return 0.0
+
+    balance = wallet.get("balance") or wallet.get("total_balance")
+    if balance is None:
+        initial_balance = float(wallet.get("initial_balance") or 0.0)
+        total_pnl = float(
+            wallet.get("total_pnl")
+            or wallet.get("pnl")
+            or wallet.get("realized_pnl", 0.0) + wallet.get("unrealized_pnl", 0.0)
+        )
+        return initial_balance + total_pnl
+
     try:
-        from crypto_bot.utils.trade_manager import get_trade_manager
-
-        trade_manager = get_trade_manager()
-
-        # Get total realized P&L from TradeManager
-        realized_pnl = float(trade_manager.total_realized_pnl)
-
-        # Calculate unrealized P&L from open positions
-        unrealized_pnl = 0.0
-        positions = trade_manager.get_all_positions()
-
-        for pos in positions:
-            if pos.is_open:
-                # Get current price from TradeManager's cache
-                current_price = float(
-                    trade_manager.price_cache.get(
-                        pos.symbol, pos.average_price
-                    )
-                )
-
-                # Calculate unrealized P&L
-                pnl, _ = pos.calculate_unrealized_pnl(
-                    Decimal(str(current_price))
-                )
-                unrealized_pnl += float(pnl)
-
-        total_pnl = realized_pnl + unrealized_pnl
-        wallet_balance = 10000.0 + total_pnl
-        logger.info(
-            f"TradeManager-based calculation: realized=${realized_pnl:.2f}, unrealized=${unrealized_pnl:.2f}, total=${total_pnl:.2f}, balance=${wallet_balance:.2f}"
-        )
-        return wallet_balance
-
-    except Exception as e:
-        logger.error(
-            f"Error calculating wallet balance from TradeManager: {e}"
-        )
-        return 10000.0
+        return float(balance)
+    except (TypeError, ValueError):
+        logger.warning("Unexpected balance payload: %s", balance)
+        return 0.0
 
 
 def calculate_wallet_balance_from_csv() -> float:
@@ -1425,858 +1408,95 @@ def set_paper_wallet_balance(balance: float) -> None:
 
 
 def get_open_positions() -> list:
-    """Get open positions from TradeManager (single source of truth)."""
-    try:
-        # Try to get positions from TradeManager first (highest priority)
-        from crypto_bot.utils.trade_manager import get_trade_manager
+    """Get open positions via the portfolio service."""
 
-        trade_manager = get_trade_manager()
-
-        positions = trade_manager.get_all_positions()
-        print(f"Found {len(positions)} positions in TradeManager")
-
-        if positions:
-            # Convert Position objects to the expected format
-            result = []
-            for position in positions:
-                # Only include positions with non-zero amounts
-                if position.total_amount <= 0:
-                    continue
-
-                # Get current price for unrealized P&L
-                current_price = trade_manager.price_cache.get(position.symbol)
-                print(
-                    f"Checking price cache for {position.symbol}: {current_price}"
-                )
-
-                if not current_price:
-                    # Try to fetch current price if not in cache
-                    try:
-                        print(
-                            f"No cached price for {position.symbol}, fetching from exchange..."
-                        )
-                        # Import and use the same exchange that the price monitor uses
-                        from crypto_bot.execution.cex_executor import (
-                            get_exchange,
-                        )
-
-                        # Use the same config loading logic
-                        config_path = resolve_config_path()
-                        try:
-                            config = load_bot_config(config_path)
-                        except Exception:
-                            config = {}
-
-                        exchange, _ = get_exchange(config)
-                        print(f"Exchange initialized: {exchange}")
-
-                        if hasattr(exchange, "fetch_ticker"):
-                            print(f"Fetching ticker for {position.symbol}...")
-                            ticker = exchange.fetch_ticker(position.symbol)
-                            print(
-                                f"Ticker response for {position.symbol}: {ticker}"
-                            )
-
-                            if ticker and ticker.get("last"):
-                                current_price = Decimal(str(ticker["last"]))
-                                # Update the cache with the fetched price
-                                trade_manager.update_price(
-                                    position.symbol, current_price
-                                )
-                                print(
-                                    f"✅ Successfully fetched and cached current price for {position.symbol}: ${current_price}"
-                                )
-                            else:
-                                print(
-                                    f"❌ Invalid ticker response for {position.symbol}: {ticker}"
-                                )
-                        else:
-                            print(
-                                f"❌ Exchange does not have fetch_ticker method: {exchange}"
-                            )
-                    except Exception as e:
-                        print(
-                            f"❌ Failed to fetch current price for {position.symbol}: {e}"
-                        )
-                        import traceback
-
-                        traceback.print_exc()
-
-                if current_price:
-                    unrealized_pnl, unrealized_pct = (
-                        position.calculate_unrealized_pnl(current_price)
-                    )
-                    current_value = float(position.total_amount) * float(
-                        current_price
-                    )
-                else:
-                    # Use entry price as last resort fallback when current price is not available
-                    print(
-                        f"Using entry price as fallback for {position.symbol} (no current price available)"
-                    )
-                    current_price = position.average_price
-                    unrealized_pnl = Decimal("0")
-                    unrealized_pct = Decimal("0")
-                    current_value = float(position.total_amount) * float(
-                        position.average_price
-                    )
-
-                # Calculate additional fields for position cards
-                pnl_value = float(unrealized_pnl)
-                pnl_pct = float(unrealized_pct)
-
-                # Generate chart data bounds (will be used by JavaScript)
-                chart_min = (
-                    min(float(current_price), float(position.average_price))
-                    * 0.95
-                )  # 5% below minimum
-                chart_max = (
-                    max(float(current_price), float(position.average_price))
-                    * 1.05
-                )  # 5% above maximum
-
-                # Calculate trend strength and R-squared based on P&L
-                trend_strength = (
-                    "strong"
-                    if abs(pnl_pct) > 2
-                    else "moderate" if abs(pnl_pct) > 1 else "weak"
-                )
-                r_squared = min(99.9, max(60.0, 70.0 + abs(pnl_pct) * 2))
-
-                pos_dict = {
-                    "symbol": position.symbol,
-                    "side": position.side,
-                    "size": float(
-                        position.total_amount
-                    ),  # Use 'size' for consistency with template
-                    "amount": float(
-                        position.total_amount
-                    ),  # Keep for backward compatibility
-                    "entry_price": float(position.average_price),
-                    "current_price": float(current_price),
-                    "current_value": current_value,
-                    "pnl": pnl_pct,  # PnL percentage (template expects this)
-                    "pnl_value": pnl_value,  # PnL dollar amount (template expects this)
-                    "pnl_percentage": pnl_pct,  # Keep for backward compatibility
-                    "chart_min": chart_min,
-                    "chart_max": chart_max,
-                    "trend_strength": trend_strength,
-                    "r_squared": r_squared,
-                    "highest_price": (
-                        float(position.highest_price)
-                        if position.highest_price
-                        else None
-                    ),
-                    "lowest_price": (
-                        float(position.lowest_price)
-                        if position.lowest_price
-                        else None
-                    ),
-                    "stop_loss_price": (
-                        float(position.stop_loss_price)
-                        if position.stop_loss_price
-                        else None
-                    ),
-                    "take_profit_price": (
-                        float(position.take_profit_price)
-                        if position.take_profit_price
-                        else None
-                    ),
-                    "entry_time": (
-                        position.entry_time.isoformat()
-                        if position.entry_time
-                        else None
-                    ),
-                }
-                result.append(pos_dict)
-
-            # Filter out test positions
-            filtered_result = []
-            for pos in result:
-                if not is_test_position(pos["symbol"]):
-                    filtered_result.append(pos)
-                else:
-                    print(
-                        f"Filtering out test position from TradeManager result: {pos['symbol']}"
-                    )
-
-            print(
-                f"Returning {len(filtered_result)} active positions from TradeManager (filtered {len(result) - len(filtered_result)} test positions)"
-            )
-            return filtered_result
-
-    except Exception as e:
-        print(f"Failed to get positions from TradeManager: {e}")
-
-    # Secondary fallback: direct portfolio service query
-    service_positions = fetch_positions_from_service()
-    if service_positions:
-        print(
-            f"Returning {len(service_positions)} positions from portfolio service fallback"
-        )
-        return service_positions
-
-    # Fallback to trade manager state file (second priority)
-    try:
-        state_file = Path("crypto_bot/logs/trade_manager_state.json")
-        if state_file.exists():
-            with open(state_file, "r") as f:
-                state = json.load(f)
-
-            positions = state.get("positions", {})
-            price_cache = state.get("price_cache", {})
-
-            result = []
-            for symbol, pos_data in positions.items():
-                # Skip test positions
-                if is_test_position(symbol):
-                    print(
-                        f"Filtering out test position from state file: {symbol}"
-                    )
-                    continue
-
-                if pos_data.get("total_amount", 0) > 0:  # Only open positions
-                    current_price = price_cache.get(
-                        symbol, pos_data.get("average_price", 0)
-                    )
-
-                    # Calculate PnL
-                    amount = pos_data["total_amount"]
-                    avg_price = pos_data["average_price"]
-                    side = pos_data["side"]
-
-                    if side == "long":
-                        pnl = (current_price - avg_price) * amount
-                    else:  # short
-                        pnl = (avg_price - current_price) * amount
-
-                    pnl_pct = (
-                        (pnl / (avg_price * amount)) * 100
-                        if avg_price > 0
-                        else 0
-                    )
-
-                    # Calculate current value
-                    current_value = float(amount) * float(current_price)
-
-                    # Calculate additional fields for position cards
-                    pnl_value = float(pnl)
-                    pnl_pct = float(pnl_pct)
-
-                    # Generate chart data bounds (will be used by JavaScript)
-                    chart_min = (
-                        min(float(current_price), float(avg_price)) * 0.95
-                    )  # 5% below minimum
-                    chart_max = (
-                        max(float(current_price), float(avg_price)) * 1.05
-                    )  # 5% above maximum
-
-                    # Calculate trend strength and R-squared based on P&L
-                    trend_strength = (
-                        "strong"
-                        if abs(pnl_pct) > 2
-                        else "moderate" if abs(pnl_pct) > 1 else "weak"
-                    )
-                    r_squared = min(99.9, max(60.0, 70.0 + abs(pnl_pct) * 2))
-
-                    position_data = {
-                        "symbol": symbol,
-                        "side": side,
-                        "size": float(
-                            amount
-                        ),  # Use 'size' for consistency with template
-                        "amount": float(
-                            amount
-                        ),  # Keep for backward compatibility
-                        "entry_price": float(avg_price),
-                        "current_price": float(current_price),
-                        "current_value": current_value,
-                        "pnl": pnl_pct,  # PnL percentage (template expects this)
-                        "pnl_value": pnl_value,  # PnL dollar amount (template expects this)
-                        "pnl_percentage": pnl_pct,  # Keep for backward compatibility
-                        "chart_min": chart_min,
-                        "chart_max": chart_max,
-                        "trend_strength": trend_strength,
-                        "r_squared": r_squared,
-                        "entry_time": pos_data.get("entry_time", ""),
-                    }
-                    result.append(position_data)
-
-            print(f"Returning {len(result)} positions from state file")
-            return result
-
-    except Exception as e:
-        print(f"Failed to get positions from state file: {e}")
-
-    # Final fallback to log parsing (lowest priority)
-    print("Falling back to log parsing for positions")
-    return get_open_positions_from_log()
-
-
-def get_open_positions_from_log() -> list:
-    """Parse open positions from positions.log file (legacy method)."""
-    import re
-    from datetime import datetime, timedelta
-
-    if not POSITIONS_FILE.exists():
+    positions = fetch_positions_from_service()
+    if not positions:
+        logger.info("No open positions returned by portfolio service")
         return []
 
-    positions = []
-    # Updated regex pattern to handle more position formats
-    pos_patterns = [
-        # Pattern 1: Standard format with pnl calculation
-        re.compile(
-            r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
-            r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+) "
-            r"pnl \$?(?P<pnl>[0-9.+-]+).*balance \$?(?P<balance>[0-9.]+)"
-        ),
-        # Pattern 2: Format without pnl calculation
-        re.compile(
-            r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
-            r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+)"
-        ),
-        # Pattern 3: Alternative format
-        re.compile(
-            r"Active (?P<symbol>\S+) (?P<side>\w+) (?P<amount>[0-9.]+) "
-            r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+) "
-            r"pnl \$?(?P<pnl>[0-9.+-]+)"
-        ),
-    ]
-
-    try:
-        with open(POSITIONS_FILE) as f:
-            lines = f.readlines()
-
-        # Only process recent lines (last 24 hours)
-        cutoff_time = datetime.now() - timedelta(hours=24)
-        recent_positions = []
-
-        for line in lines:
-            # Extract timestamp from the beginning of the line
-            timestamp_match = re.match(
-                r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})", line
-            )
-            if timestamp_match:
-                try:
-                    timestamp_str = timestamp_match.group(1)
-                    line_timestamp = datetime.strptime(
-                        timestamp_str, "%Y-%m-%d %H:%M:%S,%f"
-                    )
-
-                    # Only include positions from the last 24 hours
-                    if line_timestamp >= cutoff_time:
-                        # Try each pattern
-                        position_data = None
-                        for pattern in pos_patterns:
-                            match = pattern.search(line)
-                            if match:
-                                # Check if this is a real position (not just a balance update)
-                                symbol = match.group("symbol")
-                                side = match.group("side")
-                                amount = float(match.group("amount"))
-
-                                # Filter out positions with zero amounts or very small amounts
-                                if amount > 0.0001:  # Minimum threshold
-                                    entry_price = float(match.group("entry"))
-
-                                    # Get LIVE current price instead of cached price
-                                    current_price = (
-                                        get_current_price_for_symbol(symbol)
-                                    )
-                                    if current_price <= 0:
-                                        # For unknown tokens, use entry price to show 0 PnL
-                                        # This is better than using stale cached prices
-                                        print(
-                                            f"No live price available for {symbol}, using entry price for 0 PnL"
-                                        )
-                                        current_price = entry_price
-
-                                    # Calculate PnL if not provided
-                                    if (
-                                        "pnl" in match.groupdict()
-                                        and match.group("pnl")
-                                    ):
-                                        pnl = float(match.group("pnl"))
-                                    else:
-                                        # Calculate PnL manually
-                                        if side == "buy":
-                                            pnl = (
-                                                current_price - entry_price
-                                            ) * amount
-                                        else:  # sell/short
-                                            pnl = (
-                                                entry_price - current_price
-                                            ) * amount
-
-                                    # Get balance if available
-                                    balance = 0.0
-                                    if (
-                                        "balance" in match.groupdict()
-                                        and match.group("balance")
-                                    ):
-                                        balance = float(match.group("balance"))
-
-                                    # Calculate current value
-                                    current_value = amount * current_price
-
-                                    # Calculate PnL percentage
-                                    pnl_pct = (
-                                        (pnl / (entry_price * amount)) * 100
-                                        if entry_price > 0
-                                        else 0
-                                    )
-
-                                    # Calculate additional fields for position cards
-                                    pnl_value = float(pnl)
-
-                                    # Generate chart data bounds (will be used by JavaScript)
-                                    chart_min = (
-                                        min(
-                                            float(current_price),
-                                            float(entry_price),
-                                        )
-                                        * 0.95
-                                    )  # 5% below minimum
-                                    chart_max = (
-                                        max(
-                                            float(current_price),
-                                            float(entry_price),
-                                        )
-                                        * 1.05
-                                    )  # 5% above maximum
-
-                                    # Calculate trend strength and R-squared based on P&L
-                                    trend_strength = (
-                                        "strong"
-                                        if abs(pnl_pct) > 2
-                                        else (
-                                            "moderate"
-                                            if abs(pnl_pct) > 1
-                                            else "weak"
-                                        )
-                                    )
-                                    r_squared = min(
-                                        99.9,
-                                        max(60.0, 70.0 + abs(pnl_pct) * 2),
-                                    )
-
-                                    position_data = {
-                                        "symbol": symbol,
-                                        "side": side,
-                                        "size": float(
-                                            amount
-                                        ),  # Use 'size' for consistency with template
-                                        "amount": amount,  # Keep for backward compatibility
-                                        "entry_price": entry_price,
-                                        "current_price": current_price,
-                                        "current_value": current_value,
-                                        "pnl": pnl_pct,  # PnL percentage (template expects this)
-                                        "pnl_value": pnl_value,  # PnL dollar amount (template expects this)
-                                        "pnl_percentage": pnl_pct,  # Keep for backward compatibility
-                                        "chart_min": chart_min,
-                                        "chart_max": chart_max,
-                                        "trend_strength": trend_strength,
-                                        "r_squared": r_squared,
-                                        "balance": balance,
-                                        "timestamp": timestamp_str,
-                                    }
-                                    break
-
-                        if position_data:
-                            recent_positions.append(position_data)
-
-                except ValueError as e:
-                    print(
-                        f"Error parsing timestamp in line: {line.strip()}, error: {e}"
-                    )
-                    continue
-
-        # Remove duplicates based on symbol and side, keeping the most recent
-        seen = set()
-        unique_positions = []
-        for pos in reversed(
-            recent_positions
-        ):  # Process in reverse to keep most recent
-            key = f"{pos['symbol']}_{pos['side']}"
-            if key not in seen:
-                seen.add(key)
-                unique_positions.append(pos)
-
-        # Filter out test positions
-        filtered_positions = []
-        for pos in unique_positions:
-            if not is_test_position(pos["symbol"]):
-                filtered_positions.append(pos)
-            else:
-                print(
-                    f"Filtering out test position from log parsing: {pos['symbol']}"
-                )
-
-        # Return positions in chronological order
-        return list(reversed(filtered_positions))
-
-    except Exception as e:
-        print(f"Error parsing positions from log: {e}")
-        return []
-
-    return []
+    logger.info("Fetched %s open positions from portfolio service", len(positions))
+    return positions
 
 
-def clear_old_positions() -> None:
-    """Clear old position entries from the positions.log file."""
-    if not POSITIONS_FILE.exists():
-        return
 
-    try:
-        import re
-        from datetime import datetime, timedelta
 
-        # Read all lines
-        with open(POSITIONS_FILE, "r") as f:
-            lines = f.readlines()
 
-        # Keep only lines from the last 24 hours
-        cutoff_time = datetime.now() - timedelta(hours=24)
-        recent_lines = []
 
-        for line in lines:
-            # Extract timestamp from the beginning of the line
-            timestamp_match = re.match(
-                r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})", line
-            )
-            if timestamp_match:
-                try:
-                    timestamp_str = timestamp_match.group(1)
-                    line_timestamp = datetime.strptime(
-                        timestamp_str, "%Y-%m-%d %H:%M:%S,%f"
-                    )
 
-                    # Keep lines from the last 24 hours
-                    if line_timestamp >= cutoff_time:
-                        recent_lines.append(line)
-                except ValueError:
-                    # Keep lines that don't have valid timestamps (they might be important)
-                    recent_lines.append(line)
-            else:
-                # Keep lines without timestamps
-                recent_lines.append(line)
 
-        # Write back the filtered lines
-        with open(POSITIONS_FILE, "w") as f:
-            f.writelines(recent_lines)
 
-    except Exception as e:
-        print(f"Error clearing old positions: {e}")
 
 
 def get_uptime() -> str:
-    """Return human readable uptime."""
-    return utils.get_uptime(bot_start_time)
+    """Return human readable uptime derived from trading engine state."""
+
+    state = get_trading_engine_state()
+    metadata = state.get("metadata") or {}
+    start_timestamp = _parse_iso_timestamp(metadata.get("started_at"))
+
+    if start_timestamp is None and state.get("running"):
+        start_timestamp = _parse_iso_timestamp(state.get("last_run_started_at"))
+
+    if start_timestamp is None:
+        return utils.get_uptime(None)
+
+    return utils.get_uptime(start_timestamp)
 
 
 def calculate_wallet_pnl() -> Dict[str, float]:
-    """Calculate current wallet PnL based on paper wallet state, open positions, and trade history."""
-    try:
-        # Try to load paper wallet state first
-        paper_wallet_state_file = Path(
-            "crypto_bot/logs/paper_wallet_state.yaml"
-        )
-        if paper_wallet_state_file.exists():
-            try:
-                import numpy as np
-                from yaml import Loader, SafeLoader
+    """Calculate wallet PnL using portfolio service data."""
 
-                # Custom loader to handle numpy scalars
-                class NumpyLoader(SafeLoader):
-                    pass
-
-                def construct_numpy_scalar(loader, node):
-                    """Construct numpy scalar from YAML node."""
-                    try:
-                        # Get the numpy dtype and binary data
-                        if hasattr(node, "value") and isinstance(
-                            node.value, list
-                        ):
-                            dtype_info = node.value[0]
-                            binary_data = node.value[1]
-
-                            # Extract binary data
-                            if hasattr(binary_data, "value"):
-                                import base64
-                                import struct
-
-                                # Decode base64 binary data
-                                decoded = base64.b64decode(binary_data.value)
-                                # Convert to float64 (little endian)
-                                value = struct.unpack("<d", decoded)[0]
-                                return float(value)
-                    except Exception as e:
-                        print(f"Error decoding numpy scalar: {e}")
-                        return 0.0
-
-                    return 0.0
-
-                # Add constructor for numpy scalars
-                NumpyLoader.add_constructor(
-                    "tag:yaml.org,2002:python/object/apply:numpy._core.multiarray.scalar",
-                    construct_numpy_scalar,
-                )
-
-                with open(paper_wallet_state_file, "r") as f:
-                    state = yaml.load(f, Loader=NumpyLoader) or {}
-                    current_balance = state.get("balance", 0.0)
-                    initial_balance = state.get("initial_balance", 10000.0)
-                    realized_pnl = state.get("realized_pnl", 0.0)
-                    logger.info(
-                        f"Loaded paper wallet state: balance=${current_balance:.2f}, realized_pnl=${realized_pnl:.2f}"
-                    )
-            except Exception as e:
-                logger.error(f"Error reading paper wallet state: {e}")
-                current_balance = get_paper_wallet_balance()
-                initial_balance = current_balance
-                realized_pnl = 0.0
-        else:
-            # Fallback to reading from positions.log
-            current_balance = get_paper_wallet_balance()
-            initial_balance = current_balance
-            realized_pnl = 0.0
-
-        # Always calculate realized P&L from trade history for accuracy
-        try:
-            from crypto_bot import log_reader
-
-            df = log_reader._read_trades(TRADE_FILE)
-
-            if not df.empty:
-                # Track position history for realized P&L calculation
-                position_history = {}
-                calculated_realized_pnl = 0.0
-
-                for _, row in df.iterrows():
-                    symbol = str(row.get("symbol", ""))
-                    side = str(row.get("side", ""))
-                    amount = float(row.get("amount", 0))
-                    price = float(row.get("price", 0))
-
-                    if symbol and amount > 0 and price > 0:
-                        # Calculate trade total
-                        total = amount * price
-
-                        # Check if this trade closes an existing position
-                        if symbol in position_history:
-                            existing_pos = position_history[symbol]
-
-                            # Check if this is a closing trade (opposite side)
-                            if (
-                                side == "sell"
-                                and existing_pos["side"] == "buy"
-                            ) or (
-                                side == "buy"
-                                and existing_pos["side"] == "sell"
-                            ):
-
-                                # Calculate realized PnL
-                                if side == "sell":  # Closing long position
-                                    pnl = (
-                                        price - existing_pos["price"]
-                                    ) * min(amount, existing_pos["amount"])
-                                else:  # Closing short position
-                                    pnl = (
-                                        existing_pos["price"] - price
-                                    ) * min(amount, existing_pos["amount"])
-
-                                calculated_realized_pnl += pnl
-
-                                # Update or remove position
-                                if amount >= existing_pos["amount"]:
-                                    del position_history[symbol]
-                                else:
-                                    position_history[symbol][
-                                        "amount"
-                                    ] -= amount
-                            else:
-                                # Same side trade - average the position
-                                if symbol in position_history:
-                                    total_cost = (
-                                        existing_pos["price"]
-                                        * existing_pos["amount"]
-                                    ) + total
-                                    total_amount = (
-                                        existing_pos["amount"] + amount
-                                    )
-                                    position_history[symbol] = {
-                                        "side": side,
-                                        "price": total_cost / total_amount,
-                                        "amount": total_amount,
-                                    }
-                                else:
-                                    position_history[symbol] = {
-                                        "side": side,
-                                        "price": price,
-                                        "amount": amount,
-                                    }
-                        else:
-                            # New position
-                            position_history[symbol] = {
-                                "side": side,
-                                "price": price,
-                                "amount": amount,
-                            }
-
-                realized_pnl = calculated_realized_pnl
-
-                # Use dashboard P&L calculation for consistency
-                from frontend.utils import compute_performance
-
-                dashboard_perf = compute_performance(df)
-                dashboard_total_pnl = dashboard_perf.get("total_pnl", 0.0)
-
-                # Use dashboard P&L calculation for consistency
-                realized_pnl = dashboard_total_pnl
-
-        except Exception as e:
-            print(f"Error calculating realized P&L from trade history: {e}")
-
-        # Get open positions using the same method as the trades data API
-        try:
-            from crypto_bot.utils.open_trades import get_open_trades
-
-            open_trades = get_open_trades(TRADE_FILE)
-            if not open_trades:
-                open_positions = []
-            else:
-                # Get current prices for PnL calculation (same as trades_data API)
-                current_prices = {}
-                try:
-                    # Get current prices from the current-prices endpoint
-                    import requests
-
-                    response = requests.get(
-                        "http://localhost:8000/api/current-prices", timeout=5
-                    )
-                    if response.status_code == 200:
-                        current_prices = response.json()
-                except Exception:
-                    # Fallback: get prices directly
-                    for trade in open_trades:
-                        price = get_current_price_for_symbol(trade["symbol"])
-                        if price > 0:
-                            current_prices[trade["symbol"]] = price
-
-                # Convert the open trades format and calculate PnL (same logic as trades_data API)
-                open_positions = []
-                for trade in open_trades:
-                    symbol = trade["symbol"]
-                    side = trade["side"]
-                    amount = float(trade["amount"])
-                    entry_price = float(trade["price"])
-                    current_price = current_prices.get(symbol, 0.0)
-
-                    # Calculate unrealized PnL (same logic as trades_data API)
-                    unrealized_pnl = 0.0
-                    if current_price > 0:
-                        if side == "long":
-                            unrealized_pnl = (
-                                current_price - entry_price
-                            ) * amount
-                        else:  # short
-                            unrealized_pnl = (
-                                entry_price - current_price
-                            ) * amount
-
-                    open_positions.append(
-                        {
-                            "symbol": symbol,
-                            "side": side,
-                            "amount": amount,
-                            "entry_price": entry_price,
-                            "current_price": current_price,
-                            "unrealized_pnl": unrealized_pnl,
-                        }
-                    )
-        except Exception as e:
-            print(f"Error getting open positions: {e}")
-            open_positions = []
-
-        # Calculate unrealized PnL from open positions and total invested amount
-        unrealized_pnl = 0.0
-        total_invested_in_active_trades = 0.0
-        position_details = []
-
-        for position in open_positions:
-            symbol = position["symbol"]
-            side = position["side"]
-            amount = position["amount"]
-            entry_price = position["entry_price"]
-            current_price = position["current_price"]
-            position_unrealized_pnl = position.get("unrealized_pnl", 0.0)
-
-            # Use the pre-calculated unrealized PnL (same as trades_data API)
-            unrealized_pnl += position_unrealized_pnl
-
-            # Calculate total amount invested in this position
-            total_invested_in_active_trades += entry_price * amount
-
-            # Calculate PnL percentage
-            pnl_percentage = 0.0
-            if entry_price > 0 and amount > 0:
-                pnl_percentage = (
-                    position_unrealized_pnl / (entry_price * amount)
-                ) * 100
-
-            position_details.append(
-                {
-                    "symbol": symbol,
-                    "side": side,
-                    "amount": amount,
-                    "entry_price": entry_price,
-                    "current_price": current_price,
-                    "pnl": position_unrealized_pnl,
-                    "pnl_percentage": pnl_percentage,
-                }
-            )
-
-        # Calculate total PnL (realized + unrealized)
-        total_pnl = realized_pnl + unrealized_pnl
-
-        # Current balance = initial balance + realized PnL - amount invested in active trades
-        # This gives us the available cash + unrealized PnL from active positions
-        total_balance = (
-            initial_balance
-            + realized_pnl
-            - total_invested_in_active_trades
-            + unrealized_pnl
-        )
-
+    wallet = fetch_wallet_status()
+    if not wallet:
         return {
-            "initial_balance": initial_balance,
-            "current_balance": total_balance,
-            "realized_pnl": realized_pnl,
-            "unrealized_pnl": unrealized_pnl,
-            "total_pnl": total_pnl,
-            "total_invested_in_active_trades": total_invested_in_active_trades,
-            "pnl_percentage": (
-                (total_pnl / initial_balance) * 100
-                if initial_balance > 0
-                else 0
-            ),
-            "open_positions": position_details,
-            "position_count": len(open_positions),
-        }
-
-    except Exception as e:
-        print(f"Error calculating wallet PnL: {e}")
-        return {
-            "initial_balance": 0.0,
-            "current_balance": 0.0,
-            "realized_pnl": 0.0,
-            "unrealized_pnl": 0.0,
             "total_pnl": 0.0,
             "pnl_percentage": 0.0,
-            "open_positions": [],
-            "position_count": 0,
-            "error": str(e),
+            "realized_pnl": 0.0,
+            "unrealized_pnl": 0.0,
+            "balance": 0.0,
+            "initial_balance": 0.0,
         }
+
+    balance = float(
+        wallet.get("balance")
+        or wallet.get("total_balance")
+        or wallet.get("current_balance")
+        or 0.0
+    )
+    initial_balance = float(
+        wallet.get("initial_balance")
+        or wallet.get("starting_balance")
+        or balance
+    )
+    realized_pnl = float(wallet.get("realized_pnl") or wallet.get("realized") or 0.0)
+    unrealized_pnl = float(
+        wallet.get("unrealized_pnl") or wallet.get("unrealized") or 0.0
+    )
+    total_pnl = float(
+        wallet.get("total_pnl")
+        or wallet.get("pnl")
+        or (realized_pnl + unrealized_pnl)
+    )
+
+    if total_pnl == 0.0 and initial_balance:
+        total_pnl = balance - initial_balance
+
+    pnl_percentage = (
+        (total_pnl / initial_balance) * 100 if initial_balance else 0.0
+    )
+
+    return {
+        "total_pnl": total_pnl,
+        "pnl_percentage": pnl_percentage,
+        "realized_pnl": realized_pnl,
+        "unrealized_pnl": unrealized_pnl,
+        "balance": balance,
+        "initial_balance": initial_balance,
+    }
+
+
+
 
 
 @app.route("/api/test")
@@ -2331,169 +1551,26 @@ def api_debug_positions():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/clear-old-positions", methods=["POST"])
+def api_clear_old_positions():
+    """Legacy endpoint retained for compatibility."""
+
+    logger.info("Clear old positions request ignored; portfolio service manages retention")
+    return jsonify({"status": "ignored"})
+
+
 @app.route("/api/open-positions")
 def api_open_positions():
     """Return open positions data for the dashboard."""
+
     try:
-        logger.info("API: Starting open positions request")
+        positions = get_open_positions()
+        return jsonify(positions)
+    except Exception as exc:
+        logger.error("Failed to fetch open positions: %s", exc)
+        return jsonify({"error": str(exc)}), 502
 
-        # Load TradeManager state directly from the resolved LOG_DIR to avoid CWD issues
-        import json
-        state_file = LOG_DIR / "trade_manager_state.json"
-        logger.info(f"API: Checking state file at {state_file.resolve()}")
 
-        if state_file.exists():
-            logger.info("API: State file exists, loading data")
-            with open(state_file, "r") as f:
-                state = json.load(f)
-
-            # Get positions from state file
-            positions = state.get("positions", {})
-            price_cache = state.get("price_cache", {})
-            logger.info(f"API: Found {len(positions)} positions in state file")
-            logger.info(f"API: Found {len(price_cache)} prices in cache")
-
-            open_positions = []
-            for symbol, pos_data in positions.items():
-                logger.info(f"API: Processing position {symbol}: {pos_data}")
-
-                # Skip test positions
-                if is_test_position(symbol):
-                    logger.warning(
-                        f"Filtering out test position in API: {symbol}"
-                    )
-                    continue
-
-                if pos_data.get("total_amount", 0) > 0:  # Open position
-                    # Try to get current price from cache first
-                    current_price = price_cache.get(symbol, 0)
-
-                    # If no cached price or price is stale, try to fetch current price on-demand
-                    if not current_price or current_price == 0 or current_price == pos_data.get("average_price", 0):
-                        try:
-                            # Use shared price fetcher alias for robustness  
-                            fresh_price = get_current_price_for_symbol(symbol)
-                            if fresh_price and fresh_price > 0:
-                                current_price = fresh_price
-                                logger.debug(
-                                    f"Fetched fresh current price for {symbol}: ${current_price}"
-                                )
-                                # Update the TradeManager cache with fresh price
-                                try:
-                                    from crypto_bot.utils.trade_manager import get_trade_manager
-                                    tm = get_trade_manager()
-                                    tm.update_price(symbol, current_price)
-                                except Exception as cache_update_error:
-                                    logger.warning(f"Failed to update price cache for {symbol}: {cache_update_error}")
-                            else:
-                                logger.warning(f"No valid fresh price received for {symbol}")
-                        except Exception as price_error:
-                            logger.warning(
-                                f"Failed to fetch current price for {symbol}: {price_error}"
-                            )
-                            # Try to get from TradeManager cache as fallback
-                            try:
-                                from crypto_bot.utils.trade_manager import get_trade_manager
-                                tm = get_trade_manager()
-                                cached_price = tm.price_cache.get(symbol)
-                                if cached_price and float(cached_price) > 0:
-                                    current_price = float(cached_price)
-                                    logger.debug(f"Using TradeManager cached price for {symbol}: ${current_price}")
-                                else:
-                                    current_price = pos_data.get("average_price", 0)
-                                    logger.warning(f"No valid price available for {symbol}, using entry price as fallback")
-                            except Exception as tm_error:
-                                logger.error(f"Failed to get TradeManager price for {symbol}: {tm_error}")
-                                current_price = pos_data.get("average_price", 0)
-
-                    # Calculate PnL
-                    amount = pos_data["total_amount"]
-                    avg_price = pos_data["average_price"]
-                    side = pos_data["side"]
-
-                    if side == "long":
-                        pnl = (current_price - avg_price) * amount
-                    else:  # short
-                        pnl = (avg_price - current_price) * amount
-
-                    pnl_pct = (
-                        (pnl / (avg_price * amount)) * 100
-                        if avg_price > 0
-                        else 0
-                    )
-
-                    position_data = {
-                        "symbol": symbol,
-                        "side": side,
-                        "size": float(amount),  # Add size for template consistency
-                        "amount": float(amount),
-                        "entry_price": float(avg_price),
-                        "current_price": float(current_price),
-                        "current_value": (
-                            float(current_price * amount)
-                            if current_price
-                            else 0.0
-                        ),
-                        "pnl": float(pnl_pct),  # Template expects percentage here
-                        "pnl_value": float(pnl),  # Template expects dollar amount here
-                        "pnl_percentage": float(pnl_pct),  # Keep for backward compatibility
-                        "entry_time": pos_data.get("entry_time", ""),
-                        "position_value": (
-                            float(current_price * amount)
-                            if current_price
-                            else 0.0
-                        ),
-                        # Add missing fields for template
-                        "r_squared": min(99.9, max(60.0, 70.0 + abs(pnl_pct) * 2)),
-                        # Include stop loss/trailing stop price for chart line
-                        "stop_price": (
-                            float(pos_data.get("stop_loss_price"))
-                            if pos_data.get("stop_loss_price") is not None
-                            else None
-                        ),
-                    }
-                    open_positions.append(position_data)
-                    logger.info(f"API: Added position {symbol} to response")
-
-            # Cross-check against CSV-derived open trades to eliminate stale entries
-            try:
-                from crypto_bot.utils.open_trades import get_open_trades
-                csv_opens = get_open_trades(TRADE_FILE)
-                csv_symbols = {o.get("symbol") for o in csv_opens}
-                filtered_positions = [p for p in open_positions if p.get("symbol") in csv_symbols] if csv_symbols else open_positions
-                logger.info(
-                    f"API: Returning {len(filtered_positions)} positions after CSV cross-check (state had {len(open_positions)})"
-                )
-                return jsonify(filtered_positions)
-            except Exception as _csv_check_err:
-                logger.warning(f"API: CSV cross-check failed: {_csv_check_err}")
-                logger.info(
-                    f"API: Returning {len(open_positions)} open positions from state file"
-                )
-                return jsonify(open_positions)
-        else:
-            logger.warning(
-                "API: State file does not exist, using legacy method"
-            )
-            # Fallback to legacy method
-            open_positions = get_open_positions()
-            logger.info(
-                f"API: Returning {len(open_positions)} positions from legacy method"
-            )
-            return jsonify(open_positions)
-
-    except Exception as e:
-        logger.error(f"Failed to get open positions for API: {e}")
-        # Try legacy method as final fallback
-        try:
-            open_positions = get_open_positions()
-            logger.warning(
-                f"API: Using legacy fallback, returning {len(open_positions)} positions"
-            )
-            return jsonify(open_positions)
-        except Exception as fallback_error:
-            logger.error(f"API: Legacy fallback also failed: {fallback_error}")
-            return jsonify({"error": str(fallback_error)}), 500
 
 
 def fetch_current_price_for_symbol(symbol):
@@ -2613,242 +1690,114 @@ def api_wallet_pnl():
 
 @app.route("/start", methods=["POST"])
 def start():
-    global bot_proc, bot_start_time
     mode = request.form.get("mode", "dry_run")
     set_execution_mode(mode)
-    if not is_running() and not check_existing_bot():
-        # Launch the asyncio-based trading bot using the non-interactive script
-        venv_python = Path(__file__).parent.parent / "venv" / "bin" / "python3"
-        bot_script = Path(__file__).parent.parent / "start_bot.py"
-        bot_proc = subprocess.Popen([str(venv_python), str(bot_script), "noninteractive"])
-        bot_start_time = time.time()
+    start_trading_engine(mode)
     return redirect(url_for("index"))
 
 
 @app.route("/start_bot", methods=["POST"])
 def start_bot():
     """Start the trading bot and return JSON status."""
-    global bot_proc, bot_start_time
     mode = (
         request.json.get("mode", "dry_run")
         if request.is_json
         else request.form.get("mode", "dry_run")
     )
-    print(f"Starting bot with mode: {mode}")
+    interval_seconds = None
+    immediate = True
+    if request.is_json:
+        interval_seconds = request.json.get("interval_seconds")
+        immediate = request.json.get("immediate", True)
+
     set_execution_mode(mode)
+    result = start_trading_engine(
+        mode,
+        interval_seconds=interval_seconds,
+        immediate=bool(immediate),
+    )
 
-    # Check if we have a tracked subprocess running
-    if utils.is_running(bot_proc):
-        print("Bot subprocess is already running")
-        return jsonify(
-            {
-                "status": "already_running",
-                "running": True,
-                "uptime": get_uptime(),
-                "mode": mode,
-                "message": "Bot is already running",
-            }
-        )
+    state = get_trading_engine_state(force_refresh=True)
+    running = bool(state.get("running"))
+    response = {
+        "status": "started" if running else "pending",
+        "running": running,
+        "uptime": get_uptime(),
+        "mode": mode,
+        "state": state,
+        "message": result.get("status") or "Trading engine start requested",
+    }
 
-    # Check if there's another bot process running (skip in testing)
-    if (not app.testing) and check_existing_bot():
-        print("Another bot process detected, sending start command")
-        try:
-            # LOG_DIR already imported above
-            control_file = LOG_DIR / "bot_control.json"
-            with open(control_file, "w") as f:
-                json.dump({"command": "start"}, f)
+    if "error" in result:
+        response["status"] = "error"
+        response["message"] = result["error"]
+        return jsonify(response), 502
 
-            # Set start time if not already set (for existing processes)
-            global bot_start_time
-            if bot_start_time is None:
-                bot_start_time = time.time()
-
-            return jsonify(
-                {
-                    "status": "started",
-                    "running": True,
-                    "uptime": get_uptime(),
-                    "mode": mode,
-                    "message": "Started existing bot via control command",
-                }
-            )
-        except Exception as e:
-            print(f"Error sending start command: {e}")
-            return jsonify(
-                {
-                    "status": f"error: {e}",
-                    "running": False,
-                    "uptime": get_uptime(),
-                    "mode": mode,
-                    "message": f"Failed to send start command: {e}",
-                }
-            )
-
-    # Start new bot process
-    print("Starting new bot process")
-    try:
-        venv_python = Path(__file__).parent.parent / "venv" / "bin" / "python3"
-        bot_script = (
-            Path(__file__).parent.parent / "start_bot.py"
-        )
-
-        print(f"Using Python: {venv_python}")
-        print(f"Using script: {bot_script}")
-
-        if not venv_python.exists():
-            print(f"Python executable not found: {venv_python}")
-            return jsonify(
-                {
-                    "status": "error: Python executable not found",
-                    "running": False,
-                    "uptime": get_uptime(),
-                    "mode": mode,
-                    "message": "Python executable not found",
-                }
-            )
-
-        if not bot_script.exists():
-            print(f"Bot script not found: {bot_script}")
-            return jsonify(
-                {
-                    "status": "error: Bot script not found",
-                    "running": False,
-                    "uptime": get_uptime(),
-                    "mode": mode,
-                    "message": "Bot script not found",
-                }
-            )
-
-        # Pass environment variables to subprocess
-        env = os.environ.copy()
-        bot_proc = subprocess.Popen(
-            [str(venv_python), str(bot_script), "noninteractive"], env=env
-        )
-        bot_start_time = time.time()
-
-        # Wait a moment to see if the process starts successfully
-        time.sleep(1)
-
-        if bot_proc.poll() is None:
-            print("Bot process started successfully")
-            return jsonify(
-                {
-                    "status": "started",
-                    "running": True,
-                    "uptime": get_uptime(),
-                    "mode": mode,
-                    "message": "Bot process started",
-                }
-            )
-        else:
-            print(
-                f"Bot process failed to start, return code: {bot_proc.returncode}"
-            )
-            return jsonify(
-                {
-                    "status": f"error: Bot process failed to start (return code: {bot_proc.returncode})",
-                    "running": False,
-                    "uptime": get_uptime(),
-                    "mode": mode,
-                    "message": "Bot process failed to start",
-                }
-            )
-
-    except Exception as e:
-        print(f"Error starting bot: {e}")
-        return jsonify(
-            {
-                "status": f"error: {e}",
-                "running": False,
-                "uptime": get_uptime(),
-                "mode": mode,
-                "message": f"Error starting bot: {e}",
-            }
-        )
+    return jsonify(response)
 
 
 @app.route("/stop")
 def stop():
-    global bot_proc, bot_start_time
-    if is_running():
-        bot_proc.terminate()
-        bot_proc.wait()
-    bot_proc = None
-    bot_start_time = None
+    stop_trading_engine()
     return redirect(url_for("index"))
 
 
 @app.route("/stop_bot", methods=["POST"])
 def stop_bot():
     """Stop the trading bot and return JSON status."""
-    global bot_proc, bot_start_time
-    status = "not_running"
+    result = stop_trading_engine()
+    state = get_trading_engine_state(force_refresh=True)
+    response = {
+        "status": "stopped" if not state.get("running") else "pending",
+        "running": bool(state.get("running")),
+        "uptime": get_uptime(),
+        "mode": load_execution_mode(),
+        "message": result.get("status") or "Trading engine stop requested",
+    }
 
-    # Send stop command to running bot if it exists
-    if check_existing_bot():
-        try:
-            # LOG_DIR already imported above
-            control_file = LOG_DIR / "bot_control.json"
-            with open(control_file, "w") as f:
-                json.dump({"command": "stop"}, f)
-            status = "stopped"
-        except Exception as e:
-            status = f"error: {e}"
-    elif is_running():
-        bot_proc.terminate()
-        bot_proc.wait()
-        status = "stopped"
-        bot_proc = None
-        bot_start_time = None
+    if "error" in result:
+        response["status"] = "error"
+        response["message"] = result["error"]
+        return jsonify(response), 502
 
-    return jsonify(
-        {
-            "status": status,
-            "running": False,
-            "uptime": get_uptime(),
-            "mode": load_execution_mode(),
-            "message": "Bot stopped" if status == "stopped" else status,
-        }
-    )
+    return jsonify(response)
 
 
 @app.route("/pause_bot", methods=["POST"])
 def pause_bot():
     """Pause the trading bot and return JSON status."""
-    global bot_proc, bot_start_time
-    status = "not_running"
-    if is_running():
-        # Send SIGSTOP to pause the process
-        bot_proc.send_signal(signal.SIGSTOP)
-        status = "paused"
-    return jsonify(
-        {
-            "status": status,
-            "running": False,
-            "uptime": get_uptime(),
-            "mode": load_execution_mode(),
-        }
-    )
+    result = stop_trading_engine()
+    response = {
+        "status": "paused" if "error" not in result else "error",
+        "running": False,
+        "uptime": get_uptime(),
+        "mode": load_execution_mode(),
+        "message": result.get("status") or "Trading engine pause requested",
+    }
+    if "error" in result:
+        response["message"] = result["error"]
+        return jsonify(response), 502
+    return jsonify(response)
 
 
 @app.route("/resume_bot", methods=["POST"])
 def resume_bot():
     """Resume the trading bot and return JSON status."""
-    global bot_proc, bot_start_time
-    status = "not_running"
-    if bot_proc and bot_proc.poll() is None:
-        # Send SIGCONT to resume the process
-        bot_proc.send_signal(signal.SIGCONT)
-        status = "resumed"
-    return jsonify(
-        {
-            "status": status,
-            "running": True,
-            "uptime": get_uptime(),
-            "mode": load_execution_mode(),
-        }
-    )
+    mode = load_execution_mode()
+    result = start_trading_engine(mode, immediate=False)
+    state = get_trading_engine_state(force_refresh=True)
+    response = {
+        "status": "resumed" if state.get("running") else "pending",
+        "running": bool(state.get("running")),
+        "uptime": get_uptime(),
+        "mode": mode,
+        "message": result.get("status") or "Trading engine resume requested",
+    }
+    if "error" in result:
+        response["status"] = "error"
+        response["message"] = result["error"]
+        return jsonify(response), 502
+    return jsonify(response)
 
 
 @app.route("/bot_logs")
@@ -3547,23 +2496,13 @@ def save_config_settings():
 def refresh_config():
     """Refresh configuration by reloading from files."""
     try:
-        # Send reload command to running bot if it exists
-        if check_existing_bot():
-            # LOG_DIR already imported above
-            control_file = LOG_DIR / "bot_control.json"
-            with open(control_file, "w") as f:
-                json.dump({"command": "reload"}, f)
-            return jsonify(
-                {"status": "success", "message": "Reload command sent to bot"}
-            )
-        else:
-            # Bot not running, just return success
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "Configuration refreshed successfully",
-                }
-            )
+        response = post_gateway_json(TRADING_ENGINE_RELOAD_CONFIG_PATH, json={})
+        message = (
+            response.get("status") if isinstance(response, dict) else "Configuration reload triggered"
+        )
+        return jsonify(
+            {"status": "success", "message": message}
+        )
     except Exception as e:
         return (
             jsonify(
