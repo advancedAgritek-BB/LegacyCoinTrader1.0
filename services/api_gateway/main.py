@@ -2,20 +2,79 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Dict
+from datetime import datetime
+from typing import Dict, List, Optional
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, constr
 from redis import asyncio as redis_asyncio
 
 from .auth import AuthManager, TokenPayload
 from .config import GatewaySettings, ServiceRouteConfig, load_gateway_settings
+from .identity import (
+    ApiKeyRotationRequiredError,
+    ApiKeyValidationError,
+    IdentityService,
+    InactiveAccountError,
+    InvalidCredentialsError,
+    PasswordExpiredError,
+)
 from .proxy import ProxyGateway
 from .rate_limiter import RateLimitResult, RateLimiter
 
 LOGGER = logging.getLogger("api_gateway")
+
+
+class TokenRequest(BaseModel):
+    """Incoming credentials for token issuance."""
+
+    username: constr(min_length=1, strip_whitespace=True)
+    password: constr(min_length=1)
+
+
+class TokenResponse(BaseModel):
+    """JWT payload returned to authenticated clients."""
+
+    access_token: str
+    token_type: str = Field(default="bearer")
+    expires_at: datetime
+    username: str
+    roles: List[str]
+    password_expires_at: Optional[datetime] = None
+
+
+class PasswordRotationRequest(BaseModel):
+    """Payload for a password rotation request."""
+
+    username: constr(min_length=1, strip_whitespace=True)
+    current_password: constr(min_length=1)
+    new_password: constr(min_length=8)
+
+
+class PasswordRotationResponse(BaseModel):
+    """Metadata returned after a successful password rotation."""
+
+    username: str
+    roles: List[str]
+    password_rotated_at: datetime
+    password_expires_at: Optional[datetime] = None
+
+
+class ApiKeyValidationRequest(BaseModel):
+    """Payload for API key validation."""
+
+    api_key: constr(min_length=1)
+
+
+class ApiKeyValidationResponse(BaseModel):
+    """Response returned when an API key is validated."""
+
+    username: str
+    roles: List[str]
+    api_key_last_rotated_at: Optional[datetime] = None
 
 
 def create_app() -> FastAPI:
@@ -56,6 +115,7 @@ class GatewayState:
         self.auth_manager: AuthManager | None = None
         self.rate_limiter: RateLimiter | None = None
         self.proxy_gateway: ProxyGateway | None = None
+        self.identity_service: IdentityService | None = None
 
 
 async def get_state(request: Request) -> GatewayState:
@@ -78,6 +138,7 @@ def register_events(app: FastAPI, state: GatewayState) -> None:
             state.settings,
             state.http_client,
         )
+        state.identity_service = IdentityService(state.settings)
 
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
@@ -105,6 +166,109 @@ async def _init_redis(settings: GatewaySettings) -> redis_asyncio.Redis | None:
 
 
 def register_routes(app: FastAPI, state: GatewayState) -> None:
+    def _get_identity_service(state: GatewayState) -> IdentityService:
+        if state.identity_service is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Identity service unavailable",
+            )
+        return state.identity_service
+
+    def _token_has_required_roles(token: TokenPayload, required_roles: List[str]) -> bool:
+        if not required_roles:
+            return True
+        scopes = set(token.scopes or [])
+        if "admin" in scopes or "internal" in scopes:
+            return True
+        if token.token_type == "service" and token.service_name:
+            if token.service_name in required_roles:
+                return True
+        for role in required_roles:
+            if role in scopes or f"service:{role}" in scopes:
+                return True
+        return False
+
+    @app.post("/auth/token", tags=["Authentication"], response_model=TokenResponse)
+    async def issue_access_token(
+        payload: TokenRequest,
+        request: Request,
+        state: GatewayState = Depends(get_state),
+    ) -> TokenResponse:
+        del request  # request metadata reserved for future auditing
+        identity_service = _get_identity_service(state)
+        try:
+            issued = identity_service.issue_token(payload.username, payload.password)
+        except InvalidCredentialsError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password",
+            ) from None
+        except InactiveAccountError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        except PasswordExpiredError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+        return TokenResponse(
+            access_token=issued.access_token,
+            expires_at=issued.expires_at,
+            username=issued.username,
+            roles=issued.roles,
+            password_expires_at=issued.password_expires_at,
+        )
+
+    @app.post(
+        "/auth/password/rotate",
+        tags=["Authentication"],
+        response_model=PasswordRotationResponse,
+    )
+    async def rotate_password(
+        payload: PasswordRotationRequest,
+        state: GatewayState = Depends(get_state),
+    ) -> PasswordRotationResponse:
+        identity_service = _get_identity_service(state)
+        try:
+            identity = identity_service.rotate_password(
+                payload.username, payload.current_password, payload.new_password
+            )
+        except InvalidCredentialsError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+        except InactiveAccountError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+        return PasswordRotationResponse(
+            username=identity.username,
+            roles=identity.roles,
+            password_rotated_at=identity.password_rotated_at,
+            password_expires_at=identity.password_expires_at,
+        )
+
+    @app.post(
+        "/auth/api-key/validate",
+        tags=["Authentication"],
+        response_model=ApiKeyValidationResponse,
+    )
+    async def validate_api_key(
+        payload: ApiKeyValidationRequest,
+        state: GatewayState = Depends(get_state),
+    ) -> ApiKeyValidationResponse:
+        identity_service = _get_identity_service(state)
+        try:
+            identity = identity_service.validate_api_key(payload.api_key)
+        except ApiKeyRotationRequiredError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        except InactiveAccountError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        except ApiKeyValidationError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key"
+            ) from None
+
+        return ApiKeyValidationResponse(
+            username=identity.username,
+            roles=identity.roles,
+            api_key_last_rotated_at=identity.api_key_last_rotated_at,
+        )
+
     @app.get("/health", tags=["Health"])
     async def gateway_health() -> JSONResponse:
         health_results: Dict[str, Dict[str, object]] = {}
@@ -140,6 +304,7 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
                     "target": route.url,
                     "auth": route.allowed_auth_modes,
                     "rate_limit_per_minute": route.rate_limit_per_minute,
+                    "required_roles": route.required_roles,
                 }
                 for name, route in state.settings.service_routes.items()
             },
@@ -154,6 +319,7 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
                 "target": route.url,
                 "auth": route.allowed_auth_modes,
                 "rate_limit_per_minute": route.rate_limit_per_minute,
+                "required_roles": route.required_roles,
             }
             for name, route in state.settings.service_routes.items()
         }
@@ -169,6 +335,11 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
             token = await state.auth_manager.authenticate_request(
                 request, route.allowed_auth_modes
             )
+            if not _token_has_required_roles(token, route.required_roles):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Insufficient role privileges",
+                )
             identifier = f"{route.name}:{token.rate_limit_key}"
             result = await state.rate_limiter.check(identifier, route.rate_limit_per_minute)
             if not result.allowed:

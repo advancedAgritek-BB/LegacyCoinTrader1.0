@@ -35,6 +35,7 @@ class ServiceRouteConfig:
     )
     service_token: Optional[str] = None
     health_endpoint: str = "/health"
+    required_roles: List[str] = field(default_factory=list)
 
     def build_target_url(self, path_suffix: str) -> str:
         """Construct the target URL for the downstream service."""
@@ -66,6 +67,8 @@ class GatewaySettings:
     http_client_timeout: float
     allowed_origins: List[str]
     service_routes: Dict[str, ServiceRouteConfig]
+    token_ttl_seconds: int
+    token_issuer: str
 
     @property
     def cors_origins(self) -> List[str]:
@@ -84,6 +87,16 @@ _SERVICE_PREFIX_OVERRIDES: Dict[str, str] = {
     "token_discovery": "/api/v1/token-discovery",
     "execution": "/api/v1/execution",
     "monitoring": "/api/v1/monitoring",
+}
+
+_SERVICE_ROLE_REQUIREMENTS: Dict[str, List[str]] = {
+    "portfolio": ["portfolio"],
+    "trading_engine": ["trading"],
+    "market_data": ["market"],
+    "strategy_engine": ["strategy"],
+    "token_discovery": ["token"],
+    "execution": ["execution"],
+    "monitoring": ["monitoring"],
 }
 
 
@@ -171,6 +184,7 @@ def _build_route_config(
         rate_limit_per_minute=int(limit_env),
         allowed_auth_modes=auth_modes,
         service_token=service_tokens.get(service_name),
+        required_roles=_SERVICE_ROLE_REQUIREMENTS.get(service_name, ["admin"]),
     )
 
 
@@ -220,5 +234,7 @@ def load_gateway_settings() -> GatewaySettings:
         http_client_timeout=float(os.getenv("GATEWAY_HTTP_CLIENT_TIMEOUT", "30")),
         allowed_origins=allowed_origins,
         service_routes=service_routes,
+        token_ttl_seconds=int(os.getenv("GATEWAY_TOKEN_TTL_SECONDS", "3600")),
+        token_issuer=os.getenv("GATEWAY_TOKEN_ISSUER", "legacycointrader-gateway"),
     )
 

@@ -297,8 +297,14 @@ def login():
 
         user = auth.authenticate(username, password)
         if user:
-            session["user"] = user
+            session["user"] = {
+                "username": user["username"],
+                "roles": user.get("roles", []),
+            }
             session["login_time"] = user["login_time"]
+            session["access_token"] = user.get("access_token")
+            session["token_expires_at"] = user.get("token_expires_at")
+            session["password_expires_at"] = user.get("password_expires_at")
             flash("Login successful!", "success")
             return redirect(url_for("dashboard"))
         else:
@@ -335,12 +341,21 @@ def api_login():
 
     user = auth.authenticate(username, password)
     if user:
-        session["user"] = user
+        session["user"] = {
+            "username": user["username"],
+            "roles": user.get("roles", []),
+        }
         session["login_time"] = user["login_time"]
+        session["access_token"] = user.get("access_token")
+        session["token_expires_at"] = user.get("token_expires_at")
+        session["password_expires_at"] = user.get("password_expires_at")
         return jsonify(
             {
                 "message": "Login successful",
-                "user": {"username": user["username"], "role": user["role"]},
+                "user": {
+                    "username": user["username"],
+                    "roles": user.get("roles", []),
+                },
             }
         )
     else:
@@ -367,7 +382,10 @@ def auth_status():
         return jsonify(
             {
                 "authenticated": True,
-                "user": {"username": user["username"], "role": user["role"]},
+                "user": {
+                    "username": user.get("username"),
+                    "roles": user.get("roles", []),
+                },
             }
         )
     else:
