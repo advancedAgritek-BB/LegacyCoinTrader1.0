@@ -1,0 +1,6 @@
+apiVersion: v2
+name: token-discovery
+description: Helm chart for the LegacyCoinTrader token discovery service.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
