@@ -4,25 +4,35 @@ A comprehensive, high-performance cryptocurrency trading bot supporting both cen
 
 ## 🚀 Quick Start
 
-### Automated Setup (Recommended)
+### Start the core services
 ```bash
 chmod +x startup.sh
-./startup.sh
+./startup.sh bootstrap   # optional: pull the latest images
+./startup.sh start       # spins up Redis, the API gateway, trading engine, etc.
 ```
 
-### Manual Setup
+### Control the trading engine
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Inspect scheduler state
+python -m crypto_bot.main status
 
-# Configure API credentials
-python crypto_bot/wallet_manager.py
+# Start scheduled trading cycles immediately
+python -m crypto_bot.main start --interval 60 --immediate
 
-# Start trading bot
-python -m crypto_bot.main
+# Pause the engine or trigger an emergency liquidation
+python -m crypto_bot.main pause
+python -m crypto_bot.main emergency-stop
+```
 
-# Launch web dashboard
-python -m frontend.app
+### Manual setup with Docker Compose
+```bash
+# Start the same stack without the helper script
+docker compose up -d \
+  redis api-gateway trading-engine market-data portfolio \
+  strategy-engine execution monitoring frontend
+
+# Use the CLI to manage trading cycles
+python -m crypto_bot.main status
 ```
 
 ## 🕸 Microservice API Gateway
@@ -87,6 +97,26 @@ curl http://localhost:8000/health | jq
 
 When using the full stack (`make dev` or `docker-compose up`), the frontend and
 test harness consume the gateway endpoint at `http://localhost:8000`.
+
+### Trading Engine CLI
+
+The long-running `PhaseRunner` loop has moved into the dedicated trading engine
+service. The local CLI now acts as a thin client that issues commands through
+the gateway:
+
+```bash
+# Show available commands
+python -m crypto_bot.main --help
+
+# Trigger a single ad-hoc cycle
+python -m crypto_bot.main run-once --metadata trigger=manual
+
+# Pause scheduled cycles
+python -m crypto_bot.main pause
+```
+
+Each command exits immediately after the gateway acknowledges the request. The
+scheduler continues to run inside the trading engine microservice.
 
 ## ✨ Key Features
 
