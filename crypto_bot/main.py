@@ -440,6 +440,7 @@ async def initial_scan(
         symbols = [s for s, _ in scored]
     except Exception:
         symbols = [s for s in raw_symbols if s]
+    exchange_id = getattr(exchange, "id", "") or str(config.get("exchange", "kraken"))
     batch_size = int(config.get("symbol_batch_size", 10))
     total = len(symbols)
     processed = 0
@@ -459,7 +460,7 @@ async def initial_scan(
         try:
             df_response = await services.market_data.update_multi_tf_cache(
                 MultiTimeframeOHLCVRequest(
-                    exchange=exchange,
+                    exchange_id=str(exchange_id),
                     cache=state.df_cache,
                     symbols=batch,
                     config=loader_cfg,
@@ -468,7 +469,7 @@ async def initial_scan(
             state.df_cache = df_response.cache
             regime_response = await services.market_data.update_regime_cache(
                 RegimeCacheRequest(
-                    exchange=exchange,
+                    exchange_id=str(exchange_id),
                     cache=state.regime_cache,
                     symbols=batch,
                     config=config,
@@ -722,6 +723,7 @@ async def update_caches(ctx: BotContext) -> None:
     logger.info("PHASE: update_caches starting with batch size %d", len(ctx.current_batch))
     if ctx.services is None:
         raise RuntimeError("Market data service unavailable in context")
+    exchange_id = getattr(ctx.exchange, "id", "") if ctx.exchange else ctx.config.get("exchange", "kraken")
     batch = ctx.current_batch
     if not batch:
         logger.info("PHASE: update_caches - empty batch, skipping")
@@ -742,7 +744,7 @@ async def update_caches(ctx: BotContext) -> None:
         # Update both main and regime caches in a single consolidated operation
         multi_response = await ctx.services.market_data.update_multi_tf_cache(
             MultiTimeframeOHLCVRequest(
-                exchange=ctx.exchange,
+                exchange_id=str(exchange_id),
                 cache=ctx.df_cache,
                 symbols=batch,
                 config=ctx.config,
@@ -752,7 +754,7 @@ async def update_caches(ctx: BotContext) -> None:
         ctx.df_cache = multi_response.cache
         regime_response = await ctx.services.market_data.update_regime_cache(
             RegimeCacheRequest(
-                exchange=ctx.exchange,
+                exchange_id=str(exchange_id),
                 cache=ctx.regime_cache,
                 symbols=batch,
                 config=ctx.config,
@@ -1104,8 +1106,14 @@ async def execute_cex_trade(
             take_profit = None
             if strategy == "bounce_scalper":
                 depth = int(ctx.config.get("liquidity_depth", 10))
+                exchange_id_local = getattr(ctx.exchange, "id", ctx.config.get("exchange", "kraken"))
                 order_book_resp = await ctx.services.market_data.fetch_order_book(
-                    OrderBookRequest(exchange=ctx.exchange, symbol=sym, depth=depth)
+                    OrderBookRequest(
+                        exchange_id=str(exchange_id_local),
+                        symbol=sym,
+                        depth=depth,
+                        config=ctx.config,
+                    )
                 )
                 book = order_book_resp.order_book
                 dist = _closest_wall_distance(book, price, side)
@@ -1840,6 +1848,7 @@ async def _main_impl(
     )
     exchange = exchange_resp.exchange
     ws_client = exchange_resp.ws_client
+    exchange_id = getattr(exchange, "id", "") or str(config.get("exchange", "kraken"))
     ping_interval = int(config.get("ws_ping_interval", 0) or 0)
     if ping_interval > 0 and hasattr(exchange, "ping"):
         task = asyncio.create_task(_ws_ping_loop(exchange, ping_interval))
@@ -1859,7 +1868,7 @@ async def _main_impl(
             start_scan = time.perf_counter()
             response = await services.market_data.load_symbols(
                 LoadSymbolsRequest(
-                    exchange=exchange,
+                    exchange_id=str(exchange_id),
                     exclude=config.get("excluded_symbols", []),
                     config=config,
                 )
@@ -2702,13 +2711,14 @@ async def _main_impl(
                         # Use legacy fetcher for open positions
                         response = await ctx.services.market_data.update_ohlcv_cache(
                             OHLCVCacheRequest(
-                                exchange=exchange,
+                                exchange_id=str(exchange_id),
                                 cache=tf_cache,
                                 symbols=open_syms,
                                 timeframe=tf,
                                 limit=2,
                                 use_websocket=False,
                                 max_concurrent=config.get("max_concurrent_ohlcv", 3),
+                                config=config,
                             )
                         )
                         tf_cache = response.cache

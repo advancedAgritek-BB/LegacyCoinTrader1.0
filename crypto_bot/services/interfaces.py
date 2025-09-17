@@ -14,7 +14,7 @@ from typing import Any, Callable, Iterable, Mapping, MutableMapping, Optional, P
 class LoadSymbolsRequest:
     """Parameters used to discover tradable symbols on an exchange."""
 
-    exchange: object
+    exchange_id: str
     exclude: Sequence[str]
     config: Optional[Mapping[str, Any]] = None
 
@@ -30,7 +30,7 @@ class LoadSymbolsResponse:
 class OHLCVCacheRequest:
     """Parameters for updating a single timeframe OHLCV cache."""
 
-    exchange: object
+    exchange_id: str
     cache: MutableMapping[str, Any]
     symbols: Sequence[str]
     timeframe: str = "1h"
@@ -46,7 +46,7 @@ class OHLCVCacheRequest:
 class MultiTimeframeOHLCVRequest:
     """Parameters for updating OHLCV caches across multiple timeframes."""
 
-    exchange: object
+    exchange_id: str
     cache: MutableMapping[str, MutableMapping[str, Any]]
     symbols: Sequence[str]
     config: Mapping[str, Any]
@@ -63,7 +63,7 @@ class MultiTimeframeOHLCVRequest:
 class RegimeCacheRequest:
     """Parameters for updating regime timeframe caches."""
 
-    exchange: object
+    exchange_id: str
     cache: MutableMapping[str, MutableMapping[str, Any]]
     symbols: Sequence[str]
     config: Mapping[str, Any]
@@ -86,9 +86,10 @@ class CacheUpdateResponse:
 class OrderBookRequest:
     """Parameters for fetching an order book snapshot."""
 
-    exchange: object
+    exchange_id: str
     symbol: str
     depth: int = 2
+    config: Optional[Mapping[str, Any]] = None
 
 
 @dataclass(slots=True)
@@ -102,7 +103,7 @@ class OrderBookResponse:
 class TimeframeRequest:
     """Request conversion of timeframe to seconds."""
 
-    exchange: Optional[object]
+    exchange_id: Optional[str] = None
     timeframe: str
 
 
