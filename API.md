@@ -4,12 +4,72 @@ This document provides comprehensive API documentation for all the performance e
 
 ## Table of Contents
 
-1. [MemoryManager](#memorymanager)
-2. [AdaptiveRateLimiter](#adaptiveratelimiter)
-3. [AdaptiveCacheManager](#adaptivecachemanager)
-4. [PerformanceMonitor](#performancemonitor)
-5. [DatabaseManager](#databasemanager)
-6. [Configuration](#configuration)
+1. [API Gateway](#api-gateway)
+2. [MemoryManager](#memorymanager)
+3. [AdaptiveRateLimiter](#adaptiveratelimiter)
+4. [AdaptiveCacheManager](#adaptivecachemanager)
+5. [PerformanceMonitor](#performancemonitor)
+6. [DatabaseManager](#databasemanager)
+7. [Configuration](#configuration)
+
+## API Gateway
+
+The API gateway (`services/api_gateway/`) is the public entry point for the
+microservice deployment. It validates authentication tokens, enforces rate
+limits, and forwards HTTP requests to the downstream services declared in
+`microservice_architecture.yaml`.
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Aggregate health for Redis and downstream services. |
+| `GET` | `/routes` | Return the active proxy table with authentication modes and rate limits. |
+| `*` | `/api/v1/trading/**` | Proxy to the trading engine (`http://trading-engine:8001`). |
+| `*` | `/api/v1/market-data/**` | Proxy to the market data service (`http://market-data:8002`). |
+| `*` | `/api/v1/portfolio/**` | Proxy to the portfolio service (`http://portfolio:8003`). |
+| `*` | `/api/v1/strategy/**` | Proxy to the strategy engine (`http://strategy-engine:8004`). |
+| `*` | `/api/v1/token-discovery/**` | Proxy to the token discovery service (`http://token-discovery:8005`). |
+| `*` | `/api/v1/execution/**` | Proxy to the execution service (`http://execution:8006`). |
+| `*` | `/api/v1/monitoring/**` | Proxy to the monitoring service (`http://monitoring:8007`). |
+
+All proxied routes support the standard HTTP verbs (`GET`, `POST`, `PUT`,
+`PATCH`, `DELETE`, `OPTIONS`).
+
+### Authentication
+
+- **JWT tokens** use the shared secret configured by `GATEWAY_JWT_SECRET`. Tokens
+  must include a `sub` claim and optionally a `scopes` claim (string or list).
+- **Service tokens** can be configured per service with
+  `GATEWAY_SERVICE_TOKEN_<SERVICE_NAME>` or with the JSON map provided via
+  `GATEWAY_SERVICE_TOKENS`.
+- Setting `GATEWAY_REQUIRE_AUTH=0` disables enforcement (useful for local smoke
+  tests).
+
+Requests without valid credentials will receive HTTP `401 Unauthorized`. Invalid
+or exhausted rate limits produce HTTP `429 Too Many Requests` responses with
+`Retry-After`, `X-RateLimit-Limit`, and `X-RateLimit-Remaining` headers.
+
+### Rate Limiting
+
+The gateway stores counters in Redis using the host/port/database defined by
+`GATEWAY_REDIS_HOST`, `GATEWAY_REDIS_PORT`, and `GATEWAY_REDIS_DB`. When Redis is
+unavailable the limiter falls back to in-memory buckets so development
+environments remain usable.
+
+Service-specific limits can be overridden with
+`GATEWAY_RATE_LIMIT_<SERVICE_NAME>` (for example, `GATEWAY_RATE_LIMIT_TRADING_ENGINE=120`).
+
+### Example Request
+
+```bash
+# Request the trading engine status using a service token
+curl \
+  -H "X-Service-Token: insecure-local-token-trading_engine" \
+  http://localhost:8000/api/v1/trading/health
+```
+
+Replace the token with the secure value configured for your deployment.
 
 ## MemoryManager
 

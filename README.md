@@ -25,6 +25,69 @@ python -m crypto_bot.main
 python -m frontend.app
 ```
 
+## 🕸 Microservice API Gateway
+
+LegacyCoinTrader's microservice rollout is fronted by a FastAPI-powered API gateway
+(`services/api_gateway/`). The gateway terminates client connections, validates
+JWT or service-to-service tokens, applies Redis-backed rate limiting, and forwards
+requests to the individual services defined in `microservice_architecture.yaml`.
+
+### Route Map
+
+| Path Prefix | Downstream Service | Default Target | Authentication | Rate Limit* |
+|-------------|-------------------|----------------|----------------|-------------|
+| `/api/v1/trading` | Trading Engine | `http://trading-engine:8001` | JWT & service tokens | 60 req/min |
+| `/api/v1/market-data` | Market Data | `http://market-data:8002` | JWT & service tokens | 60 req/min |
+| `/api/v1/portfolio` | Portfolio | `http://portfolio:8003` | JWT & service tokens | 60 req/min |
+| `/api/v1/strategy` | Strategy Engine | `http://strategy-engine:8004` | JWT & service tokens | 60 req/min |
+| `/api/v1/token-discovery` | Token Discovery | `http://token-discovery:8005` | JWT & service tokens | 60 req/min |
+| `/api/v1/execution` | Execution | `http://execution:8006` | JWT & service tokens | 60 req/min |
+| `/api/v1/monitoring` | Monitoring | `http://monitoring:8007` | Service tokens (optional JWT) | 60 req/min |
+
+\*Defaults can be overridden with `GATEWAY_RATE_LIMIT_<SERVICE_NAME>` environment
+variables or the global `GATEWAY_RATE_LIMIT_REQUESTS` setting.
+
+### Authentication & Tokens
+
+- **JWT:** Signed using `GATEWAY_JWT_SECRET` (default `change-me`) and the
+  algorithm configured via `GATEWAY_JWT_ALGORITHM` (default `HS256`). Tokens must
+  present a `sub` claim and optionally a `scopes` list.
+- **Service Tokens:** Set `GATEWAY_SERVICE_TOKEN_<SERVICE_NAME>` for each
+  microservice or provide a JSON map through `GATEWAY_SERVICE_TOKENS`. The code
+  ships with insecure per-service defaults that should only be used in local
+  development.
+- Toggle enforcement by setting `GATEWAY_REQUIRE_AUTH=0` when running smoke tests.
+
+### Rate Limiting
+
+The gateway stores counters in Redis (`GATEWAY_REDIS_HOST/PORT/DB`). When Redis is
+unavailable the limiter gracefully degrades to an in-memory bucket so local
+development remains functional.
+
+### Health & Telemetry
+
+- `GET /health` aggregates Redis status and downstream service health checks.
+- `GET /routes` returns the active route catalogue and rate-limit configuration.
+
+### Reverse Proxy Configurations
+
+Reference configurations for Envoy (`envoy.yaml`) and Nginx (`nginx.conf`) are
+provided in `services/api_gateway/` for production deployments that require an
+edge proxy with TLS termination or additional ingress policies.
+
+### Running the Gateway
+
+```bash
+# Start the gateway and dependencies
+docker-compose up -d api-gateway redis
+
+# View health status
+curl http://localhost:8000/health | jq
+```
+
+When using the full stack (`make dev` or `docker-compose up`), the frontend and
+test harness consume the gateway endpoint at `http://localhost:8000`.
+
 ## ✨ Key Features
 
 ### 🎯 **Multi-Strategy Trading System**
