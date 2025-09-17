@@ -94,6 +94,14 @@ services:
       - Order status monitoring
       - Trade execution
       - WebSocket trading
+      - REST API for exchange creation and order lifecycle streaming
+    interfaces:
+      - POST /api/v1/execution/exchanges
+      - POST /api/v1/execution/orders
+      - GET /api/v1/execution/orders/{client_order_id}/events
+    authentication:
+      service_token: EXECUTION_SERVICE_TOKEN
+      signing_key: EXECUTION_SERVICE_SIGNING_KEY
     dependencies:
       - redis_cache
       - monitoring
