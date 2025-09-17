@@ -5,6 +5,9 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+COPY libs /app/libs
+RUN pip install --no-cache-dir /app/libs
+
 COPY services/trading_engine/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 

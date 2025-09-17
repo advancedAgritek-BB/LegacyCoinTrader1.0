@@ -57,3 +57,4 @@ PyJWT>=2.8.0
 grpcio>=1.75.0
 grpcio-tools>=1.75.0
 psycopg2-binary
+legacy-trading-libs==0.1.0

@@ -8,7 +8,7 @@ import json
 import os
 from typing import Any, Mapping
 
-from crypto_bot.execution.cex_executor import get_exchange
+from libs.execution import get_exchange
 
 from .models import ExchangeCredentials, ExchangeSession
 from .nonce import NonceManager

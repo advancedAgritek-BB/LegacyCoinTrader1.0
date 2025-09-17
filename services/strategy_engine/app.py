@@ -14,7 +14,7 @@ from services.monitoring.config import get_monitoring_settings
 from services.monitoring.instrumentation import instrument_fastapi_app
 from services.monitoring.logging import configure_logging
 
-from crypto_bot.services.interfaces import (
+from libs.services.interfaces import (
     StrategyBatchRequest,
     StrategyEvaluationPayload,
     StrategyEvaluationResult,

@@ -10,11 +10,10 @@ from typing import Dict, Optional
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 import redis.asyncio as redis
 
-from crypto_bot.execution.cex_executor import get_exchange
-from crypto_bot.open_position_guard import OpenPositionGuard
-from crypto_bot.paper_wallet import PaperWallet
-from crypto_bot.risk.risk_manager import RiskManager
-from crypto_bot.startup_utils import create_service_container, load_config
+from libs.execution import get_exchange
+from libs.models import OpenPositionGuard, PaperWallet
+from libs.risk import RiskManager
+from libs.bootstrap import create_service_container, load_config
 
 from services.monitoring.config import get_monitoring_settings
 from services.monitoring.logging import configure_logging

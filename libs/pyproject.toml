@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "legacy-trading-libs"
+version = "0.1.0"
+description = "Shared LegacyCoinTrader components for microservices"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [{name = "LegacyCoinTrader Team"}]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+]
+
+[tool.setuptools]
+zip-safe = false
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["libs*"]
+exclude = ["tests*"]

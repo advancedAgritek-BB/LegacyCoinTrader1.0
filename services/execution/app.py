@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
+import os
 import json
 import logging
 import time
@@ -288,10 +290,31 @@ async def authorize_request(
 ) -> None:
     settings = state.settings
     token = request.headers.get("x-service-token")
-    if settings.service_token and not hmac.compare_digest(
-        settings.service_token, token or ""
-    ):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid service token")
+    expected = settings.service_token
+    fallback = os.getenv("EXECUTION_SERVICE_TOKEN")
+    if expected and not hmac.compare_digest(expected, token or ""):
+        refreshed = get_execution_api_settings()
+        if refreshed.service_token != expected:
+            state.settings = refreshed
+            expected = refreshed.service_token
+        if fallback and fallback != expected:
+            expected_values = {expected, fallback}
+        else:
+            expected_values = {expected}
+        for candidate in expected_values:
+            if candidate and hmac.compare_digest(candidate, token or ""):
+                if candidate != expected:
+                    state.settings = refreshed
+                settings = state.settings
+                break
+        else:
+            LOGGER.warning(
+                "Service token mismatch expected=%s provided=%s",
+                hashlib.sha256(expected.encode("utf-8")).hexdigest() if expected else None,
+                hashlib.sha256((token or "").encode("utf-8")).hexdigest() if token else None,
+            )
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid service token")
+    settings = state.settings
     await _verify_signature(request, settings)
 
 

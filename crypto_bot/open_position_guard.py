@@ -1,16 +1,5 @@
-"""Limit the number of simultaneously open trades."""
+"""Compatibility wrapper for the relocated open position guard module."""
 
-from __future__ import annotations
+from libs.models.open_position_guard import OpenPositionGuard
 
-from typing import Mapping, Sequence, Union
-
-
-class OpenPositionGuard:
-    """Simple utility enforcing ``max_open_trades``."""
-
-    def __init__(self, max_open_trades: int) -> None:
-        self.max_open_trades = max(1, int(max_open_trades))
-
-    def can_open(self, positions: Union[Mapping, Sequence]) -> bool:
-        """Return ``True`` if another trade may be opened."""
-        return len(positions) < self.max_open_trades
+__all__ = ["OpenPositionGuard"]

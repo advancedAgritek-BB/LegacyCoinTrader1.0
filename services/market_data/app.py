@@ -14,8 +14,8 @@ from services.monitoring.config import get_monitoring_settings
 from services.monitoring.instrumentation import instrument_fastapi_app
 from services.monitoring.logging import configure_logging
 
-from crypto_bot.execution.cex_executor import get_exchange
-from crypto_bot.utils.market_loader import (
+from libs.execution import get_exchange
+from libs.market_data import (
     AdaptiveRateLimiter,
     fetch_ohlcv_async,
     fetch_order_book_async,

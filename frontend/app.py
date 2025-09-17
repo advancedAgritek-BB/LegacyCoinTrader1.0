@@ -216,7 +216,7 @@ auth = get_auth()
 
 monitoring_settings = get_monitoring_settings().for_service(
     "frontend",
-    environment=config.environment,
+    environment=settings.environment,
 )
 monitoring_settings.metrics.default_labels.setdefault("component", "frontend")
 configure_logging(monitoring_settings)

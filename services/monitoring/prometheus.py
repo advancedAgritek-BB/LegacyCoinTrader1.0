@@ -24,8 +24,11 @@ class HttpMetrics:
         self._initialise_metrics(self.registry)
 
     def _initialise_metrics(self, registry: CollectorRegistry) -> None:
-        labels = ["service", "environment", "method", "route", "status"]
-        latency_labels = ["service", "environment", "method", "route"]
+        extra = []
+        if self.settings.default_labels:
+            extra = sorted(self.settings.default_labels.keys())
+        labels = ["service", "environment", *extra, "method", "route", "status"]
+        latency_labels = ["service", "environment", *extra, "method", "route"]
         namespace = self.settings.namespace
         try:
             self.request_counter = Counter(
