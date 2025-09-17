@@ -10,17 +10,26 @@ from typing import Dict
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 import redis.asyncio as redis
 
+from services.monitoring.config import get_monitoring_settings
+from services.monitoring.logging import configure_logging
+from services.monitoring.instrumentation import instrument_fastapi_app
+
 from .config import Settings, get_settings
 from .interface import TradingEngineInterface
 from .redis_state import RedisCycleStateStore
 from .scheduler import CycleScheduler
 from .schemas import CycleStateResponse, RunCycleResponse, StartCycleRequest
 
+
+monitoring_settings = get_monitoring_settings().for_service(get_settings().app_name)
+monitoring_settings.metrics.default_labels.setdefault("component", "trading-engine")
+configure_logging(monitoring_settings)
+
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI):
     settings = get_settings()
     logging.getLogger().setLevel(settings.log_level.upper())
 
@@ -72,6 +81,7 @@ def get_settings_dependency(request: Request) -> Settings:
 
 
 app = FastAPI(title="Trading Engine", lifespan=lifespan)
+instrument_fastapi_app(app, settings=monitoring_settings)
 
 
 @app.get("/health")

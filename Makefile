@@ -56,6 +56,9 @@ test-results: ## View test results
 	@echo "Test results:"
 	@ls -la test_results/ 2>/dev/null || echo "No test results found"
 
+observability-check: ## Validate observability instrumentation
+	pytest tests/test_observability.py
+
 # Service Management
 build: ## Build all services
 	docker-compose build
@@ -131,6 +134,7 @@ lint: ## Lint Python code
 
 # CI/CD
 ci-test: ## Run tests in CI environment
+	$(MAKE) observability-check
 	docker-compose -f docker-compose.yml -f docker-compose.test.yml up --abort-on-container-exit --build e2e-tests
 
 ci-deploy-dev: ## Deploy to development environment

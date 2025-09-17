@@ -5,17 +5,33 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Optional
 
+import logging
+
 from fastapi import Depends, FastAPI, HTTPException, status
+
+from services.monitoring.config import get_monitoring_settings
+from services.monitoring.instrumentation import instrument_fastapi_app
+from services.monitoring.logging import configure_logging
 
 from .config import PortfolioConfig
 from .service import PortfolioService
 from .schemas import PnlBreakdown, PortfolioState, PositionRead, TradeCreate
 
+monitoring_settings = get_monitoring_settings().for_service("portfolio-service")
+monitoring_settings.metrics.default_labels.setdefault("component", "portfolio")
+configure_logging(monitoring_settings)
+
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Portfolio Service", version="1.0.0")
+instrument_fastapi_app(app, settings=monitoring_settings)
 
 
 def get_service() -> PortfolioService:
     config = PortfolioConfig.from_env()
+    logger.debug(
+        "Initialising portfolio service", extra={"host": config.rest_host, "port": config.rest_port}
+    )
     return PortfolioService(config)
 
 
