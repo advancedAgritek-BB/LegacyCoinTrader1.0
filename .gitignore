@@ -136,6 +136,7 @@ config.yaml.backup
 *.csv
 *.json
 !tests/regression/fixtures/**/*.json
+!tests/fixtures/migration/*.json
 !sample_solana_trades.json
 
 # Additional patterns to prevent tracking of temporary files

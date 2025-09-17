@@ -13,8 +13,56 @@ NC='\033[0m' # No Color
 
 WORKING_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+HYBRID_MODE=${HYBRID_MODE_ENABLED:-false}
+READ_STRATEGY=${HYBRID_READ_STRATEGY:-compare}
+WRITE_STRATEGY=${DUAL_WRITE_STRATEGY:-mirror}
+CUTOVER_FLAG=${CUTOVER_COMPLETED:-false}
+DRIFT_TOLERANCE=${MIGRATION_DRIFT_TOLERANCE:-0.0}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --hybrid)
+            HYBRID_MODE=true
+            ;;
+        --read-strategy)
+            READ_STRATEGY="$2"
+            shift || true
+            ;;
+        --write-strategy)
+            WRITE_STRATEGY="$2"
+            shift || true
+            ;;
+        --cutover-ready)
+            CUTOVER_FLAG=true
+            ;;
+        --drift-tolerance)
+            DRIFT_TOLERANCE="$2"
+            shift || true
+            ;;
+    esac
+    shift
+done
+
+if [[ "$HYBRID_MODE" == "true" ]]; then
+    export HYBRID_MODE_ENABLED=true
+    export HYBRID_READ_STRATEGY="$READ_STRATEGY"
+    export DUAL_WRITE_STRATEGY="$WRITE_STRATEGY"
+    export CUTOVER_COMPLETED=$([[ "$CUTOVER_FLAG" == "true" ]] && echo "true" || echo "false")
+    export CUTOVER_GUARDRAIL_ENABLED=true
+    export MIGRATION_DRIFT_TOLERANCE="$DRIFT_TOLERANCE"
+    if [[ "$READ_STRATEGY" == "prefer-legacy" ]]; then
+        export LEGACY_READ_ENABLED=true
+    elif [[ "$READ_STRATEGY" == "prefer-modern" ]]; then
+        export LEGACY_READ_ENABLED=false
+    fi
+    export HYBRID_FEATURE_FLAG_SOURCE="start_with_monitoring.sh"
+fi
+
 echo -e "${BLUE}🚀 Starting LegacyCoinTrader with Complete Monitoring${NC}"
 echo -e "${BLUE}$(printf '%.0s=' {1..60})${NC}"
+if [[ "$HYBRID_MODE" == "true" ]]; then
+    echo -e "${GREEN}🤝 Hybrid telemetry mode enabled${NC}"
+fi
 
 # Function to check if process is running
 check_process() {

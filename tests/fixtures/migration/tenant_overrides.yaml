@@ -1,0 +1,11 @@
+tenants:
+  tenant-a:
+    risk:
+      max_position: 10
+    exchanges:
+      primary: coinbase
+  tenant-b:
+    risk:
+      stop_loss_pct: 0.08
+    metadata:
+      region: EU

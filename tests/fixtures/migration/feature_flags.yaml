@@ -1,0 +1,4 @@
+feature_flags:
+  HYBRID_MODE_ENABLED: true
+  LEGACY_READ_ENABLED: false
+  DUAL_WRITE_STRATEGY: mirror

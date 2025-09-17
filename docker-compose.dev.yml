@@ -8,7 +8,8 @@ services:
   # Override for development - mount source code for hot reloading
   api-gateway:
     environment:
-      - GATEWAY_LOG_LEVEL=DEBUG
+      GATEWAY_LOG_LEVEL: DEBUG
+      HYBRID_FEATURE_FLAG_SOURCE: local-dev
     volumes:
       - ./services/api_gateway:/app
       - /app/__pycache__  # Exclude cache
@@ -22,10 +23,17 @@ services:
       "--reload"
     ]
 
+  legacy-monolith:
+    environment:
+      LEGACY_LOG_LEVEL: DEBUG
+      LEGACY_CONFIG_PATH: /opt/legacy/app/config/config.yaml
+    volumes:
+      - .:/opt/legacy/app
+
   trading-engine:
     environment:
-      - TRADING_ENGINE_LOG_LEVEL=DEBUG
-      - TRADING_ENGINE_CYCLE_INTERVAL=300  # Slower cycles for development
+      TRADING_ENGINE_LOG_LEVEL: DEBUG
+      TRADING_ENGINE_CYCLE_INTERVAL: 300  # Slower cycles for development
     volumes:
       - ./services/trading_engine:/app/services/trading_engine
       - ./services/interface_layer:/app/services/interface_layer
@@ -33,8 +41,8 @@ services:
 
   market-data:
     environment:
-      - MARKET_DATA_LOG_LEVEL=DEBUG
-      - MARKET_DATA_CACHE_ENABLED=false  # Disable caching for development
+      MARKET_DATA_LOG_LEVEL: DEBUG
+      MARKET_DATA_CACHE_ENABLED: 'false'  # Disable caching for development
     volumes:
       - ./services/market_data:/app
       - ./crypto_bot:/app/crypto_bot
@@ -42,8 +50,8 @@ services:
 
   portfolio:
     environment:
-      - PORTFOLIO_LOG_LEVEL=DEBUG
-      - PORTFOLIO_PAPER_TRADING=true  # Force paper trading in development
+      PORTFOLIO_LOG_LEVEL: DEBUG
+      PORTFOLIO_PAPER_TRADING: 'true'  # Force paper trading in development
     volumes:
       - ./services/portfolio:/app
       - ./crypto_bot:/app/crypto_bot
@@ -51,7 +59,7 @@ services:
 
   strategy-engine:
     environment:
-      - STRATEGY_ENGINE_LOG_LEVEL=DEBUG
+      STRATEGY_ENGINE_LOG_LEVEL: DEBUG
     volumes:
       - ./services/strategy_engine:/app
       - ./crypto_bot:/app/crypto_bot
@@ -59,8 +67,8 @@ services:
 
   token-discovery:
     environment:
-      - TOKEN_DISCOVERY_LOG_LEVEL=DEBUG
-      - TOKEN_DISCOVERY_SCAN_INTERVAL=60  # Faster scanning for development
+      TOKEN_DISCOVERY_LOG_LEVEL: DEBUG
+      TOKEN_DISCOVERY_SCAN_INTERVAL: 60  # Faster scanning for development
     volumes:
       - ./services/token_discovery:/app
       - ./crypto_bot:/app/crypto_bot
@@ -68,8 +76,8 @@ services:
 
   execution:
     environment:
-      - EXECUTION_LOG_LEVEL=DEBUG
-      - EXECUTION_DRY_RUN=true  # Force dry run in development
+      EXECUTION_LOG_LEVEL: DEBUG
+      EXECUTION_DRY_RUN: 'true'  # Force dry run in development
     volumes:
       - ./services/execution:/app
       - ./crypto_bot:/app/crypto_bot
@@ -78,7 +86,7 @@ services:
 
   monitoring:
     environment:
-      - MONITORING_LOG_LEVEL=DEBUG
+      MONITORING_LOG_LEVEL: DEBUG
     volumes:
       - ./services/monitoring:/app
       - ./crypto_bot:/app/crypto_bot
@@ -87,8 +95,9 @@ services:
 
   frontend:
     environment:
-      - FLASK_ENV=development
-      - FLASK_DEBUG=1
+      FLASK_ENV: development
+      FLASK_DEBUG: '1'
+      HYBRID_FEATURE_FLAG_SOURCE: local-dev
     volumes:
       - ./frontend:/app
       - ./static:/app/static
@@ -101,9 +110,9 @@ services:
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_DB=legacy_coin_trader_dev
-      - POSTGRES_USER=dev_user
-      - POSTGRES_PASSWORD=dev_password
+      POSTGRES_DB: legacy_coin_trader_dev
+      POSTGRES_USER: dev_user
+      POSTGRES_PASSWORD: dev_password
     volumes:
       - postgres_dev_data:/var/lib/postgresql/data
     healthcheck:
