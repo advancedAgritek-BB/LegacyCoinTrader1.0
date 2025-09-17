@@ -121,9 +121,24 @@ class TradingContextBuilder:
             if execution and hasattr(execution, "aclose"):
                 await _call(execution.aclose)
 
-        paper_wallet = getattr(self._paper_wallet, "close", None)
-        if callable(paper_wallet):  # pragma: no cover - optional cleanup
-            await _call(paper_wallet, use_thread=True)
+        if self._risk_manager is not None:
+            risk_close = getattr(self._risk_manager, "aclose", None)
+            if callable(risk_close):  # pragma: no cover - optional cleanup
+                await _call(risk_close)
+
+        if self._position_guard is not None:
+            guard_close = getattr(self._position_guard, "aclose", None)
+            if callable(guard_close):  # pragma: no cover - optional cleanup
+                await _call(guard_close)
+
+        if self._paper_wallet is not None:
+            paper_aclose = getattr(self._paper_wallet, "aclose", None)
+            if callable(paper_aclose):
+                await _call(paper_aclose)
+            else:
+                paper_close = getattr(self._paper_wallet, "close", None)
+                if callable(paper_close):  # pragma: no cover - optional cleanup
+                    await _call(paper_close, use_thread=True)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -220,10 +235,21 @@ class TradingEngineInterface:
         self._phases = list(phases)
         self._runner.set_phases(self._phases)
 
+    async def _prime_context(self, context: CycleContext) -> None:
+        paper_wallet = getattr(context, "paper_wallet", None)
+        if paper_wallet is not None:
+            refresher = getattr(paper_wallet, "refresh_state", None)
+            if callable(refresher):
+                try:
+                    await refresher()
+                except Exception:  # pragma: no cover - best effort
+                    logger.debug("Paper wallet refresh failed", exc_info=True)
+
     async def run_cycle(self, metadata: Optional[Dict[str, Any]] = None) -> CycleExecutionResult:
         """Execute a single trading cycle and return timing information."""
 
         context = self._context_factory(metadata)
+        await self._prime_context(context)
         result = await self._runner.run_cycle(context)
         context.timing = result.timings
         result.metadata.update(context.metadata)
