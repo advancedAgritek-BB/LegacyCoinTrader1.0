@@ -28,6 +28,11 @@ from crypto_bot.utils.price_fetcher import (
 )
 from crypto_bot.config import load_config as load_bot_config, save_config, resolve_config_path
 
+try:
+    from services.portfolio.clients.interface import PortfolioServiceClient
+except Exception:  # pragma: no cover - service may not be available in tests
+    PortfolioServiceClient = None
+
 # Suppress urllib3 OpenSSL warning
 warnings.filterwarnings(
     "ignore",
@@ -118,6 +123,82 @@ def is_rate_limited():
     if client_ip not in request_counts:
         request_counts[client_ip] = 0
         request_windows[client_ip] = current_time
+
+
+def get_portfolio_service_client() -> Optional[PortfolioServiceClient]:
+    """Return a portfolio service client if available."""
+
+    if PortfolioServiceClient is None:
+        return None
+    try:
+        return PortfolioServiceClient()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning(f"Portfolio service client unavailable: {exc}")
+        return None
+
+
+def fetch_positions_from_service() -> list[dict[str, Any]]:
+    """Retrieve open positions from the portfolio microservice."""
+
+    client = get_portfolio_service_client()
+    if not client:
+        return []
+
+    try:
+        positions = client.list_positions()
+    except Exception as exc:
+        logger.warning(f"Failed to fetch positions from portfolio service: {exc}")
+        return []
+
+    results: list[dict[str, Any]] = []
+    for position in positions:
+        try:
+            if position.total_amount <= 0 or is_test_position(position.symbol):
+                continue
+
+            current_price = position.mark_price or position.average_price
+            if position.side == "long":
+                pnl_value = (current_price - position.average_price) * position.total_amount
+            else:
+                pnl_value = (position.average_price - current_price) * position.total_amount
+
+            current_value = float(position.total_amount) * float(current_price)
+            pnl_pct = (
+                float((pnl_value / (position.average_price * position.total_amount)) * 100)
+                if position.average_price > 0 and position.total_amount > 0
+                else 0.0
+            )
+
+            results.append(
+                {
+                    "symbol": position.symbol,
+                    "side": position.side,
+                    "size": float(position.total_amount),
+                    "amount": float(position.total_amount),
+                    "entry_price": float(position.average_price),
+                    "current_price": float(current_price),
+                    "current_value": current_value,
+                    "pnl": pnl_pct,
+                    "pnl_value": float(pnl_value),
+                    "pnl_percentage": pnl_pct,
+                    "chart_min": float(current_price) * 0.95,
+                    "chart_max": float(current_price) * 1.05,
+                    "trend_strength": "strong" if abs(pnl_pct) > 2 else "moderate" if abs(pnl_pct) > 1 else "weak",
+                    "r_squared": min(99.9, max(60.0, 70.0 + abs(pnl_pct) * 2)),
+                    "highest_price": float(position.highest_price) if position.highest_price else None,
+                    "lowest_price": float(position.lowest_price) if position.lowest_price else None,
+                    "stop_loss_price": float(position.stop_loss_price) if position.stop_loss_price else None,
+                    "take_profit_price": float(position.take_profit_price) if position.take_profit_price else None,
+                    "entry_time": position.entry_time.isoformat() if position.entry_time else None,
+                }
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Failed to convert portfolio service position {position.symbol}: {exc}"
+            )
+            continue
+
+    return results
 
     request_counts[client_ip] += 1
 
@@ -1512,6 +1593,14 @@ def get_open_positions() -> list:
 
     except Exception as e:
         print(f"Failed to get positions from TradeManager: {e}")
+
+    # Secondary fallback: direct portfolio service query
+    service_positions = fetch_positions_from_service()
+    if service_positions:
+        print(
+            f"Returning {len(service_positions)} positions from portfolio service fallback"
+        )
+        return service_positions
 
     # Fallback to trade manager state file (second priority)
     try:

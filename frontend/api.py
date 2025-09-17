@@ -7,6 +7,11 @@ from typing import TYPE_CHECKING, List, Optional
 
 from crypto_bot.utils.logger import LOG_DIR
 
+try:
+    from services.portfolio.clients.interface import PortfolioServiceClient
+except Exception:  # pragma: no cover
+    PortfolioServiceClient = None
+
 if TYPE_CHECKING:  # pragma: no cover - type checking only
     from crypto_bot.bot_controller import TradingBotController
 
@@ -42,6 +47,49 @@ POS_PATTERN = re.compile(
     r"entry (?P<entry>[0-9.]+) current (?P<current>[0-9.]+) "
     r"pnl \$(?P<pnl>[0-9.+-]+).*balance \$(?P<balance>[0-9.]+)"
 )
+
+
+def _service_positions() -> List[dict]:
+    if PortfolioServiceClient is None:
+        return []
+
+    try:
+        client = PortfolioServiceClient()
+        positions = client.list_positions()
+    except Exception:
+        return []
+
+    entries: List[dict] = []
+    for pos in positions:
+        try:
+            if pos.total_amount <= 0:
+                continue
+            current_price = pos.mark_price or pos.average_price
+            if pos.side == "long":
+                pnl_value = (current_price - pos.average_price) * pos.total_amount
+            else:
+                pnl_value = (pos.average_price - current_price) * pos.total_amount
+            pnl_pct = (
+                float((pnl_value / (pos.average_price * pos.total_amount)) * 100)
+                if pos.average_price > 0 and pos.total_amount > 0
+                else 0.0
+            )
+            entries.append(
+                {
+                    "symbol": pos.symbol,
+                    "side": pos.side,
+                    "amount": float(pos.total_amount),
+                    "entry_price": float(pos.average_price),
+                    "current_price": float(current_price),
+                    "position_value": float(pos.total_amount * current_price),
+                    "pnl": float(pnl_value),
+                    "pnl_pct": pnl_pct,
+                    "balance": 0.0,
+                }
+            )
+        except Exception:
+            continue
+    return entries
 
 
 @app.get("/positions")
@@ -106,8 +154,9 @@ def positions() -> List[dict]:
 
     except Exception as e:
         print(f"Error getting positions from TradeManager: {e}")
-        # Return empty list instead of falling back to log file
-        # TradeManager is the single source of truth
+        service_entries = _service_positions()
+        if service_entries:
+            return service_entries
         return []
 
 
