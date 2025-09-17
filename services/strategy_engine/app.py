@@ -10,6 +10,10 @@ import pandas as pd
 import redis.asyncio as redis
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 
+from services.monitoring.config import get_monitoring_settings
+from services.monitoring.instrumentation import instrument_fastapi_app
+from services.monitoring.logging import configure_logging
+
 from crypto_bot.services.interfaces import (
     StrategyBatchRequest,
     StrategyEvaluationPayload,
@@ -28,6 +32,14 @@ from .schemas import (
     RankedSignalModel,
 )
 from .storage import ModelRegistry
+
+service_settings = get_settings()
+monitoring_settings = get_monitoring_settings().for_service(service_settings.app_name)
+monitoring_settings = monitoring_settings.model_copy(
+    update={"log_level": service_settings.log_level}
+)
+monitoring_settings.metrics.default_labels.setdefault("component", "strategy-engine")
+configure_logging(monitoring_settings)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +87,7 @@ def get_engine(request: Request) -> StrategyEngine:
 
 
 app = FastAPI(title="Strategy Engine", lifespan=lifespan)
+instrument_fastapi_app(app, settings=monitoring_settings)
 
 
 @app.get("/health", response_model=HealthResponse)

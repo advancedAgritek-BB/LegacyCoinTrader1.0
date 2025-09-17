@@ -15,11 +15,23 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
+from services.monitoring.config import get_monitoring_settings
+from services.monitoring.instrumentation import instrument_fastapi_app
+from services.monitoring.logging import configure_logging
+
 from .config import ExecutionApiSettings, ExecutionServiceConfig, get_execution_api_settings
 from .models import OrderAck, OrderFill, OrderRequest
 from .service import ExecutionService
 
 LOGGER = logging.getLogger("services.execution.api")
+
+_execution_settings = get_execution_api_settings()
+monitoring_settings = get_monitoring_settings().for_service("execution-service")
+monitoring_settings = monitoring_settings.model_copy(
+    update={"log_level": _execution_settings.log_level}
+)
+monitoring_settings.metrics.default_labels.setdefault("component", "execution")
+configure_logging(monitoring_settings)
 
 
 class ExchangeCreatePayload(BaseModel):
@@ -298,6 +310,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_execution_api_settings()
     app = FastAPI(title="Execution Service", lifespan=lifespan)
+    instrument_fastapi_app(app, settings=monitoring_settings)
     router = APIRouter(prefix=settings.base_path)
 
     @router.post(

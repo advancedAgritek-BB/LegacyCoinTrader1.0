@@ -12,6 +12,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, constr
 from redis import asyncio as redis_asyncio
 
+from services.monitoring.config import get_monitoring_settings
+from services.monitoring.instrumentation import instrument_fastapi_app
+from services.monitoring.logging import configure_logging
+
 from .auth import AuthManager, TokenPayload
 from .config import GatewaySettings, ServiceRouteConfig, load_gateway_settings
 from .identity import (
@@ -79,13 +83,20 @@ class ApiKeyValidationResponse(BaseModel):
 
 def create_app() -> FastAPI:
     settings = load_gateway_settings()
-    logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+    monitoring_settings = get_monitoring_settings().for_service("api-gateway")
+    monitoring_settings = monitoring_settings.model_copy(
+        update={"log_level": settings.log_level}
+    )
+    monitoring_settings.metrics.default_labels.setdefault("component", "api-gateway")
+    configure_logging(monitoring_settings)
+    logging.getLogger().setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
 
     app = FastAPI(
         title="LegacyCoinTrader API Gateway",
         description="Unified entry point for LegacyCoinTrader microservices",
         version="1.0.0",
     )
+    instrument_fastapi_app(app, settings=monitoring_settings)
 
     app.add_middleware(
         CORSMiddleware,
