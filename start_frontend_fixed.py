@@ -23,6 +23,7 @@ def start_frontend():
     print("🚀 Starting LegacyCoinTrader Frontend (Fixed)")
     print("=" * 50)
 
+    server = None
     try:
         # Import Flask app
         print("📦 Importing Flask app...")
@@ -59,8 +60,8 @@ def start_frontend():
         browser_thread = threading.Thread(target=open_browser, daemon=True)
         browser_thread.start()
 
-        # Start Flask
-        print(f"🌐 Starting Flask on port {port}...")
+        # Start asynchronous WSGI server
+        print(f"🌐 Starting gevent WSGI server on port {port}...")
         print(f"📊 Dashboard: http://localhost:{port}")
         print(f"📋 System logs: http://localhost:{port}/system_logs")
         print(f"🔧 Test endpoint: http://localhost:{port}/test")
@@ -70,7 +71,10 @@ def start_frontend():
         print("Press Ctrl+C to stop the frontend")
         print("-" * 50)
 
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+        from gevent.pywsgi import WSGIServer
+
+        server = WSGIServer(("0.0.0.0", port), app, log=None)
+        server.serve_forever()
 
     except KeyboardInterrupt:
         print("\n🛑 Frontend stopped by user")
@@ -78,6 +82,9 @@ def start_frontend():
         print(f"❌ Error starting frontend: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        if server is not None:
+            server.stop(timeout=1.0)
 
 if __name__ == "__main__":
     start_frontend()

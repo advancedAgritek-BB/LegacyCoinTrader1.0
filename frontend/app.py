@@ -11,12 +11,19 @@ import warnings
 import subprocess
 import json
 import time
+import threading
 import yaml
 import logging
 from pathlib import Path
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional, Dict, Any
+
+from limits import parse
+from limits.limits import RateLimitItem
+from limits.storage import RedisStorage
+from limits.strategies import MovingWindowRateLimiter
+from limits.util import WindowStats
 from crypto_bot import log_reader
 from crypto_bot import ml_signal_model as ml
 import frontend.utils as utils
@@ -27,6 +34,8 @@ from crypto_bot.utils.price_fetcher import (
     get_current_price_for_symbol as _get_current_price_for_symbol,
 )
 from crypto_bot.config import load_config as load_bot_config, save_config, resolve_config_path
+from werkzeug.exceptions import HTTPException, TooManyRequests
+from werkzeug.http import HTTP_STATUS_CODES
 
 try:
     from services.portfolio.clients.interface import PortfolioServiceClient
@@ -53,6 +62,8 @@ try:
         url_for,
         request,
         jsonify,
+        g,
+        has_request_context,
     )
 except (
     Exception
@@ -69,7 +80,10 @@ except (
         return _Dummy()
 
     Flask = _dummy_flask  # type: ignore
-    render_template = redirect = url_for = request = jsonify = _Dummy()
+    render_template = redirect = url_for = request = jsonify = g = _Dummy()
+
+    def has_request_context() -> bool:  # type: ignore
+        return False
 
 # Fix LOG_DIR path to point to the correct crypto_bot/logs directory
 LOG_DIR = Path(__file__).resolve().parents[1] / "crypto_bot" / "logs"
@@ -100,29 +114,134 @@ app.config["SESSION_COOKIE_SECURE"] = settings.environment == "production"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
-# Rate limiting (simple in-memory implementation)
-request_counts = {}
-request_windows = {}
+# Redis-backed rate limiting configuration
+_rate_limiter_lock = threading.Lock()
+_rate_limiter: Optional[MovingWindowRateLimiter] = None
+_rate_limit_item: Optional[RateLimitItem] = None
+_rate_limiter_failure_logged = False
 
 
-def is_rate_limited():
-    """Check if current request exceeds rate limit."""
+def _rate_limit_redis_uri() -> str:
+    """Build the Redis connection URI for rate limiting."""
+
+    return (
+        os.getenv("FRONTEND_REDIS_URL")
+        or os.getenv("REDIS_URL")
+        or f"redis://{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
+    )
+
+
+def _get_rate_limiter() -> tuple[Optional[MovingWindowRateLimiter], Optional[RateLimitItem]]:
+    """Return the configured rate limiter and limit definition."""
+
+    global _rate_limiter, _rate_limit_item, _rate_limiter_failure_logged
+
+    if _rate_limiter and _rate_limit_item:
+        return _rate_limiter, _rate_limit_item
+
+    with _rate_limiter_lock:
+        if _rate_limiter and _rate_limit_item:
+            return _rate_limiter, _rate_limit_item
+
+        redis_url = _rate_limit_redis_uri()
+        try:
+            storage = RedisStorage(redis_url)
+            limiter = MovingWindowRateLimiter(storage)
+            limit_item = parse(
+                f"{settings.security.rate_limit_requests} per {settings.security.rate_limit_window} seconds"
+            )
+            try:
+                storage.storage.ping()  # type: ignore[attr-defined]
+            except Exception as ping_error:
+                raise RuntimeError(f"Redis ping failed: {ping_error}") from ping_error
+        except Exception as exc:
+            if not _rate_limiter_failure_logged:
+                logger.warning("Redis rate limiter disabled: %s", exc)
+                _rate_limiter_failure_logged = True
+            _rate_limiter = None
+            _rate_limit_item = None
+            return None, None
+
+        _rate_limiter = limiter
+        _rate_limit_item = limit_item
+        _rate_limiter_failure_logged = False
+        logger.info(
+            "Configured Redis-backed rate limiter (%s requests/%s seconds) using %s",
+            settings.security.rate_limit_requests,
+            settings.security.rate_limit_window,
+            redis_url,
+        )
+    return _rate_limiter, _rate_limit_item
+
+
+def _update_rate_limit_context(
+    limiter: MovingWindowRateLimiter, limit_item: RateLimitItem, identifier: str
+) -> Optional[int]:
+    """Populate request context with the latest rate limit state."""
+
+    try:
+        window_stats: WindowStats = limiter.get_window_stats(limit_item, identifier)
+    except Exception as exc:
+        logger.debug("Rate limit stats unavailable for %s: %s", identifier, exc)
+        g.rate_limit_details = {
+            "limit": settings.security.rate_limit_requests,
+            "window": settings.security.rate_limit_window,
+        }
+        return None
+
+    remaining = max(0, int(window_stats.remaining))
+    retry_after = max(0, int(window_stats.reset_time - time.time()))
+    g.rate_limit_details = {
+        "limit": settings.security.rate_limit_requests,
+        "window": settings.security.rate_limit_window,
+        "remaining": remaining,
+        "reset": int(window_stats.reset_time),
+    }
+    return retry_after
+
+
+def _rate_limit_identifier() -> str:
+    """Return the client identifier used for rate limiting."""
+
     from flask import request
 
-    client_ip = request.remote_addr
-    current_time = time.time()
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.remote_addr or "anonymous"
 
-    # Clean old entries
-    if client_ip in request_windows:
-        window_time = settings.security.rate_limit_window
-        if current_time - request_windows[client_ip] > window_time:
-            request_counts[client_ip] = 0
-            request_windows[client_ip] = current_time
 
-    # Check rate limit
-    if client_ip not in request_counts:
-        request_counts[client_ip] = 0
-        request_windows[client_ip] = current_time
+def is_rate_limited() -> bool:
+    """Check whether the current request exceeds the configured rate limit."""
+
+    from flask import request
+
+    limiter, limit_item = _get_rate_limiter()
+    if not limiter or not limit_item:
+        return False
+
+    if request.method == "OPTIONS":
+        return False
+    if request.endpoint == "static" or request.path == "/health":
+        return False
+
+    identifier = _rate_limit_identifier()
+    try:
+        allowed = limiter.hit(limit_item, identifier)
+    except Exception as exc:
+        logger.warning("Failed to apply rate limit for %s: %s", identifier, exc)
+        return False
+
+    retry_after = _update_rate_limit_context(limiter, limit_item, identifier)
+
+    if allowed:
+        g.rate_limit_retry_after = None
+        return False
+
+    g.rate_limit_retry_after = (
+        retry_after if retry_after is not None and retry_after > 0 else settings.security.rate_limit_window
+    )
+    return True
 
 
 def get_portfolio_service_client() -> Optional[PortfolioServiceClient]:
@@ -200,18 +319,17 @@ def fetch_positions_from_service() -> list[dict[str, Any]]:
 
     return results
 
-    request_counts[client_ip] += 1
-
-    return request_counts[client_ip] > settings.security.rate_limit_requests
-
 
 @app.before_request
 def check_rate_limit():
     """Check rate limit before processing request."""
+    g.rate_limit_retry_after = None
     if is_rate_limited():
-        from flask import jsonify
-
-        return jsonify({"error": "Rate limit exceeded"}), 429
+        error = TooManyRequests(description="Rate limit exceeded.")
+        retry_after = getattr(g, "rate_limit_retry_after", None)
+        if retry_after is not None:
+            error.retry_after = retry_after
+        raise error
 
 
 # Secure headers middleware
@@ -258,6 +376,122 @@ def add_secure_headers(response):
         # 5 minutes for production
         response.headers["Cache-Control"] = "public, max-age=300"
 
+    rate_limit_details = getattr(g, "rate_limit_details", None)
+    if rate_limit_details:
+        limit = rate_limit_details.get("limit")
+        window = rate_limit_details.get("window")
+        remaining = rate_limit_details.get("remaining")
+        reset = rate_limit_details.get("reset")
+        if limit is not None:
+            response.headers["X-RateLimit-Limit"] = str(limit)
+        if window is not None:
+            response.headers["X-RateLimit-Window"] = str(window)
+        if remaining is not None:
+            response.headers["X-RateLimit-Remaining"] = str(remaining)
+        if reset is not None:
+            response.headers["X-RateLimit-Reset"] = str(reset)
+
+    return response
+
+
+def _build_error_payload(
+    status_code: int,
+    message: str,
+    *,
+    error_type: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Construct a standardised JSON error payload."""
+
+    path = ""
+    if has_request_context():
+        path = request.path
+
+    payload: Dict[str, Any] = {
+        "status": status_code,
+        "error": {
+            "type": error_type or HTTP_STATUS_CODES.get(status_code, "Error"),
+            "message": message,
+        },
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    }
+
+    if path:
+        payload["path"] = path
+    if details:
+        payload["error"]["details"] = details
+
+    return payload
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(exc: HTTPException):
+    """Return JSON responses for HTTP errors."""
+
+    status_code = exc.code or 500
+    message = exc.description or HTTP_STATUS_CODES.get(status_code, "Unknown error")
+    error_type = exc.name or HTTP_STATUS_CODES.get(status_code, "Error")
+
+    response = exc.get_response()
+    payload = _build_error_payload(status_code, message, error_type=error_type)
+
+    retry_after = getattr(exc, "retry_after", None)
+    if retry_after is None:
+        retry_after = getattr(g, "rate_limit_retry_after", None)
+    if retry_after is not None:
+        response.headers["Retry-After"] = str(retry_after)
+
+    rate_limit_details = getattr(g, "rate_limit_details", None)
+    if rate_limit_details:
+        if "limit" in rate_limit_details:
+            response.headers.setdefault("X-RateLimit-Limit", str(rate_limit_details["limit"]))
+        if "window" in rate_limit_details:
+            response.headers.setdefault("X-RateLimit-Window", str(rate_limit_details["window"]))
+        if "remaining" in rate_limit_details:
+            response.headers.setdefault("X-RateLimit-Remaining", str(rate_limit_details["remaining"]))
+        if "reset" in rate_limit_details:
+            response.headers.setdefault("X-RateLimit-Reset", str(rate_limit_details["reset"]))
+
+    response.data = json.dumps(payload)
+    response.content_type = "application/json"
+    response.status_code = status_code
+    return response
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_exception(exc: Exception):
+    """Return a standard JSON error payload for unexpected failures."""
+
+    if isinstance(exc, KeyboardInterrupt):  # pragma: no cover - allow graceful shutdowns
+        raise exc
+    if isinstance(exc, HTTPException):
+        return exc
+
+    logger.exception("Unhandled exception while processing request")
+
+    payload = _build_error_payload(
+        500,
+        "Internal server error",
+        error_type="InternalServerError",
+    )
+    response = jsonify(payload)
+
+    retry_after = getattr(g, "rate_limit_retry_after", None)
+    if retry_after is not None:
+        response.headers["Retry-After"] = str(retry_after)
+
+    rate_limit_details = getattr(g, "rate_limit_details", None)
+    if rate_limit_details:
+        if "limit" in rate_limit_details:
+            response.headers["X-RateLimit-Limit"] = str(rate_limit_details["limit"])
+        if "window" in rate_limit_details:
+            response.headers["X-RateLimit-Window"] = str(rate_limit_details["window"])
+        if "remaining" in rate_limit_details:
+            response.headers["X-RateLimit-Remaining"] = str(rate_limit_details["remaining"])
+        if "reset" in rate_limit_details:
+            response.headers["X-RateLimit-Reset"] = str(rate_limit_details["reset"])
+
+    response.status_code = 500
     return response
 
 
@@ -5392,13 +5626,20 @@ if __name__ == "__main__":
     except Exception:
         port = find_free_port()
     print(f"FLASK_PORT={port}")  # This is what startup scripts look for
-    print(f"Starting Flask app on port {port}...")
+    print(f"Starting asynchronous gevent server on port {port}...")
     print("Press Ctrl+C to stop the server")
 
+    server = None
     try:
-        app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+        from gevent.pywsgi import WSGIServer
+
+        server = WSGIServer(("0.0.0.0", port), app, log=None)
+        server.serve_forever()
     except KeyboardInterrupt:
-        print("\nFlask server stopped by user")
+        print("\nFrontend server stopped by user")
     except Exception as e:
-        print(f"Error running Flask app: {e}")
+        print(f"Error running frontend server: {e}")
         sys.exit(1)
+    finally:
+        if server is not None:
+            server.stop(timeout=1.0)

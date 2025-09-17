@@ -37,6 +37,7 @@ prometheus-client
 solders
 pythclient
 redis
+limits>=5.0
 base58
 gunicorn
 gevent

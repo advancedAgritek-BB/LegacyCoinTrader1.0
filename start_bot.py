@@ -301,7 +301,13 @@ def start_web_server(
 
                 run_simple("0.0.0.0", port_num, app, use_reloader=False, threaded=True)
             else:
-                app.run(host="0.0.0.0", port=port_num, debug=False, use_reloader=False)
+                from gevent.pywsgi import WSGIServer
+
+                server = WSGIServer(("0.0.0.0", port_num), app, log=None)
+                try:
+                    server.serve_forever()
+                finally:
+                    server.stop(timeout=1.0)
         except Exception as exc:
             print(f"❌ Web server error: {exc}")
             import traceback
