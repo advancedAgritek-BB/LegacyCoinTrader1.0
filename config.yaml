@@ -147,6 +147,15 @@ solana_scanner:
   min_volume_usd: 1000
   min_score_threshold: 0.1
   min_liquidity_score: 0.2
+token_discovery_feed:
+  enabled: true
+  redis_host: localhost
+  redis_port: 6379
+  redis_db: 0
+  redis_channel_tokens: trading_engine.token_candidates
+  redis_channel_opportunities: trading_engine.token_opportunities
+  kafka_enabled: false
+  kafka_bootstrap_servers: localhost:9092
 symbol_batch_size: 100  # Increased for comprehensive symbol processing
 symbol_validation:
   allowed_quotes:
