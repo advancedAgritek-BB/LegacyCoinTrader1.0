@@ -156,12 +156,12 @@ _fallback_env_check() {
     for env_path in "${ENV_LOCATIONS[@]}"; do
         if [[ -f "$env_path" ]]; then
             print_status "Found .env file at: $env_path"
-            
-            # Check if this .env file contains real API keys (not template values)
-            if grep -q "your_kraken_api_key_here\|your_telegram_token_here\|your_helius_key_here" "$env_path"; then
-                print_warning "Found template .env file at $env_path (contains placeholder values)"
+
+            # Check if this .env file still contains managed placeholders
+            if grep -q "MANAGED:" "$env_path"; then
+                print_warning "Found managed placeholders in $env_path"
             else
-                print_success "Found .env file with real API keys at $env_path"
+                print_success "Found .env file with resolved secrets at $env_path"
                 EXISTING_ENV="$env_path"
                 break
             fi
@@ -199,39 +199,28 @@ _fallback_env_check() {
     
     cat > .env << 'EOF'
 # .env File for LegacyCoinTrader
-# Updated with actual API keys and configuration
+# Managed secrets are injected via Vault/SSM/Secrets Manager at deploy time.
+# Replace MANAGED placeholders only when creating local overrides for testing.
 
-# Exchange Configuration
+# Required managed secrets
+API_KEY=${MANAGED:API_KEY}
+API_SECRET=${MANAGED:API_SECRET}
+KRAKEN_API_KEY=${MANAGED:KRAKEN_API_KEY}
+KRAKEN_API_SECRET=${MANAGED:KRAKEN_API_SECRET}
+
+# Optional managed secrets
+COINBASE_API_KEY=${MANAGED:COINBASE_API_KEY}
+COINBASE_API_SECRET=${MANAGED:COINBASE_API_SECRET}
+TELEGRAM_TOKEN=${MANAGED:TELEGRAM_TOKEN}
+TELEGRAM_CHAT_ID=${MANAGED:TELEGRAM_CHAT_ID}
+HELIUS_KEY=${MANAGED:HELIUS_KEY}
+LUNARCRUSH_API_KEY=${MANAGED:LUNARCRUSH_API_KEY}
+
+# Secret rotation metadata
+SECRETS_ROTATED_AT=
+
+# Runtime configuration
 EXCHANGE=kraken
-API_KEY=your_kraken_api_key_here
-API_SECRET=your_kraken_api_secret_here
-KRAKEN_API_KEY=your_kraken_api_key_here
-KRAKEN_API_SECRET=your_kraken_api_secret_here
-
-# Alternative Exchange (Coinbase)
-COINBASE_API_KEY=your_coinbase_api_key_here
-COINBASE_API_SECRET=your_coinbase_api_secret_here
-# COINBASE_PASSPHRASE=your_coinbase_passphrase_here
-
-# Telegram Configuration
-TELEGRAM_TOKEN=your_telegram_token_here
-TELEGRAM_CHAT_ID=your_chat_id_here
-TELE_CHAT_ADMINS=your_admin_chat_id_here
-
-# Solana Configuration
-HELIUS_KEY=your_helius_key_here
-WALLET_ADDRESS=your_wallet_address_here
-SOLANA_PRIVATE_KEY=your_solana_private_key_here
-
-# Supabase Configuration
-SUPABASE_URL=your_supabase_url_here
-SUPABASE_KEY=your_supabase_key_here
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
-
-# LunarCrush Sentiment Analysis (Optional)
-LUNARCRUSH_API_KEY=your_lunarcrush_api_key_here
-
-# Trading Mode
 MODE=cex
 EXECUTION_MODE=dry_run
 

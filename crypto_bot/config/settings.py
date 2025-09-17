@@ -10,9 +10,12 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from services.configuration import ManagedConfigService, SecretNotFoundError
+
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
 CONFIG_PATH_ENV = "BOT_CONFIG_FILE"
+MANAGED_SECRETS_PATH = Path(__file__).resolve().parents[2] / "config" / "managed_secrets.yaml"
 
 
 class ConfigError(RuntimeError):
@@ -821,8 +824,25 @@ def load_settings(
 
     path = resolve_config_path(config_path, env=env)
     yaml_values = _load_yaml_file(path)
+    managed_service = ManagedConfigService(
+        manifest_path=MANAGED_SECRETS_PATH,
+        env=env,
+    )
     try:
-        return BotSettings(**yaml_values)
+        merged_values = managed_service.merge(yaml_values)
+    except SecretNotFoundError as exc:
+        raise ConfigError(str(exc)) from exc
+
+    missing_env = managed_service.missing_environment()
+    if missing_env:
+        missing = ", ".join(sorted(missing_env))
+        raise ConfigError(
+            "Missing required managed secrets: "
+            f"{missing}"
+        )
+
+    try:
+        return BotSettings(**merged_values)
     except ValidationError as exc:  # pragma: no cover - exercised via unit tests
         raise ConfigError(
             f"Invalid configuration supplied by {path}: {exc}") from exc

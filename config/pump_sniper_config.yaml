@@ -108,9 +108,9 @@ sniper_risk_manager:
 social_sentiment:
   enabled: true
   
-  # API Configuration (set these in environment variables)
-  # TWITTER_BEARER_TOKEN=your_token
-  # LUNARCRUSH_API_KEY=your_key
+  # API Configuration (set these via managed environment variables)
+  # TWITTER_BEARER_TOKEN=${MANAGED:TWITTER_BEARER_TOKEN}
+  # LUNARCRUSH_API_KEY=${MANAGED:LUNARCRUSH_API_KEY}
   
   # Platforms to monitor
   platforms:

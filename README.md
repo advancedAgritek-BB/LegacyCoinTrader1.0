@@ -53,28 +53,33 @@ python -m frontend.app
 ## 🔧 Configuration
 
 ### Environment Variables (`.env`)
+Secrets are injected at deploy time from your secret manager (Vault, AWS Secrets
+Manager, or Parameter Store) using the manifest defined in
+`config/managed_secrets.yaml`. The deployment tooling now refuses to start if
+required secrets are missing or stale according to the rotation policy.
+
+Use `python tools/manage_env.py consolidate` to generate a template populated
+with `MANAGED:` placeholders. A minimal example:
+
 ```env
-# Exchange Configuration
-EXCHANGE=kraken                    # or coinbase
-API_KEY=your_kraken_api_key
-API_SECRET=your_kraken_api_secret
-API_PASSPHRASE=your_coinbase_passphrase_if_needed
+# Managed secrets (resolved by your deployment pipeline)
+API_KEY=${MANAGED:API_KEY}
+API_SECRET=${MANAGED:API_SECRET}
+KRAKEN_API_KEY=${MANAGED:KRAKEN_API_KEY}
+KRAKEN_API_SECRET=${MANAGED:KRAKEN_API_SECRET}
+LUNARCRUSH_API_KEY=${MANAGED:LUNARCRUSH_API_KEY}
 
-# Telegram Configuration
-TELEGRAM_TOKEN=your_telegram_token
-TELEGRAM_CHAT_ID=your_chat_id
+# Secret rotation metadata (ISO-8601 timestamp)
+SECRETS_ROTATED_AT=2024-01-01T00:00:00Z
 
-# Solana Configuration
-HELIUS_KEY=your_helius_api_key
-SOLANA_PRIVATE_KEY="[1,2,3,...]"
-WALLET_ADDRESS=your_wallet_address
-
-# Sentiment Analysis
-LUNARCRUSH_API_KEY=your_lunarcrush_key
-
-# Trading Mode
-EXECUTION_MODE=dry_run            # or live
+# Runtime overrides
+EXCHANGE=kraken
+EXECUTION_MODE=dry_run
 ```
+
+Update `SECRETS_ROTATED_AT` whenever your secrets are rotated. The production
+deployment script enforces a 30-day rotation window and will block rollout if
+the timestamp is missing or too old.
 
 ### Configuration
 

@@ -40,13 +40,13 @@ def check_env():
         if Path(env_path).exists():
             print(f"✅ Found .env file at: {env_path}")
             # Check if it contains real API keys (not template values)
-            with open(env_path, 'r') as f:
+            with open(env_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-                if "your_kraken_api_key_here" in content or "your_telegram_token_here" in content or "your_helius_key_here" in content:
-                    print("❌ .env file contains template values. Please edit with real API keys.")
+                if "MANAGED:" in content:
+                    print("❌ .env file contains managed placeholders. Populate secrets before launch.")
                     sys.exit(1)
                 else:
-                    print("✅ .env file contains real API keys")
+                    print("✅ .env file contains resolved secrets")
                     env_found = True
                     break
     

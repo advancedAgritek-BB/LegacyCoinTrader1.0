@@ -138,8 +138,8 @@ scan_monitoring:
 skip_symbol_filters: true
 solana_scanner:
   api_keys:
-    bitquery: YOUR_KEY
-    moralis: YOUR_KEY
+    bitquery: "${BITQUERY_KEY}"
+    moralis: "${MORALIS_KEY}"
   enabled: true
   gecko_search: true
   interval_minutes: 30

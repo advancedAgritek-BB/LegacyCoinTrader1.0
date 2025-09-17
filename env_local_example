@@ -2,6 +2,7 @@
 # Copy this to .env.local and update with your settings
 
 # Application Settings
+# Secrets are injected via environment variables sourced from your secret manager.
 ENVIRONMENT=development
 DEBUG=true
 APP_NAME=LegacyCoinTrader
@@ -16,14 +17,14 @@ REDIS_PORT=6379
 REDIS_DB=0
 REDIS_PASSWORD=
 
-# Exchange Settings (Test credentials - DO NOT USE IN PRODUCTION)
+# Exchange Settings (Populate via managed secrets before running locally)
 EXCHANGE=kraken
-API_KEY=test_api_key_12345
-API_SECRET=test_api_secret_67890
+API_KEY=
+API_SECRET=
 API_PASSPHRASE=
 
 # Security Settings
-JWT_SECRET_KEY=your_local_jwt_secret_key_here_change_in_production
+JWT_SECRET_KEY=
 JWT_ALGORITHM=HS256
 JWT_EXPIRATION_HOURS=24
 

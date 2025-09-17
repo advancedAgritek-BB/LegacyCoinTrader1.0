@@ -14,9 +14,14 @@ import json
 import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from services.configuration import (
+    DEFAULT_MANIFEST_PATH,
+    ManagedConfigService,
+    load_manifest,
+)
 
 logger = setup_logger(__name__, LOG_DIR / "production_deployment.log")
 
@@ -37,6 +42,13 @@ class ProductionDeployment:
         self.config_path = Path(config_path) if config_path else Path("production_config.yaml")
         self.config = self._load_config()
         self.project_root = Path(__file__).parent
+
+        self.manifest_path = self._resolve_manifest_path()
+        self._managed_manifest = load_manifest(self.manifest_path)
+        self._managed_config_service = ManagedConfigService(
+            manifest=self._managed_manifest
+        )
+        logger.debug("Using managed secrets manifest at %s", self.manifest_path)
 
         # Process management
         self.bot_process = None
@@ -83,6 +95,20 @@ class ProductionDeployment:
                 "log_rotation": True
             }
         }
+
+    def _resolve_manifest_path(self) -> Path:
+        """Return the managed secrets manifest path for this deployment."""
+
+        manifest_setting = (
+            self.config.get("secret_management", {}).get("manifest")
+            or self.config.get("environment", {}).get("manifest")
+        )
+        if manifest_setting:
+            candidate = Path(manifest_setting)
+            if not candidate.is_absolute():
+                candidate = (self.project_root / candidate).resolve()
+            return candidate
+        return DEFAULT_MANIFEST_PATH
 
     async def deploy(self) -> bool:
         """
@@ -172,25 +198,79 @@ class ProductionDeployment:
 
     async def _check_configuration(self) -> bool:
         """Check if configuration is valid."""
-        # Check for required environment variables
-        required_env = ['API_KEY', 'API_SECRET']
-        missing_env = []
-
-        for env_var in required_env:
-            if not os.getenv(env_var):
-                missing_env.append(env_var)
-
+        missing_env = self._managed_config_service.missing_environment()
         if missing_env:
-            logger.error(f"Missing environment variables: {', '.join(missing_env)}")
-            logger.error("Set them in your .env file or environment")
+            logger.error(
+                "Missing managed secrets: %s",
+                ", ".join(sorted(missing_env)),
+            )
+            logger.error("Populate required secrets via the configured secret manager.")
             return False
 
-        # Check configuration file
+        if not self._check_secret_rotation_policy():
+            return False
+
         if not self.config_path.exists():
             logger.warning(f"Configuration file not found: {self.config_path}")
             logger.info("Using default configuration")
 
         logger.info("Configuration check passed")
+        return True
+
+    def _check_secret_rotation_policy(self) -> bool:
+        """Validate that secrets comply with the configured rotation policy."""
+
+        policy = self.config.get("secret_management", {}).get("rotation_policy", {})
+        if not policy.get("enabled", False):
+            return True
+
+        timestamp_env = policy.get("timestamp_env")
+        rotate_every = policy.get("rotate_every_days")
+        try:
+            rotate_every_days = int(rotate_every) if rotate_every is not None else None
+        except (TypeError, ValueError):
+            rotate_every_days = None
+
+        if not timestamp_env:
+            logger.warning(
+                "Secret rotation policy is enabled but no timestamp_env is configured."
+            )
+            return True
+
+        timestamp_value = os.getenv(timestamp_env)
+        if not timestamp_value:
+            logger.error(
+                "Environment variable %s is required to enforce the secret rotation policy.",
+                timestamp_env,
+            )
+            return False
+
+        try:
+            rotated_at = datetime.fromisoformat(timestamp_value)
+        except ValueError:
+            logger.error(
+                "Environment variable %s must be an ISO-8601 timestamp (current value: %s)",
+                timestamp_env,
+                timestamp_value,
+            )
+            return False
+
+        if rotated_at.tzinfo is not None:
+            rotated_at = rotated_at.astimezone(timezone.utc).replace(tzinfo=None)
+
+        if rotate_every_days is None or rotate_every_days <= 0:
+            return True
+
+        age = datetime.utcnow() - rotated_at
+        if age.days > rotate_every_days:
+            logger.error(
+                "Managed secrets were rotated %s days ago on %s; rotation cadence is %s days.",
+                age.days,
+                rotated_at.isoformat(),
+                rotate_every_days,
+            )
+            return False
+
         return True
 
     async def _check_environment(self) -> bool:
