@@ -61,9 +61,7 @@ class TradingContextBuilder:
         *,
         services: Any,
         config: Mapping[str, Any],
-        exchange: Any = None,
-        ws_client: Any = None,
-        risk_manager: Any = None,
+        risk_client: Any = None,
         notifier: Any = None,
         paper_wallet: Any = None,
         position_guard: Any = None,
@@ -71,9 +69,7 @@ class TradingContextBuilder:
     ) -> None:
         self._services = services
         self._config = copy.deepcopy(dict(config))
-        self._exchange = exchange
-        self._ws_client = ws_client
-        self._risk_manager = risk_manager
+        self._risk_manager = risk_client
         self._notifier = notifier
         self._paper_wallet = paper_wallet
         self._position_guard = position_guard
@@ -100,14 +96,6 @@ class TradingContextBuilder:
     def services(self) -> Any:
         return self._services
 
-    @property
-    def exchange(self) -> Any:
-        return self._exchange
-
-    @property
-    def ws_client(self) -> Any:
-        return self._ws_client
-
     async def shutdown(self) -> None:
         """Close any resources owned by the builder."""
 
@@ -129,17 +117,13 @@ class TradingContextBuilder:
             strategy = getattr(self._services, "strategy", None)
             if strategy and hasattr(strategy, "aclose"):
                 await _call(strategy.aclose)
+            execution = getattr(self._services, "execution", None)
+            if execution and hasattr(execution, "aclose"):
+                await _call(execution.aclose)
 
-        if self._ws_client:
-            if hasattr(self._ws_client, "close_async"):
-                await _call(self._ws_client.close_async)
-            elif hasattr(self._ws_client, "close"):
-                close_func = self._ws_client.close
-                await _call(close_func, use_thread=not asyncio.iscoroutinefunction(close_func))
-
-        if self._exchange and hasattr(self._exchange, "close"):
-            close_func = self._exchange.close
-            await _call(close_func, use_thread=not asyncio.iscoroutinefunction(close_func))
+        paper_wallet = getattr(self._paper_wallet, "close", None)
+        if callable(paper_wallet):  # pragma: no cover - optional cleanup
+            await _call(paper_wallet, use_thread=True)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -172,8 +156,6 @@ class TradingContextBuilder:
             df_cache=defaultdict(dict),
             regime_cache=defaultdict(dict),
             config=config,
-            exchange=self._exchange,
-            ws_client=self._ws_client,
             risk_manager=self._risk_manager,
             notifier=self._notifier,
             paper_wallet=self._paper_wallet,
@@ -206,9 +188,7 @@ class TradingEngineInterface:
         timer: Optional[Callable[[], float]] = None,
         services: Any = None,
         config: Optional[Mapping[str, Any]] = None,
-        exchange: Any = None,
-        ws_client: Any = None,
-        risk_manager: Any = None,
+        risk_client: Any = None,
         notifier: Any = None,
         paper_wallet: Any = None,
         position_guard: Any = None,
@@ -219,9 +199,7 @@ class TradingEngineInterface:
         self._context_factory = TradingContextBuilder(
             services=services,
             config=config or {},
-            exchange=exchange,
-            ws_client=ws_client,
-            risk_manager=risk_manager,
+            risk_client=risk_client,
             notifier=notifier,
             paper_wallet=paper_wallet,
             position_guard=position_guard,
