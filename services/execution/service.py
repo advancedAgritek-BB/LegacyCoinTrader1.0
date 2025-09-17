@@ -39,6 +39,7 @@ class ExecutionService:
         self._session = None
         self._orders: MutableMapping[str, OrderRequest] = {}
         self._results: MutableMapping[str, OrderFill] = {}
+        self._acks: MutableMapping[str, OrderAck] = {}
         self._order_lock = asyncio.Lock()
         self._ack_topic = AsyncTopic[OrderAck]()
         self._fill_topic = AsyncTopic[OrderFill]()
@@ -109,6 +110,7 @@ class ExecutionService:
                 return request.client_order_id
             self._orders[request.client_order_id] = request
         ack = OrderAck(client_order_id=request.client_order_id, accepted=True, metadata=metadata)
+        self._acks[request.client_order_id] = ack
         await self._ack_topic.publish(ack)
         await self._post_ack_callbacks(ack)
         asyncio.create_task(self._execute_order(session, request))
@@ -212,6 +214,9 @@ class ExecutionService:
         stale = [oid for oid, fill in self._results.items() if fill.timestamp < threshold]
         for oid in stale:
             self._results.pop(oid, None)
+        stale_acks = [oid for oid, ack in self._acks.items() if ack.timestamp < threshold]
+        for oid in stale_acks:
+            self._acks.pop(oid, None)
 
     # Compatibility helpers -------------------------------------------------
 
@@ -219,3 +224,13 @@ class ExecutionService:
         """Return the underlying exchange and WebSocket client."""
         session = self.ensure_session()
         return session.exchange, session.ws_client
+
+    def pop_ack(self, client_order_id: str) -> Optional[OrderAck]:
+        """Return and remove the cached acknowledgement for ``client_order_id``."""
+
+        return self._acks.pop(client_order_id, None)
+
+    def get_fill(self, client_order_id: str) -> Optional[OrderFill]:
+        """Return the cached fill for ``client_order_id`` if available."""
+
+        return self._results.get(client_order_id)

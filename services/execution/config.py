@@ -3,7 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
+import os
+from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, Mapping, MutableMapping, Optional
+
+try:  # pragma: no cover - optional dependency for richer settings support
+    from pydantic import Field
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+except ModuleNotFoundError:  # pragma: no cover - fallback for minimal environments
+    Field = None  # type: ignore[assignment]
+    BaseSettings = None  # type: ignore[assignment]
+    SettingsConfigDict = None  # type: ignore[assignment]
 
 from .models import SecretRef
 
@@ -125,3 +137,63 @@ class ExecutionServiceConfig:
             telegram=telegram_cfg,
             monitoring=monitoring_cfg,
         )
+
+
+if BaseSettings is not None:  # pragma: no cover - exercised when dependency available
+
+    class ExecutionApiSettings(BaseSettings):
+        """Runtime configuration for the execution FastAPI layer."""
+
+        model_config = SettingsConfigDict(env_prefix="EXECUTION_SERVICE_", env_file=None)
+
+        host: str = Field(default="0.0.0.0")
+        port: int = Field(default=8006)
+        base_path: str = Field(default="/api/v1/execution")
+        log_level: str = Field(default="INFO")
+
+        service_token: str = Field(default="insecure-local-token-execution")
+        signing_key: Optional[str] = Field(default=None)
+        signature_ttl_seconds: int = Field(default=60, ge=1)
+
+        ack_timeout: float = Field(default=15.0, ge=0.1)
+        fill_timeout: float = Field(default=60.0, ge=0.1)
+
+
+    @lru_cache
+    def get_execution_api_settings() -> ExecutionApiSettings:
+        """Return cached API settings for the execution service."""
+
+        return ExecutionApiSettings()
+
+else:  # pragma: no cover - minimal fallback without pydantic
+
+    @dataclass(slots=True)
+    class ExecutionApiSettings:  # type: ignore[no-redef]
+        host: str = field(default_factory=lambda: os.getenv("EXECUTION_SERVICE_HOST", "0.0.0.0"))
+        port: int = field(default_factory=lambda: int(os.getenv("EXECUTION_SERVICE_PORT", "8006")))
+        base_path: str = field(default_factory=lambda: os.getenv("EXECUTION_SERVICE_BASE_PATH", "/api/v1/execution"))
+        log_level: str = field(default_factory=lambda: os.getenv("EXECUTION_SERVICE_LOG_LEVEL", "INFO"))
+        service_token: str = field(
+            default_factory=lambda: os.getenv("EXECUTION_SERVICE_TOKEN", "insecure-local-token-execution")
+        )
+        signing_key: Optional[str] = field(default_factory=lambda: os.getenv("EXECUTION_SERVICE_SIGNING_KEY"))
+        signature_ttl_seconds: int = field(
+            default_factory=lambda: int(os.getenv("EXECUTION_SERVICE_SIGNATURE_TTL_SECONDS", "60"))
+        )
+        ack_timeout: float = field(default_factory=lambda: float(os.getenv("EXECUTION_SERVICE_ACK_TIMEOUT", "15.0")))
+        fill_timeout: float = field(default_factory=lambda: float(os.getenv("EXECUTION_SERVICE_FILL_TIMEOUT", "60.0")))
+
+
+    @lru_cache
+    def get_execution_api_settings() -> ExecutionApiSettings:  # type: ignore[no-redef]
+        return ExecutionApiSettings()
+
+
+__all__ = [
+    "CredentialsConfig",
+    "ExecutionApiSettings",
+    "ExecutionServiceConfig",
+    "MonitoringConfig",
+    "TelegramConfig",
+    "get_execution_api_settings",
+]
