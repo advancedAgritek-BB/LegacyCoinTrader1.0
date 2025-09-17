@@ -28,6 +28,7 @@ fastapi>=0.115.0
 starlette>=0.37.0       # required by fastapi
 httpx<0.28
 uvicorn
+asgiref>=3.7.0,<4.0.0
 rich
 scikit-optimize
 pydantic>=2.4,<2.7
@@ -42,6 +43,7 @@ opentelemetry-exporter-otlp-proto-http
 solders
 pythclient
 redis
+limits>=3.5.0,<4.0.0
 base58
 gunicorn
 gevent

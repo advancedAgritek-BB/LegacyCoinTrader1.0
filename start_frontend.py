@@ -11,6 +11,8 @@ import threading
 import webbrowser
 from pathlib import Path
 
+import uvicorn
+
 # Add the project root to the Python path
 project_root = Path(__file__).parent
 if str(project_root) not in sys.path:
@@ -22,9 +24,9 @@ def start_frontend_with_browser():
     print("=" * 40)
     
     try:
-        # Import Flask app
-        print("📦 Importing Flask app...")
-        from frontend.app import app
+        # Import ASGI app
+        print("📦 Importing frontend ASGI app...")
+        from frontend.app import asgi_app
         
         # Find an available port
         import socket
@@ -57,16 +59,18 @@ def start_frontend_with_browser():
         browser_thread = threading.Thread(target=open_browser, daemon=True)
         browser_thread.start()
         
-        # Start Flask
-        print(f"🌐 Starting Flask on port {port}...")
+        # Start ASGI server
+        print(f"🌐 Starting ASGI server on port {port}...")
         print(f"📊 Dashboard: http://localhost:{port}")
         print(f"📋 System logs: http://localhost:{port}/system_logs")
         print(f"🔧 Test endpoint: http://localhost:{port}/test")
         print("-" * 40)
         print("Press Ctrl+C to stop the frontend")
         print("-" * 40)
-        
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
+        config = uvicorn.Config(asgi_app, host="0.0.0.0", port=port, log_level="info")
+        server = uvicorn.Server(config)
+        server.run()
         
     except KeyboardInterrupt:
         print("\n🛑 Frontend stopped by user")
