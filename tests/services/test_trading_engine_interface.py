@@ -171,6 +171,8 @@ async def test_trading_engine_run_cycle_executes_real_phases() -> None:
     assert services.strategy.requests, "strategy service should be invoked"
     assert services.execution.requests, "execution service should be invoked"
     assert services.execution.requests[0].symbol in {"BTC/USD", "ETH/USD"}
+    assert services.execution.requests[0].exchange is None
+    assert services.execution.requests[0].ws_client is None
     assert interface.context.analysis_results
     assert result.metadata["executed_trade_count"] == len(services.execution.requests)
 
