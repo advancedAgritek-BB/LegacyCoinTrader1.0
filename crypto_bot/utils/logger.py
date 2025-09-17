@@ -9,13 +9,21 @@ import weakref
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Optional, Union
+from typing import Iterator, Optional, Tuple, Union
 
 # Default directory for all log files used across the project
 LOG_DIR = Path(__file__).resolve().parents[2] / "crypto_bot" / "logs"
 
 _CORRELATION_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "correlation_id", default=None
+)
+_DEFAULT_TENANT_ID = "global"
+_DEFAULT_SERVICE_ROLE = "unspecified"
+_TENANT_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "tenant_id", default=None
+)
+_SERVICE_ROLE: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "service_role", default=None
 )
 
 _LOGGING_CONFIGURED = False
@@ -76,6 +84,67 @@ def correlation_id_context(correlation_id: Optional[str] = None) -> Iterator[str
         _CORRELATION_ID.reset(token)
 
 
+def get_tenant_id() -> str:
+    """Return the active tenant identifier for the current context."""
+
+    tenant = _TENANT_ID.get()
+    return tenant or _DEFAULT_TENANT_ID
+
+
+def get_service_role() -> str:
+    """Return the active service role for the current context."""
+
+    role = _SERVICE_ROLE.get()
+    return role or _DEFAULT_SERVICE_ROLE
+
+
+def set_observability_context(
+    *, tenant_id: Optional[str] = None, service_role: Optional[str] = None
+) -> Tuple[str, str]:
+    """Bind tenant/service role context to the current execution flow."""
+
+    tenant = tenant_id or _DEFAULT_TENANT_ID
+    role = service_role or _DEFAULT_SERVICE_ROLE
+    _TENANT_ID.set(tenant)
+    _SERVICE_ROLE.set(role)
+    return tenant, role
+
+
+def clear_observability_context() -> None:
+    """Reset tenant/service role context to the configured defaults."""
+
+    _TENANT_ID.set(None)
+    _SERVICE_ROLE.set(None)
+
+
+def set_default_observability_context(
+    *, tenant_id: Optional[str] = None, service_role: Optional[str] = None
+) -> None:
+    """Update the default tenant/service role used for observability metadata."""
+
+    global _DEFAULT_TENANT_ID, _DEFAULT_SERVICE_ROLE
+    if tenant_id:
+        _DEFAULT_TENANT_ID = tenant_id
+    if service_role:
+        _DEFAULT_SERVICE_ROLE = service_role
+    clear_observability_context()
+
+
+@contextmanager
+def observability_context(
+    *, tenant_id: Optional[str] = None, service_role: Optional[str] = None
+) -> Iterator[Tuple[str, str]]:
+    """Context manager to temporarily override observability metadata."""
+
+    tenant_token = _TENANT_ID.set(tenant_id or _DEFAULT_TENANT_ID)
+    role_token = _SERVICE_ROLE.set(service_role or _DEFAULT_SERVICE_ROLE)
+    try:
+        yield get_tenant_id(), get_service_role()
+    finally:
+        _TENANT_ID.reset(tenant_token)
+        _SERVICE_ROLE.reset(role_token)
+
+
 def _serialize(value: object) -> object:
     """Safely serialise values for JSON output."""
 
@@ -105,6 +174,8 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
             "correlation_id": get_correlation_id(),
+            "tenant_id": get_tenant_id(),
+            "service_role": get_service_role(),
         }
 
         if record.exc_info:
@@ -227,5 +298,11 @@ __all__ = [
     "set_correlation_id",
     "clear_correlation_id",
     "correlation_id_context",
+    "get_tenant_id",
+    "get_service_role",
+    "set_observability_context",
+    "clear_observability_context",
+    "set_default_observability_context",
+    "observability_context",
     "register_centralized_handler",
 ]

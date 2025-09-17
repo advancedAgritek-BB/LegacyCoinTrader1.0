@@ -6,7 +6,11 @@ import json
 import logging
 from typing import Optional
 
-from crypto_bot.utils.logger import register_centralized_handler, setup_logger
+from crypto_bot.utils.logger import (
+    register_centralized_handler,
+    set_default_observability_context,
+    setup_logger,
+)
 
 from .config import MonitoringSettings, OpenSearchSettings
 
@@ -75,6 +79,11 @@ def configure_logging(settings: MonitoringSettings) -> logging.Logger:
 
     logger = setup_logger(settings.service_name)
     logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+
+    set_default_observability_context(
+        tenant_id=settings.default_tenant,
+        service_role=settings.service_role,
+    )
 
     if settings.opensearch.enabled:
         handler = OpenSearchLogHandler(settings.opensearch)

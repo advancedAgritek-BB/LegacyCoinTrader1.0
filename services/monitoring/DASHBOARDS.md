@@ -103,6 +103,34 @@ Panels:
 * **Authentication failures** – Alert if more than 25 login failures occur in
   ten minutes (monitor `status=401` for `/login`).
 
+## 5. Tenant SLO & Synthetic Overview
+
+**Purpose**: provide an at-a-glance view of tenant health, synthetic guard-rails
+and compliance posture for the on-call engineer.
+
+| Panel | Query | Notes |
+|-------|-------|-------|
+| Latency p95 per tenant | `legacycoin_tenant_latency_p95_seconds` | Display as seconds and colour by `tenant`/`service_role`. Threshold at 0.5 seconds. |
+| Error rate per tenant | `legacycoin_tenant_error_rate` | Overlay the 1% error budget as a reference line. |
+| Throughput per tenant | `legacycoin_tenant_throughput_rps` | Highlight drops below 1&nbsp;rps. |
+| Synthetic status | `legacycoin_synthetic_check_status` | Show as a table with `check`, `tenant` and `service_role`. Values of 0 indicate failures or breaches. |
+| Synthetic RTO/RPO | `legacycoin_synthetic_check_recovery_time_seconds` / `legacycoin_synthetic_check_data_lag_seconds` | Compare against the 900&nbsp;s RTO and 300&nbsp;s RPO targets. |
+| Secrets rotation age | `legacycoin_compliance_secrets_rotation_age_days` | Visualise days since rotation; annotate at the 90-day limit. |
+
+### Alerts
+
+The new Alertmanager rules in [`alerts.yaml`](./alerts.yaml) back these panels:
+
+* **TenantLatencySLOViolation**, **TenantErrorRateSLOViolation** and
+  **TenantThroughputRegression** – escalate when the golden signals drift for a
+  specific tenant/service role.
+* **SyntheticCheckFailure**, **SyntheticRecoveryTimeBreach** and
+  **SyntheticDataLagBreach** – guard RTO/RPO objectives driven by the synthetic
+  endpoints. These alerts reference the SOC2-aligned runbooks documented in the
+  README.
+* **SecretsRotationStale** – notifies the compliance officer when the
+  `SECRETS_ROTATED_AT` timestamp exceeds the allowed age.
+
 ## Implementation notes
 
 * All dashboards expect the Prometheus scrape config in

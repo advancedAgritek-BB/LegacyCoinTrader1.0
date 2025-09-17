@@ -25,3 +25,74 @@ groups:
         annotations:
           summary: "Increased latency for {{ $labels.service }}"
           description: "95th percentile response time remained above 2 seconds for five minutes."
+      - alert: TenantLatencySLOViolation
+        expr: legacycoin_tenant_latency_p95_seconds > 0.5
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Tenant latency SLO breached for {{ $labels.tenant }} ({{ $labels.service_role }})"
+          description: |
+            The 95th percentile latency exceeded the 500 ms SLO for tenant {{ $labels.tenant }}
+            in role {{ $labels.service_role }} for ten minutes. Follow the latency runbook in
+            services/monitoring/README.md#operational-runbooks before escalating.
+      - alert: TenantErrorRateSLOViolation
+        expr: legacycoin_tenant_error_rate > 0.01
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tenant error budget burn for {{ $labels.tenant }}"
+          description: |
+            Error rate is above the 1% SLO for tenant {{ $labels.tenant }} / {{ $labels.service_role }}.
+            Inspect recent traces via Jaeger using the legacy.tenant_id attribute.
+      - alert: TenantThroughputRegression
+        expr: legacycoin_tenant_throughput_rps < 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Throughput regression detected for {{ $labels.tenant }}"
+          description: |
+            Request throughput dropped below 1 rps for tenant {{ $labels.tenant }}. Confirm synthetic
+            checks and customer traffic expectations before paging the secondary on-call.
+      - alert: SyntheticCheckFailure
+        expr: legacycoin_synthetic_check_status == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Synthetic guard-rail {{ $labels.check }} failing for {{ $labels.tenant }}"
+          description: |
+            Synthetic check {{ $labels.check }} is failing or violating RTO/RPO for tenant {{ $labels.tenant }}.
+            Investigate the synthetic endpoint and data freshness monitors immediately.
+      - alert: SyntheticRecoveryTimeBreach
+        expr: legacycoin_synthetic_check_recovery_time_seconds > 900
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "RTO breach for {{ $labels.check }} ({{ $labels.tenant }})"
+          description: |
+            Recorded recovery time exceeded the 15 minute RTO target. Follow the disaster recovery
+            playbook and notify the incident commander per SOC2 escalation policy.
+      - alert: SyntheticDataLagBreach
+        expr: legacycoin_synthetic_check_data_lag_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RPO breach for {{ $labels.check }}"
+          description: |
+            Synthetic data lag is beyond the five minute RPO tolerance. Validate upstream data pipelines
+            and backfill if necessary.
+      - alert: SecretsRotationStale
+        expr: legacycoin_compliance_secrets_rotation_age_days > 90
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Secrets rotation overdue for {{ $labels.tenant }}"
+          description: |
+            Secrets were rotated more than 90 days ago. Update SECRETS_ROTATED_AT and confirm evidence
+            collection for the SOC2 control.
