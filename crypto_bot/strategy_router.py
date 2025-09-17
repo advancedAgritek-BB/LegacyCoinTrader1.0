@@ -1,5 +1,7 @@
 """Strategy router for selecting and executing trading strategies based on market conditions."""
 
+from __future__ import annotations
+
 import pandas as pd
 from typing import Any, Dict, Optional
 

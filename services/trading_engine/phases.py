@@ -8,7 +8,7 @@ from typing import Iterable, Mapping, MutableMapping, Optional
 
 import pandas as pd
 
-from crypto_bot.services.interfaces import (
+from libs.services.interfaces import (
     CacheUpdateResponse,
     MultiTimeframeOHLCVRequest,
     RegimeCacheRequest,

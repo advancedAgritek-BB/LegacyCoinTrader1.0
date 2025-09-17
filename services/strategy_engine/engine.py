@@ -10,14 +10,14 @@ from typing import Any, Dict, Mapping, Optional
 import pandas as pd
 import redis.asyncio as redis
 
-from crypto_bot.services.interfaces import (
+from libs.services.interfaces import (
     RankedSignal,
     StrategyBatchRequest,
     StrategyBatchResponse,
     StrategyEvaluationPayload,
     StrategyEvaluationResult,
 )
-from crypto_bot.services.strategy_evaluator import evaluate_payload
+from libs.strategy.evaluator import evaluate_payload
 
 from .config import Settings
 from .storage import ModelRegistry

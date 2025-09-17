@@ -9,8 +9,8 @@ import uuid
 from threading import Lock
 from typing import Any, Dict, Mapping, MutableMapping, Optional
 
-from crypto_bot.execution.cex_executor import execute_trade_async
-from crypto_bot.utils.telegram import TelegramNotifier, send_message
+from libs.execution import execute_trade_async
+from libs.notifications import TelegramNotifier, send_message
 
 from .config import ExecutionServiceConfig
 from .exchange import ExchangeFactory
