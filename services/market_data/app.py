@@ -10,6 +10,10 @@ from typing import Any, Dict, Iterable, Mapping, Optional
 import redis.asyncio as redis
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 
+from services.monitoring.config import get_monitoring_settings
+from services.monitoring.instrumentation import instrument_fastapi_app
+from services.monitoring.logging import configure_logging
+
 from crypto_bot.execution.cex_executor import get_exchange
 from crypto_bot.utils.market_loader import (
     AdaptiveRateLimiter,
@@ -45,6 +49,14 @@ from .schemas import (
     TimeframeSecondsPayload,
     TimeframeSecondsResponse,
 )
+
+service_settings = get_settings()
+monitoring_settings = get_monitoring_settings().for_service(service_settings.app_name)
+monitoring_settings = monitoring_settings.model_copy(
+    update={"log_level": service_settings.log_level}
+)
+monitoring_settings.metrics.default_labels.setdefault("component", "market-data")
+configure_logging(monitoring_settings)
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +151,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Market Data Service", lifespan=lifespan)
+instrument_fastapi_app(app, settings=monitoring_settings)
 
 
 @app.get("/health")

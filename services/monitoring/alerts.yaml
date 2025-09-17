@@ -1,0 +1,27 @@
+groups:
+  - name: legacycoin-service-alerts
+    rules:
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes{job=~"api-gateway|trading-engine|market-data|portfolio|strategy-engine|token-discovery|execution|frontend"} > 1.5e9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage detected on {{ $labels.job }}"
+          description: "Process RSS is {{ $value | humanize1024 }} which is above the 1.5 GiB threshold."
+      - alert: ElevatedErrorRate
+        expr: (sum by (service) (increase(legacycoin_http_request_errors_total[5m])) / clamp_min(sum by (service) (increase(legacycoin_http_requests_total[5m])), 1)) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High HTTP error rate for {{ $labels.service }}"
+          description: "The error rate exceeded 5% over the last 10 minutes."
+      - alert: HighRequestLatency
+        expr: histogram_quantile(0.95, sum by (service, le) (rate(legacycoin_http_request_duration_seconds_bucket[5m]))) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Increased latency for {{ $labels.service }}"
+          description: "95th percentile response time remained above 2 seconds for five minutes."

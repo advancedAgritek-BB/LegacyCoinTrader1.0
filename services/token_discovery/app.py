@@ -9,6 +9,10 @@ from typing import Any
 import redis.asyncio as redis
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 
+from services.monitoring.config import get_monitoring_settings
+from services.monitoring.instrumentation import instrument_fastapi_app
+from services.monitoring.logging import configure_logging
+
 from .config import Settings, get_settings
 from .publisher import DiscoveryPublisher
 from .scanner import TokenDiscoveryCoordinator
@@ -21,6 +25,15 @@ from .schemas import (
     ScoreResponse,
     StatusResponse,
 )
+
+service_settings = get_settings()
+service_identifier = service_settings.app_name.replace(" ", "-").lower()
+monitoring_settings = get_monitoring_settings().for_service(service_identifier)
+monitoring_settings = monitoring_settings.model_copy(
+    update={"log_level": service_settings.log_level}
+)
+monitoring_settings.metrics.default_labels.setdefault("component", "token-discovery")
+configure_logging(monitoring_settings)
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +110,7 @@ def _opportunity_from_dict(data: dict[str, Any]) -> Opportunity:
 
 
 app = FastAPI(title="Token Discovery Service", lifespan=lifespan)
+instrument_fastapi_app(app, settings=monitoring_settings)
 
 
 @app.get("/health")

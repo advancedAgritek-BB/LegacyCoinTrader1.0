@@ -2,16 +2,39 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+rule_files:
+  - alerts.yaml
+
 scrape_configs:
+  - job_name: api-gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['api-gateway:8000']
   - job_name: trading-engine
     metrics_path: /metrics
     static_configs:
       - targets: ['trading-engine:8001']
+  - job_name: market-data
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['market-data:8002']
   - job_name: portfolio
     metrics_path: /metrics
     static_configs:
       - targets: ['portfolio:8003']
+  - job_name: strategy-engine
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['strategy-engine:8004']
+  - job_name: token-discovery
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['token-discovery:8005']
+  - job_name: execution
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['execution:8006']
   - job_name: frontend
     metrics_path: /metrics
     static_configs:
-      - targets: ['frontend:8000']
+      - targets: ['frontend:5000']
