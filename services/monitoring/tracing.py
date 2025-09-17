@@ -21,6 +21,8 @@ def _build_resource(settings: MonitoringSettings) -> Resource:
         "service.name": settings.service_name,
         "service.namespace": settings.tracing.service_namespace,
         "deployment.environment": settings.environment,
+        "legacy.service_role": settings.service_role,
+        "legacy.default_tenant": settings.default_tenant,
     }
     attributes.update(settings.metrics.default_labels)
     return Resource.create(attributes)
