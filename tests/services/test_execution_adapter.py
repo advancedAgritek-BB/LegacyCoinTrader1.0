@@ -32,6 +32,7 @@ class DummyExchange:
 
 @pytest.fixture(autouse=True)
 def clear_execution_settings_cache(monkeypatch):
+    monkeypatch.setenv("EXECUTION_SERVICE_SERVICE_TOKEN", "test-token")
     monkeypatch.setenv("EXECUTION_SERVICE_TOKEN", "test-token")
     monkeypatch.setenv("EXECUTION_SERVICE_SIGNING_KEY", "test-secret")
     get_execution_api_settings.cache_clear()

@@ -48,7 +48,12 @@ jobs:
 
       - name: Run unit tests
         run: |
-          pytest tests/ -v --cov=services --cov-report=xml --cov-report=html
+          pytest tests/ -v \
+            --cov=crypto_bot \
+            --cov=frontend \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-fail-under=15
 
       - name: Upload coverage reports
         uses: codecov/codecov-action@v3

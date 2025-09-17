@@ -36,6 +36,7 @@ from services.monitoring.instrumentation import instrument_flask_app
 from services.monitoring.logging import configure_logging
 from crypto_bot.config import load_config as load_bot_config, save_config, resolve_config_path
 from frontend.gateway import ApiGatewayError, get_gateway_json, post_gateway_json
+from frontend.chart_scaling import compute_chart_coordinates
 
 # Suppress urllib3 OpenSSL warning
 warnings.filterwarnings(
@@ -212,6 +213,7 @@ def health():
 
 # Get configuration and authentication instances
 settings = get_settings()
+config = settings  # Backwards compatibility for older references expecting ``config``
 auth = get_auth()
 
 monitoring_settings = get_monitoring_settings().for_service(
@@ -423,8 +425,16 @@ def fetch_positions_from_service() -> list[dict[str, Any]]:
             if total_amount <= 0:
                 continue
 
-            entry_price = float(item.get("entry_price") or item.get("average_price") or 0.0)
-            current_price = float(item.get("current_price") or item.get("mark_price") or entry_price)
+            entry_price = (
+                _coerce_optional_float(item.get("entry_price"))
+                or _coerce_optional_float(item.get("average_price"))
+                or 0.0
+            )
+            current_price = (
+                _coerce_optional_float(item.get("current_price"))
+                or _coerce_optional_float(item.get("mark_price"))
+                or entry_price
+            )
             side = item.get("side", "long")
 
             if side == "long":
@@ -439,6 +449,14 @@ def fetch_positions_from_service() -> list[dict[str, Any]]:
                 else 0.0
             )
 
+            stop_loss_price = _coerce_optional_float(item.get("stop_loss_price"))
+            chart_coordinates = compute_chart_coordinates(
+                entry_price,
+                current_price,
+                stop_loss_price=stop_loss_price,
+                include_current_price=True,
+            )
+
             results.append(
                 {
                     "symbol": symbol,
@@ -451,13 +469,13 @@ def fetch_positions_from_service() -> list[dict[str, Any]]:
                     "pnl": pnl_pct,
                     "pnl_value": pnl_value,
                     "pnl_percentage": pnl_pct,
-                    "chart_min": current_price * 0.95,
-                    "chart_max": current_price * 1.05,
+                    "chart_min": chart_coordinates.min_price,
+                    "chart_max": chart_coordinates.max_price,
                     "trend_strength": "strong" if abs(pnl_pct) > 2 else "moderate" if abs(pnl_pct) > 1 else "weak",
                     "r_squared": min(99.9, max(60.0, 70.0 + abs(pnl_pct) * 2)),
                     "highest_price": item.get("highest_price"),
                     "lowest_price": item.get("lowest_price"),
-                    "stop_loss_price": item.get("stop_loss_price"),
+                    "stop_loss_price": stop_loss_price,
                     "take_profit_price": item.get("take_profit_price"),
                     "entry_time": item.get("entry_time"),
                 }
@@ -1669,6 +1687,64 @@ def set_paper_wallet_balance(balance: float) -> None:
         raise
 
 
+def _coerce_optional_float(value: Any) -> Optional[float]:
+    """Safely convert values from API payloads into floats."""
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        value = candidate
+    try:
+        return float(value)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return None
+
+
+def _parse_entry_timestamp(value: Any) -> float:
+    """Normalise entry time information for deduplication comparisons."""
+
+    if value is None:
+        return float("-inf")
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return float("-inf")
+        try:
+            # Handle ISO timestamps with or without ``Z`` suffix.
+            return datetime.fromisoformat(candidate.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            try:
+                return float(candidate)
+            except ValueError:
+                return float("-inf")
+    return float("-inf")
+
+
+def _deduplicate_positions(positions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Ensure only the freshest position per symbol is returned."""
+
+    unique_positions: dict[str, dict[str, Any]] = {}
+    for payload in positions:
+        symbol = payload.get("symbol")
+        if not symbol:
+            continue
+
+        current = unique_positions.get(symbol)
+        if current is None:
+            unique_positions[symbol] = payload
+            continue
+
+        if _parse_entry_timestamp(payload.get("entry_time")) >= _parse_entry_timestamp(current.get("entry_time")):
+            unique_positions[symbol] = payload
+
+    return list(unique_positions.values())
+
+
 def get_open_positions() -> list:
     """Get open positions via the portfolio service."""
 
@@ -1677,8 +1753,17 @@ def get_open_positions() -> list:
         logger.info("No open positions returned by portfolio service")
         return []
 
-    logger.info("Fetched %s open positions from portfolio service", len(positions))
-    return positions
+    unique_positions = _deduplicate_positions(positions)
+    if len(unique_positions) != len(positions):
+        logger.info(
+            "Deduplicated open positions: %s raw entries -> %s unique symbols",
+            len(positions),
+            len(unique_positions),
+        )
+    else:
+        logger.info("Fetched %s open positions from portfolio service", len(unique_positions))
+
+    return unique_positions
 
 
 
@@ -2371,7 +2456,7 @@ def dashboard():
 
                     # Calculate PnL
                     amount = pos_data["total_amount"]
-                    avg_price = pos_data["average_price"]
+                    avg_price = float(pos_data["average_price"])
                     side = pos_data["side"]
 
                     if side == "long":
@@ -2386,18 +2471,21 @@ def dashboard():
                     )
 
                     # Calculate additional fields for position cards
+                    current_price = float(current_price)
                     current_value = (
                         float(current_price * amount) if current_price else 0.0
                     )
                     pnl_value = float(pnl)
 
-                    # Generate chart data bounds (will be used by JavaScript)
-                    chart_min = (
-                        min(current_price, avg_price) * 0.95
-                    )  # 5% below minimum
-                    chart_max = (
-                        max(current_price, avg_price) * 1.05
-                    )  # 5% above maximum
+                    stop_price = _coerce_optional_float(pos_data.get("stop_loss_price"))
+                    chart_coordinates = compute_chart_coordinates(
+                        avg_price,
+                        current_price,
+                        stop_loss_price=stop_price,
+                        include_current_price=True,
+                    )
+                    chart_min = chart_coordinates.min_price
+                    chart_max = chart_coordinates.max_price
 
                     # Calculate trend strength and R-squared based on P&L
                     trend_strength = (
@@ -2425,11 +2513,7 @@ def dashboard():
                         "trend_strength": trend_strength,
                         "r_squared": r_squared,
                         # Include stop loss/trailing stop price for chart line
-                        "stop_price": (
-                            float(pos_data.get("stop_loss_price"))
-                            if pos_data.get("stop_loss_price") is not None
-                            else None
-                        ),
+                        "stop_price": stop_price,
                     }
                     open_positions.append(position_data)
 
