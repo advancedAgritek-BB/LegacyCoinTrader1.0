@@ -10,6 +10,9 @@ from crypto_bot.utils.indicators import (
 )
 
 
+pytestmark = pytest.mark.regression
+
+
 def test_calculate_rsi_matches_manual():
     close = pd.Series([1, 2, 3, 2, 4, 5, 6], dtype=float)
     window = 3

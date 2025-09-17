@@ -4,11 +4,13 @@ Test script to verify Kraken nonce error fix.
 This script tests the WebSocket client with nonce improvements.
 """
 
+import logging
 import os
 import sys
 import time
-import logging
 from pathlib import Path
+
+import pytest
 
 # Ensure the project root and crypto_bot package are available for imports
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +22,8 @@ if str(CRYPTO_BOT_PATH) not in sys.path:
 
 from crypto_bot.execution.cex_executor import get_exchange
 from crypto_bot.utils.logger import setup_logger
+
+pytestmark = pytest.mark.regression
 
 # Setup logging
 LOG_DIR = PROJECT_ROOT / "logs"

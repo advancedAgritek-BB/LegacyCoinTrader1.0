@@ -9,8 +9,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 import json
+import pytest
 
 # Import the safe_json_load function from the frontend app
+pytestmark = pytest.mark.regression
+
 def safe_json_load(file_path):
     """Safely load JSON file, handling common corruption issues."""
     try:
