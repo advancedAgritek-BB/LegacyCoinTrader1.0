@@ -34,6 +34,11 @@ MAX_OPEN_POSITIONS=5
 MAX_RISK_PER_TRADE=0.05
 POSITION_SIZE_PCT=0.1
 
+# Execution Microservice
+EXECUTION_SERVICE_URL=http://localhost:8006
+EXECUTION_SERVICE_SECRET=changeme
+EXECUTION_SERVICE_KEY=local-dev
+
 # Telegram (Disabled for local testing)
 TELEGRAM_ENABLED=false
 TELEGRAM_TOKEN=

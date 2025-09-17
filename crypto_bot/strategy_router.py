@@ -1,10 +1,13 @@
 """Strategy router for selecting and executing trading strategies based on market conditions."""
 
+from __future__ import annotations
+
 import pandas as pd
 from typing import Any, Dict, Optional
 
 
 # Debug utility to help identify DataFrame conversion issues
+
 DEBUG_DATAFRAME_CONVERSION = False
 
 def enable_dataframe_debug():

@@ -18,6 +18,16 @@ services:
       - Request/response transformation
       - API versioning
     dependencies: []
+    routes:
+      - path: /api/v1/execution
+        methods: [GET, POST]
+        upstream: execution
+        auth:
+          scheme: hmac-sha256
+          signature_header: X-Execution-Signature
+          timestamp_header: X-Execution-Timestamp
+          shared_secret_env: EXECUTION_SERVICE_SECRET
+          key_header: X-Execution-Key
 
   # Trading Engine - Core trading logic and orchestration
   trading_engine:
@@ -94,6 +104,7 @@ services:
       - Order status monitoring
       - Trade execution
       - WebSocket trading
+      - FastAPI HTTP interface for order submission and event streaming
     dependencies:
       - redis_cache
       - monitoring
