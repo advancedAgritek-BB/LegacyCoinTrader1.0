@@ -103,8 +103,8 @@ class OrderBookResponse:
 class TimeframeRequest:
     """Request conversion of timeframe to seconds."""
 
-    exchange_id: Optional[str] = None
     timeframe: str
+    exchange_id: Optional[str] = None
 
 
 @dataclass(slots=True)
@@ -274,6 +274,21 @@ class PortfolioService(Protocol):
     """Protocol covering trade/portfolio management helpers."""
 
     def create_trade(self, request: CreateTradeRequest) -> CreateTradeResponse:
+        ...
+
+    def get_state(self) -> Any:
+        ...
+
+    def list_positions(self) -> Sequence[Any]:
+        ...
+
+    def update_price(self, symbol: str, price: Any) -> Any:
+        ...
+
+    def compute_pnl(self, symbol: Optional[str] = None) -> Any:
+        ...
+
+    def check_risk(self) -> Sequence[Any]:
         ...
 
     def get_trade_manager(self) -> Any:
