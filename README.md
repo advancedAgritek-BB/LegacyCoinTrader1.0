@@ -151,6 +151,21 @@ Manager, or Parameter Store) using the manifest defined in
 `config/managed_secrets.yaml`. The deployment tooling now refuses to start if
 required secrets are missing or stale according to the rotation policy.
 
+Set `SECRETS_PROVIDER` to `vault`/`hashicorp` or `aws` to enable runtime secret
+resolution. Depending on the provider, the following environment variables must
+also be supplied:
+
+* Hashicorp Vault: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_SECRET_PATH`,
+  `VAULT_VERIFY`, `VAULT_TIMEOUT`
+* AWS Secrets Manager: `AWS_SECRET_NAME`, `AWS_REGION`, `AWS_PROFILE`
+
+The frontend no longer generates a default Flask session secret; provision
+`SESSION_SECRET_KEY` (or the aliases defined in `config/managed_secrets.yaml`)
+through the configured store before starting any service. For automated API key
+rotation expose `PORTFOLIO_NEW_API_KEY` (or `PORTFOLIO_ROTATION_API_KEY`) via
+the same mechanism so that `PortfolioIdentityService.rotate_api_key` can pull
+fresh credentials.
+
 Use `python tools/manage_env.py consolidate` to generate a template populated
 with `MANAGED:` placeholders. A minimal example:
 

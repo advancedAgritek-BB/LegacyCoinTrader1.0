@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from services.common.secrets import SecretRetrievalError, resolve_secret
+
 from .config import CredentialsConfig
 from .models import ExchangeCredentials, SecretRef
 
@@ -46,9 +48,14 @@ class SecretLoader:
             return ref.name
         if source == "env":
             value = os.getenv(ref.name)
-            if value is None:
-                raise SecretNotFoundError(f"Environment variable {ref.name!r} not set")
-            return value
+            if value:
+                return value
+            try:
+                return resolve_secret(ref.name)
+            except SecretRetrievalError as exc:
+                raise SecretNotFoundError(
+                    f"Environment variable {ref.name!r} not set and secrets manager lookup failed"
+                ) from exc
         if source in {"file", "kubernetes"}:
             base = self._k8s_base if source == "kubernetes" else Path("/")
             path = Path(ref.name)
@@ -60,11 +67,23 @@ class SecretLoader:
                 return path.read_text().strip()
             except FileNotFoundError as exc:  # pragma: no cover - filesystem specific
                 raise SecretNotFoundError(str(exc)) from exc
+        if source in {"manager", "secrets_manager", "secretmanager"}:
+            key_name = ref.key or ref.name
+            try:
+                return resolve_secret(key_name, vault_path=ref.name if ref.key else None)
+            except SecretRetrievalError as exc:
+                raise SecretNotFoundError(
+                    f"Secrets manager reference {key_name!r} could not be resolved"
+                ) from exc
         if source == "vault":
-            if not self._vault_client:
-                raise SecretNotFoundError("Vault client not configured or hvac unavailable")
             if not ref.key:
                 raise SecretNotFoundError("Vault references require a key")
+            try:
+                return resolve_secret(ref.key, vault_path=ref.name)
+            except SecretRetrievalError:
+                pass
+            if not self._vault_client:
+                raise SecretNotFoundError("Vault client not configured or hvac unavailable")
             secret = self._vault_client.secrets.kv.v2.read_secret_version(path=ref.name)
             data = secret.get("data", {}).get("data", {})
             if ref.key not in data:
