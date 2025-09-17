@@ -69,6 +69,24 @@ class GatewaySettings:
     service_routes: Dict[str, ServiceRouteConfig]
     token_ttl_seconds: int
     token_issuer: str
+    service_name: str
+    service_version: str
+    service_scheme: str
+    health_endpoint: str
+    readiness_endpoint: str
+    metrics_endpoint: Optional[str]
+    event_channel_prefix: str
+    auth_event_channel: str
+    service_discovery_backend: str
+    service_discovery_url: str
+    service_discovery_token: Optional[str]
+    service_discovery_namespace: Optional[str]
+    service_discovery_datacenter: Optional[str]
+    service_discovery_tags: List[str]
+    enable_service_registration: bool
+    discovery_check_interval: int
+    discovery_check_timeout: int
+    discovery_deregister_after: int
 
     @property
     def cors_origins(self) -> List[str]:
@@ -217,6 +235,29 @@ def load_gateway_settings() -> GatewaySettings:
     service_routes = _load_service_routes(default_rate_limit)
     resolved_tokens = {name: config.service_token or "" for name, config in service_routes.items()}
 
+    service_name = os.getenv("GATEWAY_SERVICE_NAME", "api-gateway")
+    service_version = os.getenv("GATEWAY_SERVICE_VERSION", "1.0.0")
+    service_scheme = os.getenv("GATEWAY_SERVICE_SCHEME", "http")
+    health_endpoint = os.getenv("GATEWAY_HEALTH_ENDPOINT", "/health")
+    readiness_endpoint = os.getenv("GATEWAY_READINESS_ENDPOINT", "/readiness")
+    metrics_endpoint = os.getenv("GATEWAY_METRICS_ENDPOINT", "") or None
+    event_channel_prefix = os.getenv("GATEWAY_EVENT_CHANNEL_PREFIX", "legacy")
+    auth_event_channel = os.getenv("GATEWAY_AUTH_EVENT_CHANNEL", "gateway:auth")
+
+    discovery_backend = os.getenv("GATEWAY_DISCOVERY_BACKEND", "consul")
+    discovery_url = os.getenv("GATEWAY_DISCOVERY_URL", "http://localhost:8500")
+    discovery_token = os.getenv("GATEWAY_DISCOVERY_TOKEN", "") or None
+    discovery_namespace = os.getenv("GATEWAY_DISCOVERY_NAMESPACE", "") or None
+    discovery_datacenter = os.getenv("GATEWAY_DISCOVERY_DATACENTER", "") or None
+    discovery_tags_env = os.getenv("GATEWAY_DISCOVERY_TAGS", "")
+    discovery_tags = [tag.strip() for tag in discovery_tags_env.split(",") if tag.strip()]
+    if not discovery_tags:
+        discovery_tags = [service_name, "gateway"]
+    enable_service_registration = os.getenv("GATEWAY_DISCOVERY_REGISTER", "1") != "0"
+    discovery_check_interval = int(os.getenv("GATEWAY_DISCOVERY_CHECK_INTERVAL", "15"))
+    discovery_check_timeout = int(os.getenv("GATEWAY_DISCOVERY_CHECK_TIMEOUT", "5"))
+    discovery_deregister_after = int(os.getenv("GATEWAY_DISCOVERY_DEREGISTER_AFTER", "60"))
+
     return GatewaySettings(
         host=os.getenv("GATEWAY_HOST", "0.0.0.0"),
         port=int(os.getenv("GATEWAY_PORT", "8000")),
@@ -236,5 +277,23 @@ def load_gateway_settings() -> GatewaySettings:
         service_routes=service_routes,
         token_ttl_seconds=int(os.getenv("GATEWAY_TOKEN_TTL_SECONDS", "3600")),
         token_issuer=os.getenv("GATEWAY_TOKEN_ISSUER", "legacycointrader-gateway"),
+        service_name=service_name,
+        service_version=service_version,
+        service_scheme=service_scheme,
+        health_endpoint=health_endpoint,
+        readiness_endpoint=readiness_endpoint,
+        metrics_endpoint=metrics_endpoint,
+        event_channel_prefix=event_channel_prefix,
+        auth_event_channel=auth_event_channel,
+        service_discovery_backend=discovery_backend,
+        service_discovery_url=discovery_url,
+        service_discovery_token=discovery_token,
+        service_discovery_namespace=discovery_namespace,
+        service_discovery_datacenter=discovery_datacenter,
+        service_discovery_tags=discovery_tags,
+        enable_service_registration=enable_service_registration,
+        discovery_check_interval=discovery_check_interval,
+        discovery_check_timeout=discovery_check_timeout,
+        discovery_deregister_after=discovery_deregister_after,
     )
 

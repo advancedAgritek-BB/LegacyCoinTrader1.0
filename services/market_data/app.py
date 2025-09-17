@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
@@ -21,6 +20,15 @@ from crypto_bot.utils.market_loader import (
     update_ohlcv_cache,
     update_regime_tf_cache,
 )
+
+from services.common.contracts import ServiceMetadata
+from services.common.discovery import (
+    ServiceDiscoveryClient,
+    ServiceDiscoveryConfig,
+    ServiceDiscoveryError,
+)
+from services.common.messaging import RedisEventBus
+from services.market_data.contracts import MarketDataEvent, MarketDataEventPayload
 
 from .config import Settings, get_settings
 from .redis_cache import (
@@ -47,16 +55,6 @@ from .schemas import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _json_default(value: Any) -> Any:
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return value
-
-
-def _serialize_event(data: Mapping[str, Any]) -> str:
-    return json.dumps(dict(data), default=_json_default)
 
 
 def _prepare_exchange_config(exchange_id: str, config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -113,6 +111,14 @@ def get_redis_dependency(request: Request) -> redis.Redis:
     return redis_client
 
 
+def get_event_bus_dependency(request: Request) -> RedisEventBus | None:
+    return getattr(request.app.state, "event_bus", None)
+
+
+def get_service_discovery_dependency(request: Request) -> ServiceDiscoveryClient | None:
+    return getattr(request.app.state, "service_discovery", None)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -130,20 +136,92 @@ async def lifespan(app: FastAPI):
         await redis_client.close()
         raise
 
+    event_bus = RedisEventBus(
+        redis_client,
+        channel_prefix=settings.event_channel_prefix,
+        service_name=settings.app_name,
+    )
+    metadata = ServiceMetadata(
+        name=settings.app_name,
+        version=settings.service_version,
+        host=settings.host,
+        port=settings.port,
+        scheme=settings.service_scheme,
+        tags=settings.service_discovery_tags,
+        health_endpoint=settings.health_endpoint,
+        readiness_endpoint=settings.readiness_endpoint,
+        metrics_endpoint=settings.metrics_endpoint,
+    )
+    discovery_config = ServiceDiscoveryConfig(
+        metadata=metadata,
+        backend=settings.service_discovery_backend,
+        consul_url=settings.service_discovery_url,
+        consul_token=settings.service_discovery_token,
+        namespace=settings.service_discovery_namespace,
+        datacenter=settings.service_discovery_datacenter,
+        register=settings.enable_service_registration,
+        check_interval=settings.discovery_check_interval,
+        check_timeout=settings.discovery_check_timeout,
+        deregister_after=settings.discovery_deregister_after,
+        additional_tags=settings.service_discovery_tags,
+    )
+    service_discovery = ServiceDiscoveryClient(discovery_config)
+    try:
+        await service_discovery.register()
+    except ServiceDiscoveryError as exc:  # pragma: no cover - external dependency
+        logger.warning("Service discovery registration failed: %s", exc)
+
     app.state.redis = redis_client
     app.state.settings = settings
+    app.state.event_bus = event_bus
+    app.state.metadata = metadata
+    app.state.service_discovery = service_discovery
     try:
         yield
     finally:
         await redis_client.close()
+        await service_discovery.close()
 
 
 app = FastAPI(title="Market Data Service", lifespan=lifespan)
 
 
+async def _publish_market_event(
+    event_bus: RedisEventBus | None,
+    settings: Settings,
+    channel: str,
+    payload: MarketDataEventPayload,
+) -> None:
+    if event_bus is None:
+        return
+    event = MarketDataEvent(source=settings.app_name, payload=payload)
+    try:
+        await event_bus.publish(channel, event)
+    except Exception as exc:  # pragma: no cover - messaging failures shouldn't abort requests
+        logger.warning("Failed to publish market data event to %s: %s", channel, exc)
+
+
 @app.get("/health")
-async def health() -> Dict[str, str]:
-    return {"status": "ok"}
+async def health(
+    service_discovery: ServiceDiscoveryClient | None = Depends(get_service_discovery_dependency),
+    event_bus: RedisEventBus | None = Depends(get_event_bus_dependency),
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "status": "ok",
+        "event_bus": {"enabled": event_bus is not None},
+    }
+    if service_discovery is not None:
+        try:
+            registrations = await service_discovery.list_services()
+            payload["service_discovery"] = {
+                "enabled": True,
+                "registered": len(registrations),
+            }
+        except ServiceDiscoveryError as exc:
+            payload["service_discovery"] = {"enabled": True, "error": str(exc)}
+    else:
+        payload["service_discovery"] = {"enabled": False}
+    return payload
 
 
 @app.get("/readiness")
@@ -159,11 +237,46 @@ async def readiness(
     return {"status": "ready", "redis": settings.redis_dsn()}
 
 
+@app.get("/discovery/self", tags=["Discovery"])
+async def discovery_self(
+    request: Request,
+    settings: Settings = Depends(get_settings_dependency),
+) -> Dict[str, Any]:
+    metadata: ServiceMetadata | None = getattr(request.app.state, "metadata", None)
+    if metadata is None:
+        metadata = ServiceMetadata(
+            name=settings.app_name,
+            version=settings.service_version,
+            host=settings.host,
+            port=settings.port,
+            scheme=settings.service_scheme,
+            tags=settings.service_discovery_tags,
+            health_endpoint=settings.health_endpoint,
+            readiness_endpoint=settings.readiness_endpoint,
+            metrics_endpoint=settings.metrics_endpoint,
+        )
+    return metadata.model_dump()
+
+
+@app.get("/discovery/services", tags=["Discovery"])
+async def discovery_services(
+    service_discovery: ServiceDiscoveryClient | None = Depends(get_service_discovery_dependency),
+) -> Dict[str, Any]:
+    if service_discovery is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service discovery disabled")
+    try:
+        registrations = await service_discovery.list_services()
+    except ServiceDiscoveryError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return {"services": [registration.model_dump() for registration in registrations]}
+
+
 @app.post("/symbols/load", response_model=SymbolListResponse)
 async def load_symbols(
     payload: LoadSymbolsPayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
+    event_bus: RedisEventBus | None = Depends(get_event_bus_dependency),
 ) -> SymbolListResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
@@ -177,13 +290,13 @@ async def load_symbols(
     symbols = list(symbols or [])
     await store_symbols(redis_client, payload.exchange_id, symbols, settings.cache_ttl_seconds)
     updated_at = datetime.now(timezone.utc)
-    event = {
-        "type": "symbols_update",
-        "exchange": payload.exchange_id,
-        "symbols": symbols,
-        "updated_at": updated_at,
-    }
-    await redis_client.publish(settings.symbols_channel, _serialize_event(event))
+    event_payload = MarketDataEventPayload(
+        exchange_id=payload.exchange_id,
+        channel=settings.symbols_channel,
+        data={"symbols": symbols, "exclude": payload.exclude},
+        updated_at=updated_at,
+    )
+    await _publish_market_event(event_bus, settings, settings.symbols_channel, event_payload)
     return SymbolListResponse(symbols=symbols, updated_at=updated_at)
 
 
@@ -192,6 +305,7 @@ async def update_ohlcv_endpoint(
     payload: OHLCVUpdatePayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
+    event_bus: RedisEventBus | None = Depends(get_event_bus_dependency),
 ) -> TimeframeResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
@@ -225,14 +339,16 @@ async def update_ohlcv_endpoint(
         settings.cache_ttl_seconds,
     )
     updated_at = datetime.now(timezone.utc)
-    event = {
-        "type": "ohlcv_update",
-        "exchange": payload.exchange_id,
-        "timeframe": payload.timeframe,
-        "symbols": list(serialized.keys()),
-        "updated_at": updated_at,
-    }
-    await redis_client.publish(settings.ohlcv_channel, _serialize_event(event))
+    event_payload = MarketDataEventPayload(
+        exchange_id=payload.exchange_id,
+        channel=settings.ohlcv_channel,
+        data={
+            "timeframe": payload.timeframe,
+            "symbols": list(serialized.keys()),
+        },
+        updated_at=updated_at,
+    )
+    await _publish_market_event(event_bus, settings, settings.ohlcv_channel, event_payload)
     return TimeframeResponse(timeframe=payload.timeframe, data=serialized, updated_at=updated_at)
 
 
@@ -241,6 +357,7 @@ async def update_multi_timeframe(
     payload: MultiOHLCVUpdatePayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
+    event_bus: RedisEventBus | None = Depends(get_event_bus_dependency),
 ) -> MultiTimeframeResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
@@ -278,14 +395,16 @@ async def update_multi_timeframe(
         settings.cache_ttl_seconds,
     )
     updated_at = datetime.now(timezone.utc)
-    event = {
-        "type": "ohlcv_multi_update",
-        "exchange": payload.exchange_id,
-        "timeframes": list(serialized.keys()),
-        "symbols": list({sym for tf in serialized.values() for sym in tf.keys()}),
-        "updated_at": updated_at,
-    }
-    await redis_client.publish(settings.ohlcv_channel, _serialize_event(event))
+    event_payload = MarketDataEventPayload(
+        exchange_id=payload.exchange_id,
+        channel=settings.ohlcv_channel,
+        data={
+            "timeframes": list(serialized.keys()),
+            "symbols": list({sym for tf in serialized.values() for sym in tf.keys()}),
+        },
+        updated_at=updated_at,
+    )
+    await _publish_market_event(event_bus, settings, settings.ohlcv_channel, event_payload)
     return MultiTimeframeResponse(timeframes=serialized, updated_at=updated_at)
 
 
@@ -294,6 +413,7 @@ async def update_regime(
     payload: RegimeUpdatePayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
+    event_bus: RedisEventBus | None = Depends(get_event_bus_dependency),
 ) -> RegimeResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
@@ -338,14 +458,16 @@ async def update_regime(
         settings.cache_ttl_seconds,
     )
     updated_at = datetime.now(timezone.utc)
-    event = {
-        "type": "regime_update",
-        "exchange": payload.exchange_id,
-        "timeframes": list(serialized.keys()),
-        "symbols": list({sym for tf in serialized.values() for sym in tf.keys()}),
-        "updated_at": updated_at,
-    }
-    await redis_client.publish(settings.regime_channel, _serialize_event(event))
+    event_payload = MarketDataEventPayload(
+        exchange_id=payload.exchange_id,
+        channel=settings.regime_channel,
+        data={
+            "timeframes": list(serialized.keys()),
+            "symbols": list({sym for tf in serialized.values() for sym in tf.keys()}),
+        },
+        updated_at=updated_at,
+    )
+    await _publish_market_event(event_bus, settings, settings.regime_channel, event_payload)
     return RegimeResponse(timeframes=serialized, updated_at=updated_at)
 
 
@@ -354,6 +476,7 @@ async def order_book_snapshot(
     payload: OrderBookPayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
+    event_bus: RedisEventBus | None = Depends(get_event_bus_dependency),
 ) -> OrderBookResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
@@ -372,13 +495,13 @@ async def order_book_snapshot(
         settings.cache_ttl_seconds,
     )
     updated_at = datetime.now(timezone.utc)
-    event = {
-        "type": "order_book_snapshot",
-        "exchange": payload.exchange_id,
-        "symbol": payload.symbol,
-        "updated_at": updated_at,
-    }
-    await redis_client.publish(settings.order_book_channel, _serialize_event(event))
+    event_payload = MarketDataEventPayload(
+        exchange_id=payload.exchange_id,
+        channel=settings.order_book_channel,
+        data={"symbol": payload.symbol},
+        updated_at=updated_at,
+    )
+    await _publish_market_event(event_bus, settings, settings.order_book_channel, event_payload)
     return OrderBookResponse(symbol=payload.symbol, order_book=order_book, updated_at=updated_at)
 
 

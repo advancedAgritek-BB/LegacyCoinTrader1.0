@@ -2,15 +2,32 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
 from typing import Dict, List, Optional
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, constr
 from redis import asyncio as redis_asyncio
+
+from services.api_gateway.contracts import (
+    ApiKeyValidationRequest,
+    ApiKeyValidationResponse,
+    AuthenticationEvent,
+    AuthenticationPayload,
+    HTTP_CONTRACT,
+    PasswordRotationRequest,
+    PasswordRotationResponse,
+    TokenRequest,
+    TokenResponse,
+)
+from services.common.contracts import ServiceMetadata
+from services.common.discovery import (
+    ServiceDiscoveryClient,
+    ServiceDiscoveryConfig,
+    ServiceDiscoveryError,
+)
+from services.common.messaging import RedisEventBus
 
 from .auth import AuthManager, TokenPayload
 from .config import GatewaySettings, ServiceRouteConfig, load_gateway_settings
@@ -26,55 +43,6 @@ from .proxy import ProxyGateway
 from .rate_limiter import RateLimitResult, RateLimiter
 
 LOGGER = logging.getLogger("api_gateway")
-
-
-class TokenRequest(BaseModel):
-    """Incoming credentials for token issuance."""
-
-    username: constr(min_length=1, strip_whitespace=True)
-    password: constr(min_length=1)
-
-
-class TokenResponse(BaseModel):
-    """JWT payload returned to authenticated clients."""
-
-    access_token: str
-    token_type: str = Field(default="bearer")
-    expires_at: datetime
-    username: str
-    roles: List[str]
-    password_expires_at: Optional[datetime] = None
-
-
-class PasswordRotationRequest(BaseModel):
-    """Payload for a password rotation request."""
-
-    username: constr(min_length=1, strip_whitespace=True)
-    current_password: constr(min_length=1)
-    new_password: constr(min_length=8)
-
-
-class PasswordRotationResponse(BaseModel):
-    """Metadata returned after a successful password rotation."""
-
-    username: str
-    roles: List[str]
-    password_rotated_at: datetime
-    password_expires_at: Optional[datetime] = None
-
-
-class ApiKeyValidationRequest(BaseModel):
-    """Payload for API key validation."""
-
-    api_key: constr(min_length=1)
-
-
-class ApiKeyValidationResponse(BaseModel):
-    """Response returned when an API key is validated."""
-
-    username: str
-    roles: List[str]
-    api_key_last_rotated_at: Optional[datetime] = None
 
 
 def create_app() -> FastAPI:
@@ -116,6 +84,9 @@ class GatewayState:
         self.rate_limiter: RateLimiter | None = None
         self.proxy_gateway: ProxyGateway | None = None
         self.identity_service: IdentityService | None = None
+        self.event_bus: RedisEventBus | None = None
+        self.metadata: ServiceMetadata | None = None
+        self.service_discovery: ServiceDiscoveryClient | None = None
 
 
 async def get_state(request: Request) -> GatewayState:
@@ -139,10 +110,37 @@ def register_events(app: FastAPI, state: GatewayState) -> None:
             state.http_client,
         )
         state.identity_service = IdentityService(state.settings)
+        if state.redis is not None:
+            state.event_bus = RedisEventBus(
+                state.redis,
+                channel_prefix=state.settings.event_channel_prefix,
+                service_name=state.settings.service_name,
+            )
+        state.metadata = _build_service_metadata(state.settings)
+        discovery_config = ServiceDiscoveryConfig(
+            metadata=state.metadata,
+            backend=state.settings.service_discovery_backend,
+            consul_url=state.settings.service_discovery_url,
+            consul_token=state.settings.service_discovery_token,
+            namespace=state.settings.service_discovery_namespace,
+            datacenter=state.settings.service_discovery_datacenter,
+            register=state.settings.enable_service_registration,
+            check_interval=state.settings.discovery_check_interval,
+            check_timeout=state.settings.discovery_check_timeout,
+            deregister_after=state.settings.discovery_deregister_after,
+            additional_tags=state.settings.service_discovery_tags,
+        )
+        state.service_discovery = ServiceDiscoveryClient(discovery_config)
+        try:
+            await state.service_discovery.register()
+        except ServiceDiscoveryError as exc:  # pragma: no cover - external dependency
+            LOGGER.warning("Service discovery registration failed: %s", exc)
 
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
         LOGGER.info("Shutting down API Gateway")
+        if state.service_discovery:
+            await state.service_discovery.close()
         if state.http_client:
             await state.http_client.aclose()
         if state.redis:
@@ -163,6 +161,22 @@ async def _init_redis(settings: GatewaySettings) -> redis_asyncio.Redis | None:
     except Exception as exc:  # pragma: no cover - defensive
         LOGGER.warning("Redis unavailable - using in-memory rate limiting: %s", exc)
         return None
+
+
+def _build_service_metadata(settings: GatewaySettings) -> ServiceMetadata:
+    """Construct the service metadata object used for discovery registration."""
+
+    return ServiceMetadata(
+        name=settings.service_name,
+        version=settings.service_version,
+        host=settings.host,
+        port=settings.port,
+        scheme=settings.service_scheme,
+        tags=list(settings.service_discovery_tags),
+        health_endpoint=settings.health_endpoint,
+        readiness_endpoint=settings.readiness_endpoint,
+        metrics_endpoint=settings.metrics_endpoint,
+    )
 
 
 def register_routes(app: FastAPI, state: GatewayState) -> None:
@@ -188,6 +202,15 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
                 return True
         return False
 
+    async def _emit_auth_event(state: GatewayState, payload: AuthenticationPayload) -> None:
+        if not state.event_bus:
+            return
+        event = AuthenticationEvent(source=state.settings.service_name, payload=payload)
+        try:
+            await state.event_bus.publish(state.settings.auth_event_channel, event)
+        except Exception as exc:  # pragma: no cover - Redis issues handled gracefully
+            LOGGER.warning("Failed to publish authentication event: %s", exc)
+
     @app.post("/auth/token", tags=["Authentication"], response_model=TokenResponse)
     async def issue_access_token(
         payload: TokenRequest,
@@ -199,6 +222,15 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
         try:
             issued = identity_service.issue_token(payload.username, payload.password)
         except InvalidCredentialsError:
+            await _emit_auth_event(
+                state,
+                AuthenticationPayload(
+                    username=payload.username,
+                    successful=False,
+                    roles=[],
+                    subject="auth-token",
+                ),
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid username or password",
@@ -208,13 +240,23 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
         except PasswordExpiredError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
-        return TokenResponse(
+        response = TokenResponse(
             access_token=issued.access_token,
             expires_at=issued.expires_at,
             username=issued.username,
             roles=issued.roles,
             password_expires_at=issued.password_expires_at,
         )
+        await _emit_auth_event(
+            state,
+            AuthenticationPayload(
+                username=response.username,
+                successful=True,
+                roles=response.roles,
+                subject="auth-token",
+            ),
+        )
+        return response
 
     @app.post(
         "/auth/password/rotate",
@@ -231,16 +273,35 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
                 payload.username, payload.current_password, payload.new_password
             )
         except InvalidCredentialsError as exc:
+            await _emit_auth_event(
+                state,
+                AuthenticationPayload(
+                    username=payload.username,
+                    successful=False,
+                    roles=[],
+                    subject="password-rotation",
+                ),
+            )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
         except InactiveAccountError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
-        return PasswordRotationResponse(
+        response = PasswordRotationResponse(
             username=identity.username,
             roles=identity.roles,
             password_rotated_at=identity.password_rotated_at,
             password_expires_at=identity.password_expires_at,
         )
+        await _emit_auth_event(
+            state,
+            AuthenticationPayload(
+                username=response.username,
+                successful=True,
+                roles=response.roles,
+                subject="password-rotation",
+            ),
+        )
+        return response
 
     @app.post(
         "/auth/api-key/validate",
@@ -255,19 +316,47 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
         try:
             identity = identity_service.validate_api_key(payload.api_key)
         except ApiKeyRotationRequiredError as exc:
+            await _emit_auth_event(
+                state,
+                AuthenticationPayload(
+                    username=payload.api_key,
+                    successful=False,
+                    roles=[],
+                    subject="api-key",
+                ),
+            )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
         except InactiveAccountError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
         except ApiKeyValidationError:
+            await _emit_auth_event(
+                state,
+                AuthenticationPayload(
+                    username=payload.api_key,
+                    successful=False,
+                    roles=[],
+                    subject="api-key",
+                ),
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key"
             ) from None
 
-        return ApiKeyValidationResponse(
+        response = ApiKeyValidationResponse(
             username=identity.username,
             roles=identity.roles,
             api_key_last_rotated_at=identity.api_key_last_rotated_at,
         )
+        await _emit_auth_event(
+            state,
+            AuthenticationPayload(
+                username=response.username,
+                successful=True,
+                roles=response.roles,
+                subject="api-key",
+            ),
+        )
+        return response
 
     @app.get("/health", tags=["Health"])
     async def gateway_health() -> JSONResponse:
@@ -308,7 +397,22 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
                 }
                 for name, route in state.settings.service_routes.items()
             },
+            "event_bus": {
+                "enabled": state.event_bus is not None,
+                "channel_prefix": state.settings.event_channel_prefix,
+            },
+            "service_discovery": {"enabled": state.service_discovery is not None},
         }
+        if state.metadata:
+            payload["metadata"] = state.metadata.model_dump()
+        if state.service_discovery:
+            try:
+                registrations = await state.service_discovery.list_services()
+                payload["service_discovery"].update(
+                    {"registered": len(registrations)}
+                )
+            except ServiceDiscoveryError as exc:
+                payload["service_discovery"]["error"] = str(exc)
         return JSONResponse(payload)
 
     @app.get("/routes", tags=["Configuration"])
@@ -323,6 +427,28 @@ def register_routes(app: FastAPI, state: GatewayState) -> None:
             }
             for name, route in state.settings.service_routes.items()
         }
+
+    @app.get("/contracts", tags=["Discovery"])
+    async def describe_contracts() -> Dict[str, object]:
+        return {"http": [endpoint.model_dump() for endpoint in HTTP_CONTRACT]}
+
+    @app.get("/discovery/self", tags=["Discovery"])
+    async def discovery_self(state: GatewayState = Depends(get_state)) -> Dict[str, object]:
+        metadata = state.metadata or _build_service_metadata(state.settings)
+        return metadata.model_dump()
+
+    @app.get("/discovery/services", tags=["Discovery"])
+    async def discovery_services(state: GatewayState = Depends(get_state)) -> Dict[str, object]:
+        if not state.service_discovery:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Service discovery disabled",
+            )
+        try:
+            registrations = await state.service_discovery.list_services()
+        except ServiceDiscoveryError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        return {"services": [registration.model_dump() for registration in registrations]}
 
     def _register_proxy_endpoint(route: ServiceRouteConfig) -> None:
         async def auth_and_rate_limit(

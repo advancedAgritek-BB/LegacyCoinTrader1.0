@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 import redis.asyncio as redis
@@ -16,9 +16,17 @@ from crypto_bot.paper_wallet import PaperWallet
 from crypto_bot.risk.risk_manager import RiskManager
 from crypto_bot.startup_utils import create_service_container, load_config
 
+from services.common.contracts import ServiceMetadata
+from services.common.discovery import (
+    ServiceDiscoveryClient,
+    ServiceDiscoveryConfig,
+    ServiceDiscoveryError,
+)
+from services.common.messaging import RedisEventBus
 from services.monitoring.config import get_monitoring_settings
 from services.monitoring.logging import configure_logging
 from services.monitoring.instrumentation import instrument_fastapi_app
+from services.trading_engine.contracts import TradingCycleEvent, TradingCycleEventPayload
 
 from .config import Settings, get_settings
 from .interface import TradingEngineInterface
@@ -52,6 +60,41 @@ async def lifespan(app: FastAPI):
         logger.error("Unable to connect to Redis: %s", exc)
         await redis_client.close()
         raise
+
+    event_bus = RedisEventBus(
+        redis_client,
+        channel_prefix=settings.event_channel_prefix,
+        service_name=settings.app_name,
+    )
+    metadata = ServiceMetadata(
+        name=settings.app_name,
+        version=settings.service_version,
+        host=settings.host,
+        port=settings.port,
+        scheme=settings.service_scheme,
+        tags=settings.service_discovery_tags,
+        health_endpoint=settings.health_endpoint,
+        readiness_endpoint=settings.readiness_endpoint,
+        metrics_endpoint=settings.metrics_endpoint,
+    )
+    discovery_config = ServiceDiscoveryConfig(
+        metadata=metadata,
+        backend=settings.service_discovery_backend,
+        consul_url=settings.service_discovery_url,
+        consul_token=settings.service_discovery_token,
+        namespace=settings.service_discovery_namespace,
+        datacenter=settings.service_discovery_datacenter,
+        register=settings.enable_service_registration,
+        check_interval=settings.discovery_check_interval,
+        check_timeout=settings.discovery_check_timeout,
+        deregister_after=settings.discovery_deregister_after,
+        additional_tags=settings.service_discovery_tags,
+    )
+    service_discovery = ServiceDiscoveryClient(discovery_config)
+    try:
+        await service_discovery.register()
+    except ServiceDiscoveryError as exc:  # pragma: no cover - depends on runtime environment
+        logger.warning("Service discovery registration failed: %s", exc)
 
     state_store = RedisCycleStateStore(redis_client, key_prefix=settings.state_key_prefix)
     await state_store.ensure_defaults(settings.default_cycle_interval)
@@ -123,6 +166,9 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.trading_interface = interface
     app.state.service_container = services
+    app.state.event_bus = event_bus
+    app.state.service_discovery = service_discovery
+    app.state.metadata = metadata
 
     try:
         yield
@@ -130,6 +176,7 @@ async def lifespan(app: FastAPI):
         await scheduler.shutdown()
         await interface.shutdown()
         await redis_client.close()
+        await service_discovery.close()
 
 
 def get_scheduler(request: Request) -> CycleScheduler:
@@ -146,8 +193,39 @@ def get_settings_dependency(request: Request) -> Settings:
     return settings
 
 
+def get_event_bus(request: Request) -> RedisEventBus | None:
+    return getattr(request.app.state, "event_bus", None)
+
+
 app = FastAPI(title="Trading Engine", lifespan=lifespan)
 instrument_fastapi_app(app, settings=monitoring_settings)
+
+
+async def _publish_cycle_event(
+    event_bus: RedisEventBus | None,
+    settings: Settings,
+    status: str,
+    state: CycleStateResponse,
+    metadata: Optional[Dict[str, Any]] = None,
+    timings: Optional[Dict[str, float]] = None,
+    started_at: Optional[datetime] = None,
+    completed_at: Optional[datetime] = None,
+) -> None:
+    if event_bus is None:
+        return
+    payload = TradingCycleEventPayload(
+        status=status,
+        interval_seconds=state.interval_seconds,
+        started_at=started_at or state.last_run_started_at,
+        completed_at=completed_at or state.last_run_completed_at,
+        timings=timings or state.last_timings,
+        metadata={**(state.metadata or {}), **(metadata or {})},
+    )
+    event = TradingCycleEvent(source=settings.app_name, payload=payload)
+    try:
+        await event_bus.publish(settings.cycle_event_channel, event)
+    except Exception as exc:  # pragma: no cover - messaging should not fail requests
+        logger.warning("Failed to publish trading cycle event: %s", exc)
 
 
 @app.get("/health")
@@ -175,19 +253,29 @@ async def readiness(request: Request, settings: Settings = Depends(get_settings_
 async def start_cycle(
     payload: StartCycleRequest,
     scheduler: CycleScheduler = Depends(get_scheduler),
+    event_bus: RedisEventBus | None = Depends(get_event_bus),
+    settings: Settings = Depends(get_settings_dependency),
 ) -> CycleStateResponse:
     state = await scheduler.start(
         interval_seconds=payload.interval_seconds,
         immediate=payload.immediate,
         metadata=payload.metadata,
     )
-    return CycleStateResponse.from_state(state)
+    response = CycleStateResponse.from_state(state)
+    await _publish_cycle_event(event_bus, settings, "started", response, metadata=payload.metadata)
+    return response
 
 
 @app.post("/cycles/stop", response_model=CycleStateResponse)
-async def stop_cycle(scheduler: CycleScheduler = Depends(get_scheduler)) -> CycleStateResponse:
+async def stop_cycle(
+    scheduler: CycleScheduler = Depends(get_scheduler),
+    event_bus: RedisEventBus | None = Depends(get_event_bus),
+    settings: Settings = Depends(get_settings_dependency),
+) -> CycleStateResponse:
     state = await scheduler.stop()
-    return CycleStateResponse.from_state(state)
+    response = CycleStateResponse.from_state(state)
+    await _publish_cycle_event(event_bus, settings, "stopped", response)
+    return response
 
 
 @app.get("/cycles/status", response_model=CycleStateResponse)
@@ -200,13 +288,15 @@ async def cycle_status(scheduler: CycleScheduler = Depends(get_scheduler)) -> Cy
 async def run_cycle(
     scheduler: CycleScheduler = Depends(get_scheduler),
     payload: StartCycleRequest | None = None,
+    event_bus: RedisEventBus | None = Depends(get_event_bus),
+    settings: Settings = Depends(get_settings_dependency),
 ) -> RunCycleResponse:
     metadata = dict(payload.metadata if payload else {})
     result = await scheduler.run_once(metadata=metadata)
     started_at = result.started_at or datetime.now(timezone.utc)
     completed_at = result.completed_at or datetime.now(timezone.utc)
     merged_metadata = {**metadata, **result.metadata}
-    return RunCycleResponse(
+    response = RunCycleResponse(
         status="completed",
         timings=result.timings,
         started_at=started_at,
@@ -214,6 +304,19 @@ async def run_cycle(
         duration=result.duration,
         metadata=merged_metadata,
     )
+    state_snapshot = await scheduler.get_state()
+    state_response = CycleStateResponse.from_state(state_snapshot)
+    await _publish_cycle_event(
+        event_bus,
+        settings,
+        "executed",
+        state_response,
+        metadata=merged_metadata,
+        timings=result.timings,
+        started_at=started_at,
+        completed_at=completed_at,
+    )
+    return response
 
 
 @app.get("/settings")
