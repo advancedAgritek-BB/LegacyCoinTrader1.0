@@ -8,12 +8,16 @@ import sys
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 # Ensure the project root is on the Python path for local imports
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from crypto_bot.paper_wallet import PaperWallet
+
+pytestmark = pytest.mark.regression
 
 def test_paper_wallet_with_decimals():
     """Test that PaperWallet can handle Decimal objects without errors."""

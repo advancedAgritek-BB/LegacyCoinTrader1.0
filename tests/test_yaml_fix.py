@@ -4,13 +4,19 @@
 import sys
 from pathlib import Path
 
+from decimal import Decimal
+
+import numpy as np
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from crypto_bot.paper_wallet import PaperWallet
-from decimal import Decimal
-import numpy as np
+
+pytestmark = pytest.mark.regression
+
 
 def test_yaml_serialization():
     """Test that YAML serialization works with numpy scalars and Decimal objects."""
