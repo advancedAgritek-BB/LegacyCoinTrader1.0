@@ -2,111 +2,34 @@ import asyncio
 import importlib
 import functools
 import pandas as pd
-from typing import Dict, Iterable, Tuple, List, Optional
+from typing import Dict, List, Optional
 
 from .logger import LOG_DIR, setup_logger
-from . import perf
-from crypto_bot.utils.strategy_utils import compute_strategy_weights
 
 from crypto_bot.regime.pattern_detector import detect_patterns
 from crypto_bot.regime.regime_classifier import (
     classify_regime_async,
     classify_regime_cached,
 )
-from crypto_bot.strategy_router import (
-    route,
-    strategy_name,
-    get_strategies_for_regime,
-    get_strategy_by_name,
-    strategy_for,
-    RouterConfig,
-    evaluate_regime,
-)
+from crypto_bot.strategy_router import RouterConfig, get_strategy_by_name
 from crypto_bot.utils.telegram import TelegramNotifier
-from crypto_bot import meta_selector
-from crypto_bot.signals.signal_scoring import evaluate_async, evaluate_strategies
-from crypto_bot.utils.rank_logger import log_second_place
+from crypto_bot.signals.signal_scoring import evaluate_async
 from crypto_bot.strategy import grid_bot
 from crypto_bot.volatility_filter import calc_atr
 from ta.volatility import BollingerBands
 from .stats import zscore
 from crypto_bot.utils.telemetry import telemetry
-
-
-def _fn_name(fn: callable) -> str:
-    """Return the underlying function name even for functools.partial."""
-    if isinstance(fn, functools.partial):
-        return getattr(fn.func, "__name__", str(fn))
-    return getattr(fn, "__name__", str(fn))
+from crypto_bot.services.interfaces import (
+    StrategyBatchRequest,
+    StrategyEvaluationPayload,
+    StrategyEvaluationService,
+)
+from crypto_bot.services.strategy_evaluator import (
+    evaluate_payload as evaluate_strategy_payload,
+)
 
 
 analysis_logger = setup_logger("strategy_rank", LOG_DIR / "strategy_rank.log")
-
-
-async def run_candidates(
-    df: pd.DataFrame,
-    strategies: Iterable,
-    symbol: str,
-    cfg: Dict,
-    regime: Optional[str] = None,
-) -> List[Tuple[callable, float, str]]:
-    """Evaluate ``strategies`` and rank them by score times edge."""
-
-    strategy_list = list(strategies)
-    weights = compute_strategy_weights()
-    try:
-        evals = await evaluate_async(
-            strategy_list,
-            df,
-            cfg,
-            max_parallel=cfg.get("max_parallel", 4),
-        )
-    except Exception as exc:  # pragma: no cover - safety
-        analysis_logger.warning("Batch evaluation failed: %s", exc)
-        return []
-
-    results: List[Tuple[float, callable, float, str]] = []
-    for strat, (score, direction, _atr) in zip(strategy_list, evals):
-        name = _fn_name(strat)
-        try:
-            edge = perf.edge(name, symbol, cfg.get("drawdown_penalty_coef", 0.0))
-        except Exception:  # pragma: no cover - if perf fails use neutral edge
-            edge = 1.0
-        weight = weights.get(name, 1.0)
-        rank = score * edge * weight
-        results.append((rank, strat, score, direction))
-
-    results.sort(key=lambda x: x[0], reverse=True)
-    ranked = [(s, sc, d) for (rank, s, sc, d) in results]
-
-    if regime is not None and ranked:
-        scores = [sc for _fn, sc, _d in ranked]
-        dirs = [d for _fn, _sc, d in ranked]
-        if (
-            len(set(scores)) == 1
-            or all(s == 0.0 for s in scores)
-            or all(d == "none" for d in dirs)
-        ):
-            for idx, (fn, sc, d) in enumerate(ranked):
-                reg_filter = getattr(fn, "regime_filter", None)
-                if reg_filter is None:
-                    try:
-                        module = importlib.import_module(fn.__module__)
-                        reg_filter = getattr(module, "regime_filter", None)
-                    except Exception:  # pragma: no cover - safety
-                        reg_filter = None
-                try:
-                    if (
-                        reg_filter
-                        and hasattr(reg_filter, "matches")
-                        and reg_filter.matches(regime)
-                    ):
-                        ranked.insert(0, ranked.pop(idx))
-                        break
-                except Exception:  # pragma: no cover - safety
-                    pass
-
-    return ranked
 
 
 async def analyze_symbol(
@@ -115,6 +38,7 @@ async def analyze_symbol(
     mode: str,
     config: Dict,
     notifier: Optional[TelegramNotifier] = None,
+    strategy_service: Optional[StrategyEvaluationService] = None,
 ) -> Dict:
     """Classify the market regime and evaluate the trading signal for ``symbol``.
 
@@ -130,6 +54,9 @@ async def analyze_symbol(
         Bot configuration.
     notifier : Optional[TelegramNotifier]
         Optional notifier used to send a message when the strategy is invoked.
+    strategy_service : Optional[StrategyEvaluationService]
+        Remote strategy evaluation service. When provided the evaluation
+        portion of the analysis is delegated to this service.
     """
     router_cfg = RouterConfig.from_dict(config)
     lookback = config.get("indicator_lookback", 10)  # Reduced from 14*2=28 to just 10
@@ -326,125 +253,44 @@ async def analyze_symbol(
 
     if regime != "unknown":
         env = mode if mode != "auto" else "cex"
-        eval_mode = config.get("strategy_evaluation_mode", "mapped")
         cfg = {**config, "symbol": symbol}
+        evaluation_payload = StrategyEvaluationPayload(
+            symbol=symbol,
+            regime=regime,
+            mode=env,
+            timeframes=df_map,
+            config=cfg,
+            metadata={"evaluation_mode": cfg.get("strategy_evaluation_mode", "mapped")},
+        )
 
-        atr = None
-        higher_df_1h = df_map.get("1h")
+        evaluation_result = None
+        evaluation_errors: List[str] = []
 
-        def wrap(fn):
-            if fn is grid_bot.generate_signal:
-                return functools.partial(fn, higher_df=higher_df_1h)
-            # For other strategies, ensure they receive the DataFrame for the base timeframe
-            def wrapped_strategy(df_or_map, config=None):
-                if isinstance(df_or_map, dict):
-                    # Extract DataFrame for the base timeframe
-                    base_tf = router_cfg.timeframe
-                    df = df_or_map.get(base_tf)
-                    if df is None:
-                        # Fallback to any available DataFrame
-                        for tf in ['15m', '1h', '4h', '1d']:
-                            df = df_or_map.get(tf)
-                            if df is not None and isinstance(df, pd.DataFrame) and not df.empty:
-                                break
-                    if df is None or not isinstance(df, pd.DataFrame):
-                        # Return no signal if no valid DataFrame available
-                        return 0.0, "none"
-                else:
-                    df = df_or_map
+        if strategy_service is not None:
+            try:
+                batch_response = await strategy_service.evaluate_batch(
+                    StrategyBatchRequest(items=[evaluation_payload])
+                )
+                if batch_response.results:
+                    evaluation_result = batch_response.results[0]
+                if batch_response.errors:
+                    evaluation_errors.extend(batch_response.errors)
+            except Exception as exc:  # pragma: no cover - network failures
+                analysis_logger.warning(
+                    "Remote strategy evaluation failed for %s: %s", symbol, exc
+                )
+                evaluation_errors.append(str(exc))
 
-                # Ensure df is a valid DataFrame
-                if not isinstance(df, pd.DataFrame):
-                    logger.warning(f"Strategy {fn.__name__} received invalid data type: {type(df)}")
-                    return 0.0, "none"
+        if evaluation_result is None:
+            evaluation_result = await evaluate_strategy_payload(
+                evaluation_payload, notifier=notifier
+            )
 
-                if df.empty:
-                    logger.debug(f"Strategy {fn.__name__} received empty DataFrame")
-                    return 0.0, "none"
-
-                # Call the strategy with the DataFrame
-                try:
-                    if config is not None:
-                        return fn(df, config)
-                    else:
-                        return fn(df)
-                except TypeError:
-                    # Fallback if strategy doesn't accept config
-                    return fn(df)
-
-            wrapped_strategy.__name__ = getattr(fn, "__name__", "wrapped_strategy")
-            return wrapped_strategy
-
-        if eval_mode == "best":
-            strategies = [
-                wrap(s) for s in get_strategies_for_regime(regime, router_cfg)
-            ]
-            res = evaluate_strategies(strategies, df, cfg)
-            name = res.get("name", strategy_name(regime, env))
-            score = float(res.get("score", 0.0))
-            direction = res.get("direction", "none")
-            if len(strategies) > 1:
-                remaining = [s for s in strategies if _fn_name(s) != name]
-                if remaining:
-                    second = evaluate_strategies(remaining, df, cfg)
-                    second_score = float(second.get("score", 0.0))
-                    edge = score - second_score
-                    log_second_place(
-                        symbol, regime, second.get("name", ""), second_score, edge
-                    )
-        elif eval_mode == "ensemble":
-            min_conf = float(config.get("ensemble_min_conf", 0.15))
-            candidates = [wrap(strategy_for(regime, router_cfg))]
-            extra = meta_selector._scores_for(regime)
-            for strat_name, val in extra.items():
-                if val >= min_conf:
-                    fn = get_strategy_by_name(strat_name)
-                    if fn:
-                        fn = wrap(fn)
-                        if fn not in candidates:
-                            candidates.append(fn)
-            ranked = await run_candidates(df, candidates, symbol, cfg, regime)
-            if ranked:
-                best_fn, raw_score, raw_dir = ranked[0]
-                name = _fn_name(best_fn)
-                score = raw_score
-                direction = raw_dir if raw_score >= min_conf else "none"
-                if len(ranked) > 1:
-                    second = ranked[1]
-                    analysis_logger.info(
-                        "%s second %s %.4f %s",
-                        symbol,
-                        _fn_name(second[0]),
-                        second[1],
-                        second[2],
-                    )
-            else:
-                name = strategy_name(regime, env)
-                score = 0.0
-                direction = "none"
-        else:
-            strategy_fn = wrap(route(regime, env, router_cfg, notifier, df_map=df_map))
-            name = strategy_name(regime, env)
-            # Extract the DataFrame for the base timeframe before calling evaluate_async
-            base_tf = router_cfg.timeframe
-            df_for_strategy = df_map.get(base_tf)
-            if df_for_strategy is None or (isinstance(df_for_strategy, pd.DataFrame) and df_for_strategy.empty):
-                # Fallback to any available DataFrame
-                for tf in ['15m', '1h', '4h', '1d']:
-                    df_for_strategy = df_map.get(tf)
-                    if df_for_strategy is not None and isinstance(df_for_strategy, pd.DataFrame) and not df_for_strategy.empty:
-                        break
-                if df_for_strategy is None or (isinstance(df_for_strategy, pd.DataFrame) and df_for_strategy.empty):
-                    # No data available, return no signal
-                    score, direction, atr = 0.0, "none", None
-                else:
-                    score, direction, atr = (await evaluate_async([strategy_fn], df_for_strategy, cfg))[0]
-            else:
-                score, direction, atr = (await evaluate_async([strategy_fn], df_for_strategy, cfg))[0]
-
-        atr_period = int(config.get("risk", {}).get("atr_period", 14))
-        if direction != "none" and {"high", "low", "close"}.issubset(df.columns):
-            atr = calc_atr(df, window=atr_period)
+        score = float(evaluation_result.score)
+        direction = evaluation_result.direction
+        atr = evaluation_result.atr
+        if atr is None and direction != "none" and {"high", "low", "close"}.issubset(df.columns):
+            atr = calc_atr(df)
 
         weights = config.get("scoring_weights", {})
         final = (
@@ -459,16 +305,56 @@ async def analyze_symbol(
         result.update(
             {
                 "env": env,
-                "name": name,
+                "name": evaluation_result.strategy,
                 "score": final,
+                "raw_score": score,
                 "direction": direction,
                 "atr": atr,
+                "ranked_signals": [
+                    {
+                        "strategy": rs.strategy,
+                        "score": rs.score,
+                        "direction": rs.direction,
+                    }
+                    for rs in evaluation_result.ranked_signals
+                ],
+                "evaluation_metadata": dict(evaluation_result.metadata),
+                "evaluation_cached": evaluation_result.cached,
             }
         )
+
+        if evaluation_result.fused_score is not None:
+            result["fused_signal"] = {
+                "score": evaluation_result.fused_score,
+                "direction": evaluation_result.fused_direction or "none",
+            }
+
+        if evaluation_errors:
+            result.setdefault("evaluation_errors", evaluation_errors)
 
         telemetry.inc("analysis.evaluated")
         if direction == "none":
             telemetry.inc("analysis.direction_none")
+
+        def wrap_for_voting(fn):
+            if fn is grid_bot.generate_signal:
+                return functools.partial(fn, higher_df=df_map.get("1h"))
+
+            def wrapped(df_input, config=None):
+                df_local = df_input
+                if isinstance(df_local, dict):
+                    df_local = df_local.get(router_cfg.timeframe, df)
+                if not isinstance(df_local, pd.DataFrame) or df_local.empty:
+                    return 0.0, "none"
+                try:
+                    if config is not None:
+                        return fn(df_local, config)
+                    return fn(df_local)
+                except TypeError:
+                    return fn(df_local)
+
+            wrapped.__name__ = getattr(fn, "__name__", "wrapped")
+            return wrapped
 
         votes = []
         voting = config.get("voting_strategies", [])
@@ -477,7 +363,7 @@ async def analyze_symbol(
                 fn = get_strategy_by_name(strat_name)
                 if fn is None:
                     continue
-                fn = wrap(fn)
+                fn = wrap_for_voting(fn)
                 try:
                     dir_vote = (await evaluate_async([fn], df, cfg))[0][1]
                 except Exception:  # pragma: no cover - safety
