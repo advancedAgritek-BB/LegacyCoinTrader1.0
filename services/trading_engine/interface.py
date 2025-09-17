@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, Optional
+from datetime import datetime
+from typing import Any, Callable, Dict, Iterable, Optional
 
 from services.interface_layer.cycle import CycleExecutionResult, TradingCycleInterface
 
@@ -28,9 +29,15 @@ class CycleContext:
 class TradingEngineInterface:
     """High-level orchestration entry point for trading cycles."""
 
-    def __init__(self, phases: Optional[Iterable] = None) -> None:
+    def __init__(
+        self,
+        phases: Optional[Iterable] = None,
+        *,
+        clock: Optional[Callable[[], datetime]] = None,
+        timer: Optional[Callable[[], float]] = None,
+    ) -> None:
         self._phases = list(phases or DEFAULT_PHASES)
-        self._runner = TradingCycleInterface(self._phases)
+        self._runner = TradingCycleInterface(self._phases, clock=clock, timer=timer)
 
     def set_phases(self, phases: Iterable) -> None:
         self._phases = list(phases)
