@@ -11,9 +11,10 @@ services:
 
   api-gateway:
     environment:
-      - GATEWAY_LOG_LEVEL=DEBUG
-      - GATEWAY_RATE_LIMIT_REQUESTS=10000  # Higher limits for testing
-      - GATEWAY_RATE_LIMIT_WINDOW=60
+      GATEWAY_LOG_LEVEL: DEBUG
+      GATEWAY_RATE_LIMIT_REQUESTS: 10000  # Higher limits for testing
+      GATEWAY_RATE_LIMIT_WINDOW: 60
+      HYBRID_FEATURE_FLAG_SOURCE: test-suite
     volumes:
       - ./services/api_gateway:/app
     healthcheck:
@@ -25,9 +26,9 @@ services:
 
   trading-engine:
     environment:
-      - TRADING_ENGINE_LOG_LEVEL=DEBUG
-      - TRADING_ENGINE_CYCLE_INTERVAL=30  # Faster cycles for testing
-      - TRADING_ENGINE_BATCH_SIZE=10
+      TRADING_ENGINE_LOG_LEVEL: DEBUG
+      TRADING_ENGINE_CYCLE_INTERVAL: 30  # Faster cycles for testing
+      TRADING_ENGINE_BATCH_SIZE: 10
     volumes:
       - ./services/trading_engine:/app/services/trading_engine
       - ./services/interface_layer:/app/services/interface_layer
@@ -40,8 +41,8 @@ services:
 
   market-data:
     environment:
-      - MARKET_DATA_LOG_LEVEL=DEBUG
-      - MARKET_DATA_CACHE_SIZE=50  # Smaller cache for testing
+      MARKET_DATA_LOG_LEVEL: DEBUG
+      MARKET_DATA_CACHE_SIZE: 50  # Smaller cache for testing
     volumes:
       - ./services/market_data:/app
       - ./crypto_bot:/app/crypto_bot
@@ -54,8 +55,8 @@ services:
 
   portfolio:
     environment:
-      - PORTFOLIO_LOG_LEVEL=DEBUG
-      - PORTFOLIO_PAPER_TRADING=true  # Force paper trading for tests
+      PORTFOLIO_LOG_LEVEL: DEBUG
+      PORTFOLIO_PAPER_TRADING: 'true'  # Force paper trading for tests
     volumes:
       - ./services/portfolio:/app
       - ./crypto_bot:/app/crypto_bot
@@ -68,7 +69,7 @@ services:
 
   strategy-engine:
     environment:
-      - STRATEGY_ENGINE_LOG_LEVEL=DEBUG
+      STRATEGY_ENGINE_LOG_LEVEL: DEBUG
     volumes:
       - ./services/strategy_engine:/app
       - ./crypto_bot:/app/crypto_bot
@@ -81,8 +82,8 @@ services:
 
   token-discovery:
     environment:
-      - TOKEN_DISCOVERY_LOG_LEVEL=DEBUG
-      - TOKEN_DISCOVERY_SCAN_INTERVAL=10  # Faster scanning for tests
+      TOKEN_DISCOVERY_LOG_LEVEL: DEBUG
+      TOKEN_DISCOVERY_SCAN_INTERVAL: 10  # Faster scanning for tests
     volumes:
       - ./services/token_discovery:/app
       - ./crypto_bot:/app/crypto_bot
@@ -95,8 +96,8 @@ services:
 
   execution:
     environment:
-      - EXECUTION_LOG_LEVEL=DEBUG
-      - EXECUTION_DRY_RUN=true  # Force dry run for tests
+      EXECUTION_LOG_LEVEL: DEBUG
+      EXECUTION_DRY_RUN: 'true'  # Force dry run for tests
     volumes:
       - ./services/execution:/app
       - ./crypto_bot:/app/crypto_bot
@@ -109,7 +110,7 @@ services:
 
   monitoring:
     environment:
-      - MONITORING_LOG_LEVEL=DEBUG
+      MONITORING_LOG_LEVEL: DEBUG
     volumes:
       - ./services/monitoring:/app
       - ./crypto_bot:/app/crypto_bot
@@ -122,8 +123,8 @@ services:
 
   frontend:
     environment:
-      - FLASK_ENV=development
-      - FLASK_DEBUG=1
+      FLASK_ENV: development
+      FLASK_DEBUG: '1'
     volumes:
       - ./frontend:/app
       - ./static:/app/static
@@ -163,8 +164,8 @@ services:
       - ./tests/e2e:/app/tests
       - ./e2e_test_results.json:/app/e2e_test_results.json
     environment:
-      - API_GATEWAY_URL=http://api-gateway:8000
-      - TEST_TIMEOUT=300  # 5 minutes timeout
+      API_GATEWAY_URL: http://api-gateway:8000
+      TEST_TIMEOUT: 300  # 5 minutes timeout
     command: ["python", "/app/tests/test_e2e_framework.py"]
     deploy:
       restart_policy:
@@ -175,9 +176,9 @@ services:
   test-postgres:
     image: postgres:15-alpine
     environment:
-      - POSTGRES_DB=legacy_coin_trader_test
-      - POSTGRES_USER=test_user
-      - POSTGRES_PASSWORD=test_password
+      POSTGRES_DB: legacy_coin_trader_test
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
     volumes:
       - test_postgres_data:/var/lib/postgresql/data
       - ./tests/db/init:/docker-entrypoint-initdb.d

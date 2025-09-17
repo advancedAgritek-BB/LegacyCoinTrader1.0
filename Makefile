@@ -59,6 +59,15 @@ test-results: ## View test results
 observability-check: ## Validate observability instrumentation
 	pytest tests/test_observability.py
 
+migration-audit: ## Run post-migration data integrity validation against fixture snapshots
+	@mkdir -p test_results
+	python tools/migration/tenant_migration.py audit \
+		--legacy-snapshot tests/fixtures/migration/legacy_snapshot.json \
+		--modern-snapshot tests/fixtures/migration/modern_snapshot.json \
+		--report-path test_results/migration_audit_report.json \
+		--tolerance 0.0 \
+		--fail-on-drift
+
 # Service Management
 build: ## Build all services
 	docker-compose build
@@ -134,6 +143,7 @@ lint: ## Lint Python code
 
 # CI/CD
 ci-test: ## Run tests in CI environment
+	$(MAKE) migration-audit
 	$(MAKE) observability-check
 	docker-compose -f docker-compose.yml -f docker-compose.test.yml up --abort-on-container-exit --build e2e-tests
 

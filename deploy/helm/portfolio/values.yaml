@@ -24,6 +24,20 @@ securityContext: {}
 env: []
 envFrom: []
 
+featureFlags:
+  HYBRID_MODE_ENABLED: false
+  LEGACY_READ_ENABLED: true
+  DUAL_WRITE_STRATEGY: mirror
+  HYBRID_READ_STRATEGY: compare
+  CUTOVER_COMPLETED: false
+  CUTOVER_GUARDRAIL_ENABLED: true
+  MIGRATION_DRIFT_TOLERANCE: "0.0"
+
+cutoverControls:
+  CUTOVER_TARGET_TIMESTAMP: ""
+  LEGACY_SERVICE_BASE_URL: ""
+  MODERN_SERVICE_BASE_URL: ""
+
 service:
   type: ClusterIP
   port: 80

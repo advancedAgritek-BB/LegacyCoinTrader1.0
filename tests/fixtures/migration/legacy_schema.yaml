@@ -1,0 +1,33 @@
+tables:
+  - name: accounts
+    tenant_lookup_key: account_id
+    columns:
+      - name: account_id
+        type: UUID
+        primary_key: true
+        nullable: false
+      - name: user_id
+        type: UUID
+        nullable: false
+      - name: balance
+        type: NUMERIC(18,8)
+        nullable: false
+  - name: trades
+    tenant_lookup_key: user_id
+    columns:
+      - name: id
+        type: UUID
+        primary_key: true
+        nullable: false
+      - name: user_id
+        type: UUID
+        nullable: false
+      - name: symbol
+        type: TEXT
+        nullable: false
+      - name: qty
+        type: NUMERIC(18,8)
+        nullable: false
+      - name: price
+        type: NUMERIC(18,8)
+        nullable: false

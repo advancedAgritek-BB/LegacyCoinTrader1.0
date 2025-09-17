@@ -18,15 +18,16 @@ services:
     volumes:
       - redis_prod_data:/data
     environment:
-      - REDIS_MAXMEMORY=256mb
-      - REDIS_MAXMEMORY_POLICY=allkeys-lru
+      REDIS_MAXMEMORY: 256mb
+      REDIS_MAXMEMORY_POLICY: allkeys-lru
 
   # Production overrides for API Gateway
   api-gateway:
     environment:
-      - GATEWAY_LOG_LEVEL=INFO
-      - GATEWAY_RATE_LIMIT_REQUESTS=1000
-      - GATEWAY_RATE_LIMIT_WINDOW=60
+      GATEWAY_LOG_LEVEL: INFO
+      GATEWAY_RATE_LIMIT_REQUESTS: 1000
+      GATEWAY_RATE_LIMIT_WINDOW: 60
+      HYBRID_FEATURE_FLAG_SOURCE: prod-config
     deploy:
       resources:
         limits:
@@ -51,9 +52,9 @@ services:
   # Production overrides for Trading Engine
   trading-engine:
     environment:
-      - TRADING_ENGINE_LOG_LEVEL=INFO
-      - TRADING_ENGINE_CYCLE_INTERVAL=120
-      - TRADING_ENGINE_BATCH_SIZE=25
+      TRADING_ENGINE_LOG_LEVEL: INFO
+      TRADING_ENGINE_CYCLE_INTERVAL: 120
+      TRADING_ENGINE_BATCH_SIZE: 25
     deploy:
       resources:
         limits:
@@ -78,8 +79,8 @@ services:
   # Production overrides for Market Data Service
   market-data:
     environment:
-      - MARKET_DATA_LOG_LEVEL=INFO
-      - MARKET_DATA_CACHE_SIZE=1000
+      MARKET_DATA_LOG_LEVEL: INFO
+      MARKET_DATA_CACHE_SIZE: 1000
     deploy:
       resources:
         limits:
@@ -104,8 +105,8 @@ services:
   # Production overrides for Portfolio Service
   portfolio:
     environment:
-      - PORTFOLIO_LOG_LEVEL=INFO
-      - PORTFOLIO_BACKUP_INTERVAL=3600
+      PORTFOLIO_LOG_LEVEL: INFO
+      PORTFOLIO_BACKUP_INTERVAL: 3600
     deploy:
       resources:
         limits:
@@ -130,8 +131,8 @@ services:
   # Production overrides for Strategy Engine
   strategy-engine:
     environment:
-      - STRATEGY_ENGINE_LOG_LEVEL=INFO
-      - STRATEGY_ENGINE_MODEL_CACHE_SIZE=100
+      STRATEGY_ENGINE_LOG_LEVEL: INFO
+      STRATEGY_ENGINE_MODEL_CACHE_SIZE: 100
     deploy:
       resources:
         limits:
@@ -156,8 +157,8 @@ services:
   # Production overrides for Token Discovery Service
   token-discovery:
     environment:
-      - TOKEN_DISCOVERY_LOG_LEVEL=INFO
-      - TOKEN_DISCOVERY_MAX_CONCURRENT_SCANS=5
+      TOKEN_DISCOVERY_LOG_LEVEL: INFO
+      TOKEN_DISCOVERY_MAX_CONCURRENT_SCANS: 5
     deploy:
       resources:
         limits:
@@ -182,9 +183,9 @@ services:
   # Production overrides for Execution Service
   execution:
     environment:
-      - EXECUTION_LOG_LEVEL=INFO
-      - EXECUTION_MAX_RETRIES=3
-      - EXECUTION_RATE_LIMIT_ENABLED=true
+      EXECUTION_LOG_LEVEL: INFO
+      EXECUTION_MAX_RETRIES: 3
+      EXECUTION_RATE_LIMIT_ENABLED: 'true'
     deploy:
       resources:
         limits:
@@ -209,8 +210,8 @@ services:
   # Production overrides for Monitoring Service
   monitoring:
     environment:
-      - MONITORING_LOG_LEVEL=INFO
-      - MONITORING_METRICS_RETENTION=7d
+      MONITORING_LOG_LEVEL: INFO
+      MONITORING_METRICS_RETENTION: 7d
     deploy:
       resources:
         limits:
@@ -235,8 +236,8 @@ services:
   # Production overrides for Frontend
   frontend:
     environment:
-      - FLASK_ENV=production
-      - FLASK_DEBUG=0
+      FLASK_ENV: production
+      FLASK_DEBUG: '0'
     deploy:
       resources:
         limits:
@@ -262,9 +263,9 @@ services:
   postgres:
     image: postgres:15-alpine
     environment:
-      - POSTGRES_DB=legacy_coin_trader_prod
-      - POSTGRES_USER=${DB_USER:-prod_user}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-change_me_in_production}
+      POSTGRES_DB: legacy_coin_trader_prod
+      POSTGRES_USER: ${DB_USER:-prod_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me_in_production}
     volumes:
       - postgres_prod_data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d

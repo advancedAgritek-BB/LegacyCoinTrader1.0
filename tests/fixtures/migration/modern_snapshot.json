@@ -1,0 +1,20 @@
+{
+  "tenants": {
+    "tenant-a": {
+      "balances": [
+        {"id": "btc", "asset": "BTC", "available": 1.25, "reserved": 0.05},
+        {"id": "eth", "asset": "ETH", "available": 12.0, "reserved": 1.0}
+      ],
+      "positions": {
+        "pos-1": {"symbol": "BTC-USD", "size": 0.5, "entry_price": 30000.0},
+        "pos-2": {"symbol": "ETH-USD", "size": 10.0, "entry_price": 1800.0}
+      }
+    },
+    "tenant-b": {
+      "balances": [
+        {"id": "sol", "asset": "SOL", "available": 250.0, "reserved": 0.0}
+      ],
+      "positions": {}
+    }
+  }
+}
