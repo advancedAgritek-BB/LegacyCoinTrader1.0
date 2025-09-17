@@ -14,6 +14,7 @@ class StartCycleRequest(BaseModel):
     interval_seconds: Optional[int] = Field(default=None, ge=1)
     immediate: bool = Field(default=False)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    risk_allocation: Optional[float] = Field(default=None, ge=0.0)
 
 
 class RunCycleResponse(BaseModel):
@@ -34,6 +35,7 @@ class CycleStateResponse(BaseModel):
     last_timings: Dict[str, float] = Field(default_factory=dict)
     last_error: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    tenant_id: Optional[str] = None
 
     @classmethod
     def from_state(cls, state: CycleState) -> "CycleStateResponse":
@@ -46,6 +48,7 @@ class CycleStateResponse(BaseModel):
             last_timings=state.last_timings,
             last_error=state.last_error,
             metadata=state.metadata,
+            tenant_id=state.tenant_id,
         )
 
 
