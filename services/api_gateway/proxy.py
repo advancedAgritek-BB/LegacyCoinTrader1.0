@@ -88,10 +88,13 @@ class ProxyGateway:
         headers["X-Forwarded-Host"] = request.url.hostname or "api-gateway"
         headers.setdefault("X-Request-ID", request.headers.get("X-Request-ID", str(uuid.uuid4())))
 
-        if token.token_type == "jwt":
+        if token.token_type in {"jwt", "oidc"}:
             headers["X-Authenticated-User"] = token.subject
             if token.scopes:
                 headers["X-User-Scopes"] = ",".join(token.scopes)
+            if token.roles:
+                headers["X-User-Roles"] = ",".join(token.roles)
+            elif token.scopes:
                 headers.setdefault("X-User-Roles", ",".join(token.scopes))
             if token.raw_token:
                 headers.setdefault("Authorization", f"Bearer {token.raw_token}")
@@ -100,6 +103,26 @@ class ProxyGateway:
 
         if route.service_token:
             headers["X-Service-Token"] = route.service_token
+
+        tenant_context = getattr(request.state, "tenant_context", None)
+        if tenant_context:
+            headers["X-Tenant-Id"] = tenant_context.tenant_id
+            if tenant_context.slug:
+                headers["X-Tenant-Slug"] = tenant_context.slug
+            if tenant_context.plan:
+                headers.setdefault("X-Tenant-Plan", tenant_context.plan)
+            if tenant_context.scopes:
+                headers["X-Tenant-Scopes"] = ",".join(sorted(set(tenant_context.scopes)))
+            if tenant_context.roles:
+                headers.setdefault(
+                    "X-Tenant-Roles", ",".join(sorted(set(tenant_context.roles)))
+                )
+        elif token.tenant_id:
+            headers["X-Tenant-Id"] = token.tenant_id
+            if token.tenant_plan:
+                headers.setdefault("X-Tenant-Plan", token.tenant_plan)
+            if token.tenant_scopes:
+                headers.setdefault("X-Tenant-Scopes", ",".join(token.tenant_scopes))
 
         headers.setdefault("X-Gateway-Version", "1.0.0")
         return headers

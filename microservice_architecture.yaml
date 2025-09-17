@@ -118,6 +118,66 @@ services:
     dependencies:
       - redis_cache
 
+  # Identity Service - Centralized identity provider and SSO broker
+  identity:
+    port: 8010
+    responsibilities:
+      - User and service identity lifecycle
+      - OIDC-compliant token issuance
+      - Single Sign-On federation
+      - Credential policy enforcement
+    gateway:
+      prefix: /api/v1/identity
+      auth_modes:
+        - oidc
+        - jwt
+        - service
+      required_roles:
+        - identity
+      service_token_env: IDENTITY_SERVICE_TOKEN
+    dependencies:
+      - tenant_management
+      - audit
+
+  # Tenant Management Service - Multi-tenant orchestration and governance
+  tenant_management:
+    port: 8011
+    responsibilities:
+      - Tenant provisioning and lifecycle management
+      - Subscription and plan governance
+      - Rate-limit and feature policy distribution
+      - Tenant scope resolution
+    gateway:
+      prefix: /api/v1/tenants
+      auth_modes:
+        - jwt
+        - service
+      required_roles:
+        - tenant-admin
+        - admin
+      service_token_env: TENANT_MANAGEMENT_SERVICE_TOKEN
+    dependencies:
+      - redis_cache
+      - audit
+
+  # Audit Service - Compliance and security telemetry pipeline
+  audit:
+    port: 8012
+    responsibilities:
+      - Structured audit event ingestion
+      - Compliance reporting exports
+      - Security operations analytics
+    gateway:
+      prefix: /api/v1/audit
+      auth_modes:
+        - service
+      required_roles:
+        - audit
+      service_token_env: AUDIT_SERVICE_TOKEN
+    dependencies:
+      - kafka
+      - monitoring
+
   # Shared Infrastructure
   redis_cache:
     port: 6379
@@ -127,6 +187,14 @@ services:
       - Session storage
       - Pub/Sub messaging
       - Rate limiting data
+
+  kafka:
+    port: 9092
+    type: infrastructure
+    responsibilities:
+      - Event streaming backbone
+      - Audit pipeline transport
+      - Rate limit counter fan-out
 
 # Inter-Service Communication
 communication:

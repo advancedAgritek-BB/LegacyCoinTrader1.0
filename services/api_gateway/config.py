@@ -5,7 +5,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import yaml
 
@@ -36,6 +36,7 @@ class ServiceRouteConfig:
     service_token: Optional[str] = None
     health_endpoint: str = "/health"
     required_roles: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def build_target_url(self, path_suffix: str) -> str:
         """Construct the target URL for the downstream service."""
@@ -69,6 +70,11 @@ class GatewaySettings:
     service_routes: Dict[str, ServiceRouteConfig]
     token_ttl_seconds: int
     token_issuer: str
+    oidc_issuer: Optional[str]
+    oidc_audience: Optional[str]
+    oidc_jwks_url: Optional[str]
+    tenant_metadata_ttl: int
+    kafka_bootstrap_servers: Optional[str]
 
     @property
     def cors_origins(self) -> List[str]:
@@ -87,6 +93,9 @@ _SERVICE_PREFIX_OVERRIDES: Dict[str, str] = {
     "token_discovery": "/api/v1/token-discovery",
     "execution": "/api/v1/execution",
     "monitoring": "/api/v1/monitoring",
+    "identity": "/api/v1/identity",
+    "tenant_management": "/api/v1/tenants",
+    "audit": "/api/v1/audit",
 }
 
 _SERVICE_ROLE_REQUIREMENTS: Dict[str, List[str]] = {
@@ -97,6 +106,9 @@ _SERVICE_ROLE_REQUIREMENTS: Dict[str, List[str]] = {
     "token_discovery": ["token"],
     "execution": ["execution"],
     "monitoring": ["monitoring"],
+    "identity": ["identity"],
+    "tenant_management": ["tenant-admin"],
+    "audit": ["audit"],
 }
 
 
@@ -134,8 +146,18 @@ def _load_service_tokens() -> Dict[str, str]:
     for service_name, definition in services.items():
         if service_name == "api_gateway":
             continue
-        if isinstance(definition, dict) and definition.get("type") == "infrastructure":
+        if not isinstance(definition, dict):
             continue
+        if definition.get("type") == "infrastructure":
+            continue
+        gateway_config = definition.get("gateway") or definition.get("authentication") or {}
+        explicit_env = gateway_config.get("service_token_env")
+        if explicit_env:
+            token = os.getenv(explicit_env)
+            if token:
+                tokens[service_name] = token
+                continue
+
         env_key = f"GATEWAY_SERVICE_TOKEN_{service_name.upper()}".replace("-", "_")
         token = os.getenv(env_key)
         if token:
@@ -164,27 +186,63 @@ def _build_route_config(
     service_tokens: Dict[str, str],
     default_limit: int,
 ) -> ServiceRouteConfig:
-    prefix = _SERVICE_PREFIX_OVERRIDES.get(
-        service_name, f"/api/v1/{service_name.replace('_', '-')}"
+    gateway_config: Dict[str, Any] = {}
+    if isinstance(service_definition, dict):
+        gateway_config = service_definition.get("gateway") or {}
+
+    prefix = (
+        gateway_config.get("prefix")
+        or _SERVICE_PREFIX_OVERRIDES.get(
+            service_name, f"/api/v1/{service_name.replace('_', '-')}"
+        )
     )
     port = int(service_definition.get("port", 0) or 0)
     url = _build_service_url(service_name, port)
-    limit_env = os.getenv(
-        f"GATEWAY_RATE_LIMIT_{service_name.upper()}",
-        os.getenv("GATEWAY_RATE_LIMIT_PER_MINUTE", str(default_limit)),
+    limit_value = gateway_config.get("rate_limit_per_minute")
+    if limit_value is None:
+        limit_env = os.getenv(
+            f"GATEWAY_RATE_LIMIT_{service_name.upper()}",
+            os.getenv("GATEWAY_RATE_LIMIT_PER_MINUTE", str(default_limit)),
+        )
+        limit_value = int(limit_env)
+    else:
+        limit_value = int(limit_value)
+
+    raw_methods = gateway_config.get("methods")
+    route_kwargs: Dict[str, object] = {}
+    if raw_methods:
+        route_kwargs["methods"] = [str(method).upper() for method in raw_methods]
+
+    auth_modes = [
+        mode.lower() for mode in gateway_config.get("auth_modes", ["jwt", "oidc", "service"])
+    ]
+    if service_name == "monitoring" and "service" not in auth_modes:
+        auth_modes.insert(0, "service")
+
+    required_roles = gateway_config.get("required_roles") or _SERVICE_ROLE_REQUIREMENTS.get(
+        service_name, ["admin"]
     )
-    auth_modes = ["jwt", "service"]
-    if service_name == "monitoring":
-        auth_modes = ["service", "jwt"]
+
+    health_endpoint = gateway_config.get("health_endpoint", "/health")
+
+    service_token_env = gateway_config.get("service_token_env")
+    service_token = None
+    if service_token_env:
+        service_token = os.getenv(service_token_env)
+    if not service_token:
+        service_token = service_tokens.get(service_name)
 
     return ServiceRouteConfig(
         name=service_name,
         prefix=prefix,
         url=url,
-        rate_limit_per_minute=int(limit_env),
+        rate_limit_per_minute=limit_value,
         allowed_auth_modes=auth_modes,
-        service_token=service_tokens.get(service_name),
-        required_roles=_SERVICE_ROLE_REQUIREMENTS.get(service_name, ["admin"]),
+        service_token=service_token,
+        health_endpoint=health_endpoint,
+        required_roles=required_roles,
+        metadata=dict(gateway_config),
+        **route_kwargs,
     )
 
 
@@ -217,6 +275,20 @@ def load_gateway_settings() -> GatewaySettings:
     service_routes = _load_service_routes(default_rate_limit)
     resolved_tokens = {name: config.service_token or "" for name, config in service_routes.items()}
 
+    identity_route = service_routes.get("identity")
+    oidc_issuer = os.getenv("GATEWAY_OIDC_ISSUER", "") or None
+    oidc_jwks_url = os.getenv("GATEWAY_OIDC_JWKS_URL", "") or None
+    if identity_route:
+        oidc_issuer = oidc_issuer or identity_route.url.rstrip("/")
+        if not oidc_jwks_url:
+            oidc_jwks_url = identity_route.build_target_url(".well-known/jwks.json")
+    oidc_audience = os.getenv("GATEWAY_OIDC_AUDIENCE", "") or None
+    if not oidc_audience:
+        oidc_audience = os.getenv("GATEWAY_JWT_AUDIENCE", "") or None
+
+    tenant_metadata_ttl = int(os.getenv("GATEWAY_TENANT_METADATA_TTL", "60"))
+    kafka_bootstrap_servers = os.getenv("GATEWAY_KAFKA_BOOTSTRAP_SERVERS", "") or None
+
     return GatewaySettings(
         host=os.getenv("GATEWAY_HOST", "0.0.0.0"),
         port=int(os.getenv("GATEWAY_PORT", "8000")),
@@ -236,5 +308,10 @@ def load_gateway_settings() -> GatewaySettings:
         service_routes=service_routes,
         token_ttl_seconds=int(os.getenv("GATEWAY_TOKEN_TTL_SECONDS", "3600")),
         token_issuer=os.getenv("GATEWAY_TOKEN_ISSUER", "legacycointrader-gateway"),
+        oidc_issuer=oidc_issuer,
+        oidc_audience=oidc_audience,
+        oidc_jwks_url=oidc_jwks_url,
+        tenant_metadata_ttl=tenant_metadata_ttl,
+        kafka_bootstrap_servers=kafka_bootstrap_servers,
     )
 
