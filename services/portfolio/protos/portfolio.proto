@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package portfolio;
+
+import "google/protobuf/empty.proto";
+
+message Trade {
+  string id = 1;
+  string symbol = 2;
+  string side = 3;
+  string amount = 4;
+  string price = 5;
+  string timestamp = 6;
+  string strategy = 7;
+  string exchange = 8;
+  string fees = 9;
+  string status = 10;
+  string order_id = 11;
+  string client_order_id = 12;
+  string metadata_json = 13;
+  string position_symbol = 14;
+}
+
+message Position {
+  string symbol = 1;
+  string side = 2;
+  string total_amount = 3;
+  string average_price = 4;
+  string realized_pnl = 5;
+  string fees_paid = 6;
+  string entry_time = 7;
+  string last_update = 8;
+  string highest_price = 9;
+  string lowest_price = 10;
+  string stop_loss_price = 11;
+  string take_profit_price = 12;
+  string trailing_stop_pct = 13;
+  string metadata_json = 14;
+  string mark_price = 15;
+  bool is_open = 16;
+  repeated Trade trades = 17;
+}
+
+message PriceEntry {
+  string symbol = 1;
+  string price = 2;
+  string updated_at = 3;
+}
+
+message Statistics {
+  int32 total_trades = 1;
+  string total_volume = 2;
+  string total_fees = 3;
+  string total_realized_pnl = 4;
+  string last_updated = 5;
+}
+
+message PortfolioState {
+  repeated Trade trades = 1;
+  repeated Position positions = 2;
+  repeated Position closed_positions = 3;
+  repeated PriceEntry price_cache = 4;
+  Statistics statistics = 5;
+}
+
+message PortfolioStateResponse {
+  PortfolioState state = 1;
+}
+
+message PortfolioStateRequest {
+  PortfolioState state = 1;
+}
+
+message TradeRequest {
+  Trade trade = 1;
+}
+
+message PriceUpdateRequest {
+  string symbol = 1;
+  string price = 2;
+}
+
+message PnlRequest {
+  string symbol = 1;
+}
+
+message PnlResponse {
+  string realized = 1;
+  string unrealized = 2;
+  string total = 3;
+}
+
+message RiskCheckEntry {
+  string name = 1;
+  bool passed = 2;
+  string message = 3;
+}
+
+message RiskCheckResponse {
+  repeated RiskCheckEntry results = 1;
+}
+
+message PositionResponse {
+  Position position = 1;
+  bool has_position = 2;
+}
+
+service Portfolio {
+  rpc GetState(google.protobuf.Empty) returns (PortfolioStateResponse);
+  rpc UpdateState(PortfolioStateRequest) returns (PortfolioStateResponse);
+  rpc RecordTrade(TradeRequest) returns (PositionResponse);
+  rpc UpdatePrice(PriceUpdateRequest) returns (PositionResponse);
+  rpc ComputePnl(PnlRequest) returns (PnlResponse);
+  rpc CheckRisk(google.protobuf.Empty) returns (RiskCheckResponse);
+}

@@ -16,6 +16,20 @@ from pathlib import Path
 import json
 import uuid
 import time
+
+try:
+    from services.portfolio.clients.interface import PortfolioServiceClient
+    from services.portfolio.schemas import (
+        PortfolioState,
+        PortfolioStatistics,
+        PositionRead,
+        PriceCacheEntry,
+        TradeRead,
+    )
+except Exception:  # pragma: no cover - service may not be available in all contexts
+    PortfolioServiceClient = None
+    PortfolioState = PortfolioStatistics = PositionRead = PriceCacheEntry = TradeRead = None
+
 from crypto_bot.utils.logger import LOG_DIR
 
 logger = logging.getLogger(__name__)
@@ -395,6 +409,105 @@ class Position:
         return cls(**data_copy)
 
 
+def _trade_to_schema(trade: Trade) -> TradeRead:
+    if TradeRead is None:
+        raise RuntimeError("Portfolio schemas are not available")
+    return TradeRead(
+        id=trade.id,
+        symbol=trade.symbol,
+        side=trade.side,
+        amount=trade.amount,
+        price=trade.price,
+        timestamp=trade.timestamp,
+        strategy=trade.strategy or None,
+        exchange=trade.exchange or None,
+        fees=trade.fees,
+        status=trade.status,
+        order_id=trade.order_id,
+        client_order_id=trade.client_order_id,
+        metadata=trade.metadata or {},
+        position_symbol=None,
+    )
+
+
+def _schema_to_trade(schema: TradeRead) -> Trade:
+    return Trade(
+        id=schema.id,
+        symbol=schema.symbol,
+        side=schema.side,
+        amount=Decimal(str(schema.amount)),
+        price=Decimal(str(schema.price)),
+        timestamp=schema.timestamp,
+        strategy=schema.strategy or "",
+        exchange=schema.exchange or "",
+        fees=Decimal(str(schema.fees)),
+        status=schema.status,
+        order_id=schema.order_id,
+        client_order_id=schema.client_order_id,
+        metadata=schema.metadata or {},
+    )
+
+
+def _position_to_schema(
+    position: Position,
+    price_cache: Dict[str, Decimal],
+    is_open: bool,
+) -> PositionRead:
+    if PositionRead is None:
+        raise RuntimeError("Portfolio schemas are not available")
+    trades = [_trade_to_schema(trade) for trade in position.trades]
+    return PositionRead(
+        symbol=position.symbol,
+        side=position.side,
+        total_amount=position.total_amount,
+        average_price=position.average_price,
+        realized_pnl=position.realized_pnl,
+        fees_paid=position.fees_paid,
+        entry_time=position.entry_time,
+        last_update=position.last_update,
+        highest_price=position.highest_price,
+        lowest_price=position.lowest_price,
+        stop_loss_price=position.stop_loss_price,
+        take_profit_price=position.take_profit_price,
+        trailing_stop_pct=position.trailing_stop_pct,
+        metadata=position.metadata,
+        mark_price=price_cache.get(position.symbol),
+        is_open=is_open,
+        trades=trades,
+    )
+
+
+def _schema_to_position(schema: PositionRead) -> Position:
+    position = Position(
+        symbol=schema.symbol,
+        side=schema.side,
+        total_amount=Decimal(str(schema.total_amount)),
+        average_price=Decimal(str(schema.average_price)),
+        realized_pnl=Decimal(str(schema.realized_pnl)),
+        fees_paid=Decimal(str(schema.fees_paid)),
+        entry_time=schema.entry_time,
+        last_update=schema.last_update,
+        highest_price=Decimal(str(schema.highest_price))
+        if schema.highest_price is not None
+        else None,
+        lowest_price=Decimal(str(schema.lowest_price))
+        if schema.lowest_price is not None
+        else None,
+        stop_loss_price=Decimal(str(schema.stop_loss_price))
+        if schema.stop_loss_price is not None
+        else None,
+        take_profit_price=Decimal(str(schema.take_profit_price))
+        if schema.take_profit_price is not None
+        else None,
+        trailing_stop_pct=Decimal(str(schema.trailing_stop_pct))
+        if schema.trailing_stop_pct is not None
+        else None,
+        metadata=schema.metadata or {},
+    )
+    position.trades = [_schema_to_trade(trade) for trade in schema.trades]
+    return position
+
+
 class TradeManager:
     """
     Centralized Trade Manager - Single Source of Truth
@@ -437,6 +550,20 @@ class TradeManager:
         self.auto_save_interval = 30  # seconds - match price monitor interval
         self.last_save_time = time.time()
 
+        self.service_client: Optional[PortfolioServiceClient] = None
+        if PortfolioServiceClient is not None:
+            try:
+                self.service_client = PortfolioServiceClient()
+                logger.info(
+                    "Portfolio service client initialized for TradeManager persistence"
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Portfolio service client unavailable, falling back to local persistence: %s",
+                    exc,
+                )
+                self.service_client = None
+
         # Load existing state
         self._load_state()
 
@@ -460,6 +587,111 @@ class TradeManager:
             target=auto_save_worker, daemon=True
         )
         self.auto_save_thread.start()
+
+    def _apply_portfolio_state(self, state: PortfolioState) -> None:
+        valid_trades: List[Trade] = []
+        filtered_trades = 0
+
+        for trade_schema in state.trades:
+            try:
+                trade = _schema_to_trade(trade_schema)
+                if is_test_position(trade.symbol):
+                    filtered_trades += 1
+                    continue
+                valid_trades.append(trade)
+            except Exception as exc:
+                logger.warning(
+                    "Skipping invalid trade from portfolio service: %s", exc
+                )
+        self.trades = valid_trades
+
+        self.positions = {}
+        filtered_positions = 0
+        for pos_schema in state.positions:
+            try:
+                if is_test_position(pos_schema.symbol):
+                    filtered_positions += 1
+                    continue
+                position = _schema_to_position(pos_schema)
+                self.positions[position.symbol] = position
+            except Exception as exc:
+                filtered_positions += 1
+                logger.warning(
+                    "Skipping invalid position from portfolio service: %s", exc
+                )
+
+        self.closed_positions = []
+        for pos_schema in state.closed_positions:
+            try:
+                position = _schema_to_position(pos_schema)
+                position.total_amount = Decimal(str(position.total_amount))
+                self.closed_positions.append(position)
+            except Exception as exc:
+                logger.warning(
+                    "Skipping invalid closed position from portfolio service: %s",
+                    exc,
+                )
+
+        self.price_cache = {}
+        for entry in state.price_cache:
+            if is_test_position(entry.symbol):
+                continue
+            try:
+                self.price_cache[entry.symbol] = Decimal(str(entry.price))
+            except Exception as exc:
+                logger.warning(
+                    "Skipping invalid price cache entry %s: %s", entry.symbol, exc
+                )
+
+        stats = state.statistics
+        self.total_trades = stats.total_trades
+        self.total_volume = Decimal(str(stats.total_volume))
+        self.total_fees = Decimal(str(stats.total_fees))
+        self.total_realized_pnl = Decimal(str(stats.total_realized_pnl))
+
+        logger.info(
+            "Loaded TradeManager state from portfolio service with %s trades and %s positions",
+            len(self.trades),
+            len(self.positions),
+        )
+        if filtered_trades or filtered_positions:
+            logger.info(
+                "Filtered %s trades and %s positions from portfolio service state",
+                filtered_trades,
+                filtered_positions,
+            )
+
+    def _build_portfolio_state(self) -> PortfolioState:
+        if PortfolioState is None or PortfolioStatistics is None or PriceCacheEntry is None:
+            raise RuntimeError("Portfolio schemas are not available")
+
+        trades = [_trade_to_schema(trade) for trade in self.trades]
+        positions = [
+            _position_to_schema(position, self.price_cache, True)
+            for position in self.positions.values()
+        ]
+        closed_positions = [
+            _position_to_schema(position, self.price_cache, False)
+            for position in self.closed_positions
+        ]
+        price_cache_entries = [
+            PriceCacheEntry(symbol=symbol, price=price, updated_at=datetime.utcnow())
+            for symbol, price in self.price_cache.items()
+        ]
+        stats = PortfolioStatistics(
+            total_trades=self.total_trades,
+            total_volume=self.total_volume,
+            total_fees=self.total_fees,
+            total_realized_pnl=self.total_realized_pnl,
+            last_updated=datetime.utcnow(),
+        )
+        return PortfolioState(
+            trades=trades,
+            positions=positions,
+            closed_positions=closed_positions,
+            price_cache=price_cache_entries,
+            statistics=stats,
+        )
 
     def add_price_callback(self, callback: callable) -> None:
         """Add callback for price updates."""
@@ -1052,9 +1284,20 @@ class TradeManager:
         return trades
 
     def save_state(self) -> None:
-        """Save current state to disk."""
+        """Persist current state to the portfolio service and disk."""
+        if self.service_client is not None and PortfolioState is not None:
+            try:
+                service_state = self._build_portfolio_state()
+                self.service_client.put_state(service_state)
+                logger.info("TradeManager state persisted to portfolio service")
+            except Exception as exc:
+                logger.error(
+                    "Failed to persist TradeManager state to portfolio service: %s",
+                    exc,
+                )
+
         try:
-            state = {
+            state_payload = {
                 "trades": [trade.to_dict() for trade in self.trades],
                 "positions": {s: p.to_dict() for s, p in self.positions.items()},
                 "closed_positions": [p.to_dict() for p in self.closed_positions],
@@ -1070,13 +1313,15 @@ class TradeManager:
 
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.storage_path, "w") as f:
-                json.dump(state, f, indent=2)
+                json.dump(state_payload, f, indent=2)
 
-            logger.info(f"TradeManager state saved to {self.storage_path} with {len(self.positions)} positions")
+            logger.info(
+                f"TradeManager state saved to {self.storage_path} with {len(self.positions)} positions"
+            )
             logger.info(f"Saved positions: {list(self.positions.keys())}")
 
         except Exception as e:
-            logger.error(f"Failed to save TradeManager state: {e}")
+            logger.error(f"Failed to save TradeManager state locally: {e}")
 
     def cleanup_sell_locks(self) -> None:
         """Clean up sell locks (called periodically to prevent lock accumulation)."""
@@ -1087,7 +1332,31 @@ class TradeManager:
             self._sell_locks.clear()
 
     def _load_state(self) -> None:
-        """Load state from disk."""
+        """Load state from the portfolio service or local disk."""
+        service_loaded = False
+        if self.service_client is not None and PortfolioState is not None:
+            try:
+                state = self.service_client.get_state()
+                if state is not None:
+                    has_data = any(
+                        [state.trades, state.positions, state.closed_positions]
+                    )
+                    if has_data:
+                        self._apply_portfolio_state(state)
+                        service_loaded = True
+                        logger.info("TradeManager state loaded from portfolio service")
+                        return
+                    logger.info(
+                        "Portfolio service returned empty state; falling back to local persistence"
+                    )
+            except Exception as exc:
+                logger.error(
+                    "Failed to load state from portfolio service: %s", exc
+                )
+
+        if service_loaded:
+            return
+
         try:
             if not self.storage_path.exists():
                 logger.info("No TradeManager state file found, attempting CSV replay")
@@ -1095,11 +1364,9 @@ class TradeManager:
                     logger.info("CSV replay not possible; starting fresh")
                 return
 
-            # Load state normally - TradeManager is single source of truth
             with open(self.storage_path, "r") as f:
                 state = json.load(f)
 
-            # Load trades - filter out test positions
             valid_trades = []
             filtered_trade_count = 0
             for trade_data in state.get("trades", []):
@@ -1119,7 +1386,6 @@ class TradeManager:
                     filtered_trade_count += 1
             self.trades = valid_trades
 
-            # Load positions - filter out test positions
             self.positions = {}
             filtered_position_count = 0
             for symbol, pos_data in state.get("positions", {}).items():
@@ -1137,7 +1403,6 @@ class TradeManager:
                     )
                     filtered_position_count += 1
 
-            # Load closed positions
             self.closed_positions = []
             for pos_data in state.get("closed_positions", []):
                 try:
@@ -1147,12 +1412,10 @@ class TradeManager:
                         f"Skipping invalid closed position during state loading: {e}"
                     )
 
-            # Load price cache
             self.price_cache = {}
             for symbol, price in state.get("price_cache", {}).items():
                 self.price_cache[symbol] = Decimal(str(price))
 
-            # Load statistics
             stats = state.get("statistics", {})
             self.total_trades = stats.get("total_trades", 0)
             self.total_volume = Decimal(str(stats.get("total_volume", 0)))
@@ -1173,7 +1436,6 @@ class TradeManager:
         except Exception as e:
             logger.error(f"Failed to load TradeManager state: {e}")
             if not self._replay_from_csv():
-                # Start with clean state if loading fails and replay not possible
                 self.trades = []
                 self.positions = {}
                 self.price_cache = {}
