@@ -36,7 +36,6 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 # All imports consolidated at the top
 from crypto_bot.utils.telegram import TelegramNotifier, send_test_message
-from crypto_bot.utils.trade_manager import create_trade
 from crypto_bot.utils.logger import (
     LOG_DIR,
     setup_logger
@@ -44,7 +43,6 @@ from crypto_bot.utils.logger import (
 from crypto_bot.portfolio_rotator import PortfolioRotator
 from crypto_bot.wallet_manager import load_or_create
 from crypto_bot.utils.market_analyzer import analyze_symbol
-from crypto_bot.strategy_router import strategy_for, strategy_name
 from crypto_bot.cooldown_manager import (
     configure as cooldown_configure,
 )
@@ -53,24 +51,13 @@ from crypto_bot.risk.risk_manager import RiskManager, RiskConfig
 from crypto_bot.risk.exit_manager import (
     should_exit,
 )
-from crypto_bot.execution.cex_executor import (
-    execute_trade_async as cex_trade_async,
-    get_exchange,
-)
 from crypto_bot.open_position_guard import OpenPositionGuard
 from crypto_bot import console_monitor, console_control
 from crypto_bot.utils.position_logger import log_position, log_balance
 from crypto_bot.utils.market_loader import (
-    load_kraken_symbols,
-    update_ohlcv_cache,
-    update_multi_tf_ohlcv_cache,
-    update_regime_tf_cache,
-    timeframe_seconds,
     configure as market_loader_configure,
-    fetch_order_book_async,
 )
 from crypto_bot.utils.eval_queue import build_priority_queue
-from crypto_bot.solana import get_solana_new_tokens
 from crypto_bot.utils.symbol_utils import fix_symbol
 from crypto_bot.utils.metrics_logger import log_cycle as log_cycle_metrics
 from crypto_bot.utils.pnl_logger import log_pnl
@@ -97,7 +84,6 @@ from crypto_bot.evaluation_pipeline_integration import (
     initialize_evaluation_pipeline,
     get_tokens_for_evaluation,
 )
-from crypto_bot.monitoring import record_sol_scanner_metrics
 from crypto_bot.position_monitor import PositionMonitor
 from crypto_bot.fund_manager import (
     auto_convert_funds,
@@ -116,11 +102,26 @@ from crypto_bot.runtime_signals import (
 )
 from crypto_bot.startup_utils import (
     CONFIG_PATH,
+    create_service_container,
     flatten_config,
     load_config,
     maybe_reload_config,
     reload_config,
     set_last_config_mtime,
+)
+from crypto_bot.services.interfaces import (
+    CreateTradeRequest,
+    ExchangeRequest,
+    LoadSymbolsRequest,
+    MultiTimeframeOHLCVRequest,
+    OHLCVCacheRequest,
+    OrderBookRequest,
+    RecordScannerMetricsRequest,
+    RegimeCacheRequest,
+    ServiceContainer,
+    TimeframeRequest,
+    TokenDiscoveryRequest,
+    TradeExecutionRequest,
 )
 # Backwards compatibility for tests - function defined later
 # Log monitoring setup will be done after logger is initialized
@@ -286,6 +287,28 @@ def compute_average_atr(symbols: list[str], df_cache: dict, timeframe: str) -> f
             continue
         atr_values.append(calc_atr(df))
     return sum(atr_values) / len(atr_values) if atr_values else 0.0
+
+
+def _timeframe_to_seconds(timeframe: str) -> int:
+    """Convert timeframe strings like ``1h`` or ``15m`` to seconds."""
+
+    unit = timeframe[-1]
+    value = int(timeframe[:-1])
+    if unit == "s":
+        return value
+    if unit == "m":
+        return value * 60
+    if unit == "h":
+        return value * 3600
+    if unit == "d":
+        return value * 86400
+    if unit == "w":
+        return value * 604800
+    if unit == "M":
+        return value * 2592000
+    raise ValueError(f"Unknown timeframe {timeframe}")
+
+
 def is_market_pumping(
     symbols: list[str], df_cache: dict, timeframe: str = "1h", lookback_hours: int = 24
 ) -> bool:
@@ -293,7 +316,10 @@ def is_market_pumping(
     tf_cache = df_cache.get(timeframe, {})
     if not tf_cache:
         return False
-    sec = timeframe_seconds(None, timeframe)
+    try:
+        sec = _timeframe_to_seconds(timeframe)
+    except Exception:
+        return False
     candles = int(lookback_hours * 3600 / sec) if sec else 0
     changes: list[float] = []
     for sym in symbols:
@@ -398,6 +424,7 @@ async def initial_scan(
     exchange: object,
     config: dict,
     state: SessionState,
+    services: ServiceContainer,
     notifier: Union[TelegramNotifier, None] = None,
 ) -> None:
     """Populate OHLCV and regime caches before trading begins."""
@@ -423,23 +450,30 @@ async def initial_scan(
     logger.info("Initial scan starting: warming OHLCV/regime caches")
     # Respect configured timeframes, chunk symbols to batches
     tfs = config.get("timeframes", [config.get("timeframe", "15m")])
-    try:
-        from crypto_bot.utils.market_loader import update_multi_tf_ohlcv_cache, update_regime_tf_cache
-    except Exception as exc:
-        logger.error("Failed to import cache updaters: %s", exc)
-        return
     # Simple batching to avoid timeouts
     batch_size = max(1, int(config.get("symbol_batch_size", 10)))
     for i in range(0, total, batch_size):
         batch = symbols[i:i+batch_size]
         loader_cfg = {**config, "timeframes": tfs}
         try:
-            state.df_cache = await update_multi_tf_ohlcv_cache(
-                exchange, state.df_cache, batch, loader_cfg
+            df_response = await services.market_data.update_multi_tf_cache(
+                MultiTimeframeOHLCVRequest(
+                    exchange=exchange,
+                    cache=state.df_cache,
+                    symbols=batch,
+                    config=loader_cfg,
+                )
             )
-            state.regime_cache = await update_regime_tf_cache(
-                exchange, state.regime_cache, batch, config
+            state.df_cache = df_response.cache
+            regime_response = await services.market_data.update_regime_cache(
+                RegimeCacheRequest(
+                    exchange=exchange,
+                    cache=state.regime_cache,
+                    symbols=batch,
+                    config=config,
+                )
             )
+            state.regime_cache = regime_response.cache
         except Exception as exc:
             logger.error("Initial scan batch failed: %s", exc)
         processed += len(batch)
@@ -685,6 +719,8 @@ async def scan_arbitrage(exchange: object, config: dict) -> list[str]:
 async def update_caches(ctx: BotContext) -> None:
     """Update OHLCV and regime caches for the current symbol batch."""
     logger.info("PHASE: update_caches starting with batch size %d", len(ctx.current_batch))
+    if ctx.services is None:
+        raise RuntimeError("Market data service unavailable in context")
     batch = ctx.current_batch
     if not batch:
         logger.info("PHASE: update_caches - empty batch, skipping")
@@ -703,15 +739,26 @@ async def update_caches(ctx: BotContext) -> None:
         # Get regime timeframes to include in the consolidated cache update
         regime_timeframes = ctx.config.get("regime_timeframes", [])
         # Update both main and regime caches in a single consolidated operation
-        await update_multi_tf_ohlcv_cache(
-            ctx.exchange,
-            ctx.df_cache,
-            batch,
-            ctx.config,
-            additional_timeframes=regime_timeframes
+        multi_response = await ctx.services.market_data.update_multi_tf_cache(
+            MultiTimeframeOHLCVRequest(
+                exchange=ctx.exchange,
+                cache=ctx.df_cache,
+                symbols=batch,
+                config=ctx.config,
+                additional_timeframes=regime_timeframes,
+            )
         )
-        # Update regime cache using the data we just fetched
-        await update_regime_tf_cache(ctx.exchange, ctx.regime_cache, batch, ctx.config)
+        ctx.df_cache = multi_response.cache
+        regime_response = await ctx.services.market_data.update_regime_cache(
+            RegimeCacheRequest(
+                exchange=ctx.exchange,
+                cache=ctx.regime_cache,
+                symbols=batch,
+                config=ctx.config,
+                df_map=multi_response.cache,
+            )
+        )
+        ctx.regime_cache = regime_response.cache
         # Filter batch to only include symbols that have data in the main timeframe
         main_tf = ctx.config.get("timeframe", "1h")
         filtered_batch = []
@@ -902,6 +949,8 @@ async def execute_solana_trade(
     sentiment_boost: float = 1.0,
 ) -> bool:
     """Execute a Solana trade asynchronously."""
+    if ctx.services is None:
+        raise RuntimeError("Portfolio service unavailable in context")
     try:
         from crypto_bot.solana import sniper_solana
         from crypto_bot.solana_trading import sniper_trade
@@ -938,18 +987,21 @@ async def execute_solana_trade(
             # Record trade through centralized TradeManager
             if ctx.trade_manager:
                 from decimal import Decimal
-                trade = create_trade(
-                    symbol=sym,
-                    side=side,
-                    amount=Decimal(str(amount)),
-                    price=Decimal(str(price)),
-                    strategy=strategy,
-                    exchange="solana",
-                    metadata={
-                        "regime": candidate.get("regime"),
-                        "confidence": candidate.get("score", 0.0)
-                    }
+                trade_response = ctx.services.portfolio.create_trade(
+                    CreateTradeRequest(
+                        symbol=sym,
+                        side=side,
+                        amount=Decimal(str(amount)),
+                        price=Decimal(str(price)),
+                        strategy=strategy,
+                        exchange="solana",
+                        metadata={
+                            "regime": candidate.get("regime"),
+                            "confidence": candidate.get("score", 0.0)
+                        },
+                    )
                 )
+                trade = trade_response.trade
                 trade_id = ctx.trade_manager.record_trade(trade)
                 logger.info(
                 f"Solana trade recorded: {trade.symbol} {trade.side} {trade.amount} @ {trade.price}"
@@ -1012,6 +1064,8 @@ async def execute_cex_trade(
     sentiment_boost: float = 1.0,
 ) -> bool:
     """Execute a CEX trade asynchronously."""
+    if ctx.services is None:
+        raise RuntimeError("Execution service unavailable in context")
     try:
         # Apply sentiment boost to size
         adjusted_size = size * sentiment_boost
@@ -1030,23 +1084,29 @@ async def execute_cex_trade(
         except Exception as e:
             logger.error(f"Symbol validation failed for {sym}: {e} - aborting trade")
             return False
-        order = await cex_trade_async(
-            ctx.exchange,
-            ctx.ws_client,
-            sym,
-            side,
-            amount,
-            ctx.notifier,
-            dry_run=ctx.config.get("execution_mode") == "dry_run",
-            use_websocket=ctx.config.get("use_websocket", False),
-            config=ctx.config,
+        order_response = await ctx.services.execution.execute_trade(
+            TradeExecutionRequest(
+                exchange=ctx.exchange,
+                ws_client=ctx.ws_client,
+                symbol=sym,
+                side=side,
+                amount=amount,
+                notifier=ctx.notifier,
+                dry_run=ctx.config.get("execution_mode") == "dry_run",
+                use_websocket=ctx.config.get("use_websocket", False),
+                config=ctx.config,
+            )
         )
+        order = order_response.order
         if order:
             # Handle take profit for bounce scalper strategy
             take_profit = None
             if strategy == "bounce_scalper":
                 depth = int(ctx.config.get("liquidity_depth", 10))
-                book = await fetch_order_book_async(ctx.exchange, sym, depth)
+                order_book_resp = await ctx.services.market_data.fetch_order_book(
+                    OrderBookRequest(exchange=ctx.exchange, symbol=sym, depth=depth)
+                )
+                book = order_book_resp.order_book
                 dist = _closest_wall_distance(book, price, side)
                 if dist is not None:
                     take_profit = dist * 0.8
@@ -1110,18 +1170,21 @@ async def execute_cex_trade(
             # Record trade through centralized TradeManager
             if ctx.trade_manager:
                 from decimal import Decimal
-                trade = create_trade(
-                    symbol=sym,
-                    side=side,
-                    amount=Decimal(str(amount)),
-                    price=Decimal(str(price)),
-                    strategy=strategy,
-                    exchange="cex",
-                    metadata={
-                        "regime": candidate.get("regime"),
-                        "confidence": candidate.get("score", 0.0)
-                    }
+                trade_response = ctx.services.portfolio.create_trade(
+                    CreateTradeRequest(
+                        symbol=sym,
+                        side=side,
+                        amount=Decimal(str(amount)),
+                        price=Decimal(str(price)),
+                        strategy=strategy,
+                        exchange="cex",
+                        metadata={
+                            "regime": candidate.get("regime"),
+                            "confidence": candidate.get("score", 0.0)
+                        },
+                    )
                 )
+                trade = trade_response.trade
                 trade_id = ctx.trade_manager.record_trade(trade)
                 logger.info(
                 f"CEX trade recorded: {trade.symbol} {trade.side} {trade.amount} @ {trade.price}"
@@ -1348,6 +1411,8 @@ async def execute_signals(ctx: BotContext) -> None:
 async def handle_exits(ctx: BotContext) -> None:
     """Check open positions for exit conditions with enhanced monitoring."""
     logger.info("PHASE: handle_exits starting with %d positions", len(ctx.positions))
+    if ctx.services is None:
+        raise RuntimeError("Execution service unavailable in context")
     tf = ctx.config.get("timeframe", "1h")
     tf_cache = ctx.df_cache.get(tf, {})
     # Clean up old monitors for closed positions
@@ -1385,16 +1450,18 @@ async def handle_exits(ctx: BotContext) -> None:
         )
         pos["trailing_stop"] = new_stop
         if exit_signal:
-            await cex_trade_async(
-                ctx.exchange,
-                ctx.ws_client,
-                sym,
-                opposite_side(pos["side"]),
-                pos["size"],
-                ctx.notifier,
-                dry_run=ctx.config.get("execution_mode") == "dry_run",
-                use_websocket=ctx.config.get("use_websocket", False),
-                config=ctx.config,
+            await ctx.services.execution.execute_trade(
+                TradeExecutionRequest(
+                    exchange=ctx.exchange,
+                    ws_client=ctx.ws_client,
+                    symbol=sym,
+                    side=opposite_side(pos["side"]),
+                    amount=pos["size"],
+                    notifier=ctx.notifier,
+                    dry_run=ctx.config.get("execution_mode") == "dry_run",
+                    use_websocket=ctx.config.get("use_websocket", False),
+                    config=ctx.config,
+                )
             )
             if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
                 try:
@@ -1440,6 +1507,8 @@ async def handle_exits(ctx: BotContext) -> None:
             pass
 async def force_exit_all(ctx: BotContext) -> None:
     """Liquidate all open positions immediately."""
+    if ctx.services is None:
+        raise RuntimeError("Execution service unavailable in context")
     tf = ctx.config.get("timeframe", "1h")
     tf_cache = ctx.df_cache.get(tf, {})
     for sym, pos in list(ctx.positions.items()):
@@ -1447,16 +1516,18 @@ async def force_exit_all(ctx: BotContext) -> None:
         exit_price = pos["entry_price"]
         if df is not None and not df.empty:
             exit_price = float(df["close"].iloc[-1])
-        await cex_trade_async(
-            ctx.exchange,
-            ctx.ws_client,
-            sym,
-            opposite_side(pos["side"]),
-            pos["size"],
-            ctx.notifier,
-            dry_run=ctx.config.get("execution_mode") == "dry_run",
-            use_websocket=ctx.config.get("use_websocket", False),
-            config=ctx.config,
+        await ctx.services.execution.execute_trade(
+            TradeExecutionRequest(
+                exchange=ctx.exchange,
+                ws_client=ctx.ws_client,
+                symbol=sym,
+                side=opposite_side(pos["side"]),
+                amount=pos["size"],
+                notifier=ctx.notifier,
+                dry_run=ctx.config.get("execution_mode") == "dry_run",
+                use_websocket=ctx.config.get("use_websocket", False),
+                config=ctx.config,
+            )
         )
         if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
             try:
@@ -1490,6 +1561,8 @@ async def force_exit_all(ctx: BotContext) -> None:
             pass
 async def _monitor_micro_scalp_exit(ctx: BotContext, sym: str) -> None:
     """Monitor a micro-scalp trade and exit based on :func:`monitor_price`."""
+    if ctx.services is None:
+        raise RuntimeError("Execution service unavailable in context")
     pos = ctx.positions.get(sym)
     if not pos:
         return
@@ -1501,16 +1574,18 @@ async def _monitor_micro_scalp_exit(ctx: BotContext, sym: str) -> None:
         return float(df["close"].iloc[-1])
     res = await monitor_price(feed, pos["entry_price"], {})
     exit_price = res.get("exit_price", feed())
-    await cex_trade_async(
-        ctx.exchange,
-        ctx.ws_client,
-        sym,
-        opposite_side(pos["side"]),
-        pos["size"],
-        ctx.notifier,
-        dry_run=ctx.config.get("execution_mode") == "dry_run",
-        use_websocket=ctx.config.get("use_websocket", False),
-        config=ctx.config,
+    await ctx.services.execution.execute_trade(
+        TradeExecutionRequest(
+            exchange=ctx.exchange,
+            ws_client=ctx.ws_client,
+            symbol=sym,
+            side=opposite_side(pos["side"]),
+            amount=pos["size"],
+            notifier=ctx.notifier,
+            dry_run=ctx.config.get("execution_mode") == "dry_run",
+            use_websocket=ctx.config.get("use_websocket", False),
+            config=ctx.config,
+        )
     )
     if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
         try:
@@ -1587,6 +1662,7 @@ async def _main_impl() -> TelegramNotifier:
     logger.info("Starting bot")
     global UNKNOWN_COUNT, TOTAL_ANALYSES
     config = load_config()
+    services: ServiceContainer = create_service_container()
     sol_syms = [fix_symbol(s) for s in config.get("solana_symbols", [])]
     sol_syms = [f"{s}/USDC" if "/" not in s else s for s in sol_syms]
     if sol_syms:
@@ -1635,7 +1711,10 @@ async def _main_impl() -> TelegramNotifier:
             logger.info("Using basic Solana scanner")
             while True:
                 try:
-                    tokens = await get_solana_new_tokens(cfg)
+                    response = await services.token_discovery.discover_tokens(
+                        TokenDiscoveryRequest(config=cfg)
+                    )
+                    tokens = response.tokens
                     if tokens:
                         async with QUEUE_LOCK:
                             for sym in reversed(tokens):
@@ -1749,7 +1828,11 @@ async def _main_impl() -> TelegramNotifier:
     # allow user-configured exchange to override YAML setting
     if user.get("exchange"):
         config["exchange"] = user["exchange"]
-    exchange, ws_client = get_exchange(config)
+    exchange_resp = services.execution.create_exchange(
+        ExchangeRequest(config=config)
+    )
+    exchange = exchange_resp.exchange
+    ws_client = exchange_resp.ws_client
     ping_interval = int(config.get("ws_ping_interval", 0) or 0)
     if ping_interval > 0 and hasattr(exchange, "ping"):
         task = asyncio.create_task(_ws_ping_loop(exchange, ping_interval))
@@ -1767,13 +1850,22 @@ async def _main_impl() -> TelegramNotifier:
         discovered: Union[list[str], None] = None
         while attempt < MAX_SYMBOL_SCAN_ATTEMPTS:
             start_scan = time.perf_counter()
-            discovered = await load_kraken_symbols(
-                exchange,
-                config.get("excluded_symbols", []),
-                config,
+            response = await services.market_data.load_symbols(
+                LoadSymbolsRequest(
+                    exchange=exchange,
+                    exclude=config.get("excluded_symbols", []),
+                    config=config,
+                )
             )
+            discovered = response.symbols
             latency = time.perf_counter() - start_scan
-            record_sol_scanner_metrics(len(discovered or []), latency, config)
+            services.monitoring.record_scanner_metrics(
+                RecordScannerMetricsRequest(
+                    tokens=len(discovered or []),
+                    latency=latency,
+                    config=config,
+                )
+            )
             if discovered:
                 break
             attempt += 1
@@ -2066,6 +2158,7 @@ async def _main_impl() -> TelegramNotifier:
                 exchange,
                 config,
                 session_state,
+                services,
                 notifier if status_updates else None,
             )
         )
@@ -2074,6 +2167,7 @@ async def _main_impl() -> TelegramNotifier:
             exchange,
             config,
             session_state,
+            services,
             notifier if status_updates else None,
         )
     ctx = BotContext(
@@ -2081,6 +2175,7 @@ async def _main_impl() -> TelegramNotifier:
         df_cache=session_state.df_cache,
         regime_cache=session_state.regime_cache,
         config=config,
+        services=services,
     )
     ctx.exchange = exchange
     ctx.ws_client = ws_client
@@ -2089,9 +2184,8 @@ async def _main_impl() -> TelegramNotifier:
     ctx.paper_wallet = paper_wallet
     # Initialize TradeManager and sync with paper wallet
     try:
-        from crypto_bot.utils.trade_manager import get_trade_manager
         from crypto_bot.utils.price_monitor import start_price_monitoring
-        tm = get_trade_manager()
+        tm = services.portfolio.get_trade_manager()
         # Start price monitoring service for real-time price updates
         ctx.price_monitor = start_price_monitoring(exchange, tm)
         logger.info("Price monitoring service started")
@@ -2124,8 +2218,7 @@ async def _main_impl() -> TelegramNotifier:
     ctx.position_guard = position_guard
     # Initialize TradeManager if not already available
     if not hasattr(ctx, 'trade_manager') or ctx.trade_manager is None:
-        from crypto_bot.utils.trade_manager import get_trade_manager
-        ctx.trade_manager = get_trade_manager()
+        ctx.trade_manager = services.portfolio.get_trade_manager()
         logger.info("Initialized TradeManager in context for position monitor")
     # Initialize real-time position monitor
     # Convert TradeManager positions to the format expected by PositionMonitor
@@ -2156,18 +2249,22 @@ async def _main_impl() -> TelegramNotifier:
         logger.info(
                 f"🚨 Position monitor triggered exit for {symbol}: {exit_reason} at {current_price:.6f}"
             )
+        if ctx.services is None:
+            raise RuntimeError("Execution service unavailable in context")
         try:
             # Execute the exit trade
-            await cex_trade_async(
-                ctx.exchange,
-                ctx.ws_client,
-                symbol,
-                opposite_side(position["side"]),
-                position["size"],
-                ctx.notifier,
-                dry_run=ctx.config.get("execution_mode") == "dry_run",
-                use_websocket=ctx.config.get("use_websocket", False),
-                config=ctx.config,
+            await ctx.services.execution.execute_trade(
+                TradeExecutionRequest(
+                    exchange=ctx.exchange,
+                    ws_client=ctx.ws_client,
+                    symbol=symbol,
+                    side=opposite_side(position["side"]),
+                    amount=position["size"],
+                    notifier=ctx.notifier,
+                    dry_run=ctx.config.get("execution_mode") == "dry_run",
+                    use_websocket=ctx.config.get("use_websocket", False),
+                    config=ctx.config,
+                )
             )
             # Handle paper wallet if in dry run mode
             if ctx.config.get("execution_mode") == "dry_run" and ctx.paper_wallet:
@@ -2191,19 +2288,18 @@ async def _main_impl() -> TelegramNotifier:
                     tm_position = ctx.trade_manager.get_position(symbol)
                     if tm_position and tm_position.is_open:
                         logger.info(f"Closing TradeManager position for {symbol} via {exit_reason}")
-                        # Import create_trade function
-                        from crypto_bot.utils.trade_manager import create_trade
-                        # Determine closing side
                         closing_side = 'sell' if tm_position.side == 'long' else 'buy'
-                        # Create closing trade
-                        closing_trade = create_trade(
-                            symbol=symbol,
-                            side=closing_side,
-                            amount=Decimal(str(position["size"])),
-                            price=Decimal(str(current_price)),
-                            strategy=exit_reason,  # Use exit_reason as strategy
-                            exchange='kraken'
+                        closing_trade_response = ctx.services.portfolio.create_trade(
+                            CreateTradeRequest(
+                                symbol=symbol,
+                                side=closing_side,
+                                amount=Decimal(str(position["size"])),
+                                price=Decimal(str(current_price)),
+                                strategy=exit_reason,  # Use exit_reason as strategy
+                                exchange='kraken',
+                            )
                         )
+                        closing_trade = closing_trade_response.trade
                         # Record the closing trade
                         trade_id = ctx.trade_manager.record_trade(closing_trade)
                         logger.info(f"TradeManager position closed for {symbol} with trade ID: {trade_id}")
@@ -2556,7 +2652,7 @@ async def _main_impl() -> TelegramNotifier:
             # Refresh OHLCV for open positions if a new candle has formed
             try:
                 tf = config.get("timeframe", "1h")
-                tf_sec = timeframe_seconds(None, tf)
+                tf_sec = _timeframe_to_seconds(tf)
                 open_syms: list[str] = []
                 for sym in ctx.positions:
                     last_ts = last_candle_ts.get(sym, 0)
@@ -2591,15 +2687,18 @@ async def _main_impl() -> TelegramNotifier:
                         )
                     else:
                         # Use legacy fetcher for open positions
-                        tf_cache = await update_ohlcv_cache(
-                            exchange,
-                            tf_cache,
-                            open_syms,
-                            timeframe=tf,
-                            limit=2,
-                            use_websocket=False,
-                            max_concurrent=config.get("max_concurrent_ohlcv", 3),
+                        response = await ctx.services.market_data.update_ohlcv_cache(
+                            OHLCVCacheRequest(
+                                exchange=exchange,
+                                cache=tf_cache,
+                                symbols=open_syms,
+                                timeframe=tf,
+                                limit=2,
+                                use_websocket=False,
+                                max_concurrent=config.get("max_concurrent_ohlcv", 3),
+                            )
                         )
+                        tf_cache = response.cache
                     ctx.df_cache[tf] = tf_cache
                     session_state.df_cache[tf] = tf_cache
                     for sym in open_syms:
