@@ -1,18 +1,14 @@
-"""Asynchronous service clients for the trading engine."""
-
 from __future__ import annotations
 
-import asyncio
+import json
 import logging
 import os
 import uuid
-from typing import Any, Dict, Mapping, MutableMapping, Optional, Tuple
+from typing import Any, Dict, Mapping, MutableMapping, Optional
 
 import httpx
 import pandas as pd
 
-from libs.models import OpenPositionGuard, PaperWallet
-from libs.risk import RiskManager
 from libs.services.interfaces import (
     ExchangeRequest,
     ExchangeResponse,
@@ -24,9 +20,9 @@ from libs.services.interfaces import (
 
 from crypto_bot.services.adapters.market_data import MarketDataAdapter
 from crypto_bot.services.adapters.monitoring import MonitoringAdapter
+from crypto_bot.services.adapters.portfolio import PortfolioAdapter
 from crypto_bot.services.adapters.strategy import StrategyAdapter
 from crypto_bot.services.adapters.token_discovery import TokenDiscoveryAdapter
-from crypto_bot.services.adapters.portfolio import PortfolioAdapter
 
 from crypto_bot.services.adapters.execution import ExecutionApiClient, ExecutionTimeoutError
 
@@ -73,9 +69,6 @@ class ExecutionGatewayClient(ExecutionService):
 
         await self._api.aclose()
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
     @staticmethod
     def _generate_client_order_id(config: Optional[Mapping[str, Any]]) -> str:
         base = "exec"
@@ -104,9 +97,6 @@ class ExecutionGatewayClient(ExecutionService):
             logger.warning("Invalid %s override: %r", key, value)
             return default
 
-    # ------------------------------------------------------------------
-    # ExecutionService implementation
-    # ------------------------------------------------------------------
     def create_exchange(self, request: ExchangeRequest) -> ExchangeResponse:
         metadata = self._api.ensure_exchange(request.config)
         return ExchangeResponse(exchange=metadata, ws_client=None)
@@ -148,19 +138,67 @@ class ExecutionGatewayClient(ExecutionService):
         return TradeExecutionResponse(order=fill.get("order", {}))
 
 
-class AsyncRiskServiceClient:
-    """Asynchronous wrapper around the core risk manager implementation."""
+class RiskServiceClient:
+    """HTTP client facade for the risk management microservice."""
 
-    def __init__(self, manager: RiskManager) -> None:
-        self._manager = manager
+    def __init__(
+        self,
+        *,
+        base_url: Optional[str] = None,
+        timeout: Optional[float] = None,
+        config: Optional[Mapping[str, Any]] = None,
+        client: Optional[httpx.AsyncClient] = None,
+    ) -> None:
+        resolved_base = base_url or os.getenv("RISK_SERVICE_URL", "http://risk:8010/api/v1")
+        resolved_timeout = (
+            timeout if timeout is not None else float(os.getenv("RISK_SERVICE_TIMEOUT", "10"))
+        )
+        self._client = client or httpx.AsyncClient(base_url=resolved_base, timeout=resolved_timeout)
+        self._owns_client = client is None
+        self._config = dict(config or {})
 
-    @classmethod
-    def from_config(cls, config: Mapping[str, Any]) -> "AsyncRiskServiceClient":
-        manager = RiskManager.from_config(config)
-        return cls(manager)
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
 
-    async def allow_trade(self, df: pd.DataFrame, strategy: Optional[str]) -> Tuple[bool, str]:
-        return await asyncio.to_thread(self._manager.allow_trade, df, strategy)
+    @staticmethod
+    def _serialise_dataframe(df: Optional[pd.DataFrame]) -> Optional[list[dict[str, Any]]]:
+        if df is None or df.empty:
+            return None
+        try:
+            trimmed = df.tail(250).reset_index()
+        except Exception:  # pragma: no cover - fallback for unusual structures
+            trimmed = df.tail(250)
+        try:
+            return json.loads(trimmed.to_json(orient="records", date_format="iso"))
+        except TypeError:  # pragma: no cover - defensive conversion
+            records: list[dict[str, Any]] = []
+            for row in trimmed.to_dict(orient="records"):
+                serialised: dict[str, Any] = {}
+                for key, value in row.items():
+                    if hasattr(value, "isoformat"):
+                        serialised[key] = value.isoformat()
+                    elif isinstance(value, (float, int, str, bool)) or value is None:
+                        serialised[key] = value
+                    else:
+                        serialised[key] = str(value)
+                records.append(serialised)
+            return records
+
+    async def allow_trade(
+        self, df: pd.DataFrame, strategy: Optional[str]
+    ) -> tuple[bool, str]:
+        payload = {
+            "strategy": strategy,
+            "config": self._config,
+            "market_data": self._serialise_dataframe(df),
+        }
+        response = await self._client.post("/risk/allow", json=payload)
+        response.raise_for_status()
+        data = response.json() if response.content else {}
+        allowed = bool(data.get("allowed", True))
+        reason = data.get("reason", "")
+        return allowed, str(reason) if isinstance(reason, str) else ""
 
     async def position_size(
         self,
@@ -171,71 +209,161 @@ class AsyncRiskServiceClient:
         atr: Optional[float] = None,
         price: Optional[float] = None,
     ) -> float:
-        return float(
-            await asyncio.to_thread(
-                self._manager.position_size,
-                confidence,
-                balance,
-                df,
-                None,
-                atr,
-                price,
-            )
-        )
+        payload = {
+            "confidence": confidence,
+            "balance": balance,
+            "atr": atr,
+            "price": price,
+            "config": self._config,
+            "market_data": self._serialise_dataframe(df),
+        }
+        response = await self._client.post("/risk/position-size", json=payload)
+        response.raise_for_status()
+        data = response.json() if response.content else {}
+        return float(data.get("position_size", data.get("amount", 0.0)))
 
     async def can_allocate(self, strategy: str, amount: float, balance: float) -> bool:
-        if not hasattr(self._manager, "can_allocate"):
-            return True
-        return bool(
-            await asyncio.to_thread(self._manager.can_allocate, strategy, amount, balance)
-        )
+        payload = {
+            "strategy": strategy,
+            "amount": amount,
+            "balance": balance,
+            "config": self._config,
+        }
+        response = await self._client.post("/risk/allocations/check", json=payload)
+        response.raise_for_status()
+        data = response.json() if response.content else {}
+        return bool(data.get("allowed", data.get("can_allocate", True)))
 
     async def allocate_capital(self, strategy: str, amount: float) -> None:
-        if not hasattr(self._manager, "allocate_capital"):
-            return
-        await asyncio.to_thread(self._manager.allocate_capital, strategy, amount)
+        payload = {"strategy": strategy, "amount": amount, "config": self._config}
+        response = await self._client.post("/risk/allocations/allocate", json=payload)
+        response.raise_for_status()
 
-    async def snapshot(self) -> Mapping[str, Any]:
-        state = getattr(self._manager, "config", None)
-        if state is None:
-            return {}
-        return dict(state.__dict__)
+    async def snapshot(self) -> Mapping[str, Any]:  # pragma: no cover - advisory helper
+        response = await self._client.get("/risk/snapshot", params={"include_config": True})
+        response.raise_for_status()
+        payload = response.json() if response.content else {}
+        if isinstance(payload, Mapping):
+            return payload
+        return {}
 
 
-class AsyncPaperWalletClient:
-    """Minimal asynchronous wrapper around :class:`PaperWallet`."""
+class PaperWalletServiceClient:
+    """HTTP client for the paper wallet orchestration service."""
 
-    def __init__(self, wallet: PaperWallet) -> None:
-        self._wallet = wallet
+    def __init__(
+        self,
+        *,
+        base_url: Optional[str] = None,
+        timeout: Optional[float] = None,
+        config: Optional[Mapping[str, Any]] = None,
+        client: Optional[httpx.AsyncClient] = None,
+    ) -> None:
+        resolved_base = base_url or os.getenv("PAPER_WALLET_SERVICE_URL", "http://paper-wallet:8011/api/v1")
+        resolved_timeout = (
+            timeout if timeout is not None else float(os.getenv("PAPER_WALLET_SERVICE_TIMEOUT", "10"))
+        )
+        self._client = client or httpx.AsyncClient(base_url=resolved_base, timeout=resolved_timeout)
+        self._owns_client = client is None
+        self._config = dict(config or {})
+        self.balance: float = 0.0
+        self.positions: Mapping[str, Any] = {}
 
-    @property
-    def balance(self) -> float:
-        return float(self._wallet.balance)
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
 
-    @property
-    def positions(self) -> Mapping[str, Any]:
-        return self._wallet.positions
+    async def _request(
+        self, method: str, path: str, payload: Optional[Mapping[str, Any]] = None
+    ) -> Mapping[str, Any]:
+        data = dict(payload or {})
+        if self._config and "config" not in data:
+            data["config"] = self._config
+        if method.upper() == "GET":
+            response = await self._client.request(method, path, params=data or None)
+        else:
+            response = await self._client.request(method, path, json=data if data else None)
+        response.raise_for_status()
+        body = response.json() if response.content else {}
+        return body if isinstance(body, Mapping) else {}
+
+    async def refresh_state(self) -> None:
+        payload = await self._request("GET", "/wallet/state")
+        balance = payload.get("balance")
+        positions = payload.get("positions")
+        try:
+            self.balance = float(balance)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            self.balance = 0.0
+        if isinstance(positions, Mapping):
+            self.positions = dict(positions)
+        else:
+            self.positions = {}
 
     async def buy(self, symbol: str, amount: float, price: float) -> bool:
-        return bool(await asyncio.to_thread(self._wallet.buy, symbol, amount, price))
+        payload = {"symbol": symbol, "amount": amount, "price": price, "side": "buy"}
+        data = await self._request("POST", "/wallet/buy", payload)
+        success = bool(data.get("success", data.get("purchased", False)))
+        if success:
+            await self.refresh_state()
+        return success
 
     async def sell(self, symbol: str, amount: float, price: float) -> bool:
-        return bool(await asyncio.to_thread(self._wallet.sell, symbol, amount, price))
+        payload = {"symbol": symbol, "amount": amount, "price": price, "side": "sell"}
+        data = await self._request("POST", "/wallet/sell", payload)
+        success = bool(data.get("success", data.get("sold", False)))
+        if success:
+            await self.refresh_state()
+        return success
 
 
-class AsyncPositionGuardClient:
-    """Asynchronous facade for :class:`OpenPositionGuard`."""
+class PositionGuardServiceClient:
+    """HTTP client facade for open position guard orchestration."""
 
-    def __init__(self, guard: OpenPositionGuard) -> None:
-        self._guard = guard
+    def __init__(
+        self,
+        *,
+        base_url: Optional[str] = None,
+        timeout: Optional[float] = None,
+        config: Optional[Mapping[str, Any]] = None,
+        max_open_trades: Optional[int] = None,
+        client: Optional[httpx.AsyncClient] = None,
+    ) -> None:
+        resolved_base = base_url or os.getenv("POSITION_GUARD_SERVICE_URL", "http://position-guard:8012/api/v1")
+        resolved_timeout = (
+            timeout if timeout is not None else float(os.getenv("POSITION_GUARD_SERVICE_TIMEOUT", "10"))
+        )
+        self._client = client or httpx.AsyncClient(base_url=resolved_base, timeout=resolved_timeout)
+        self._owns_client = client is None
+        self._config = dict(config or {})
+        self._max_open_trades = max_open_trades
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+    async def _request(
+        self, method: str, path: str, payload: Optional[Mapping[str, Any]] = None
+    ) -> Mapping[str, Any]:
+        data = dict(payload or {})
+        if self._config and "config" not in data:
+            data["config"] = self._config
+        if self._max_open_trades is not None:
+            data.setdefault("max_open_trades", self._max_open_trades)
+        if method.upper() == "GET":
+            response = await self._client.request(method, path, params=data or None)
+        else:
+            response = await self._client.request(method, path, json=data if data else None)
+        response.raise_for_status()
+        body = response.json() if response.content else {}
+        return body if isinstance(body, Mapping) else {}
 
     async def can_open(self, positions: Mapping[str, Any]) -> bool:
-        return bool(await asyncio.to_thread(self._guard.can_open, positions))
+        data = await self._request("POST", "/guard/can-open", {"positions": dict(positions)})
+        return bool(data.get("allowed", data.get("can_open", True)))
 
 
 def build_service_container() -> ServiceContainer:
-    """Instantiate service clients used by the trading engine."""
-
     return ServiceContainer(
         market_data=MarketDataAdapter(),
         strategy=StrategyAdapter(),
@@ -246,43 +374,47 @@ def build_service_container() -> ServiceContainer:
     )
 
 
-def build_risk_client(config: Mapping[str, Any]) -> Optional[AsyncRiskServiceClient]:
+def build_risk_client(config: Mapping[str, Any]) -> Optional[RiskServiceClient]:
     if not config:
         return None
     try:
-        return AsyncRiskServiceClient.from_config(config)
+        return RiskServiceClient(config=config)
     except Exception:  # pragma: no cover - optional dependency
         logger.warning("Risk manager client initialisation failed", exc_info=True)
         return None
 
 
-def build_paper_wallet_client(config: Mapping[str, Any]) -> Optional[AsyncPaperWalletClient]:
+def build_paper_wallet_client(config: Mapping[str, Any]) -> Optional[PaperWalletServiceClient]:
     mode = str(config.get("execution_mode", "dry_run")).lower()
     if mode != "dry_run":
         return None
-    wallet_cfg = config.get("paper_wallet", {})
+    wallet_cfg = dict(config.get("paper_wallet", {}))
     initial_balance = wallet_cfg.get("initial_balance")
     if initial_balance is None:
         initial_balance = config.get("risk", {}).get("starting_balance", 0.0)
     try:
-        wallet = PaperWallet(
-            float(initial_balance or 0.0),
-            max_open_trades=int(wallet_cfg.get("max_open_trades", 5)),
-            allow_short=bool(wallet_cfg.get("allow_short", True)),
+        wallet_cfg.setdefault("initial_balance", initial_balance)
+        wallet_cfg.setdefault("allow_short", bool(wallet_cfg.get("allow_short", True)))
+        wallet_cfg.setdefault(
+            "max_open_trades",
+            int(config.get("max_open_trades") or wallet_cfg.get("max_open_trades", 5)),
         )
-        return AsyncPaperWalletClient(wallet)
+        return PaperWalletServiceClient(config=wallet_cfg)
     except Exception:  # pragma: no cover - optional dependency
         logger.warning("Paper wallet client initialisation failed", exc_info=True)
         return None
 
 
-def build_position_guard_client(config: Mapping[str, Any]) -> Optional[AsyncPositionGuardClient]:
+def build_position_guard_client(config: Mapping[str, Any]) -> Optional[PositionGuardServiceClient]:
     max_trades = config.get("max_open_trades") or config.get("paper_wallet", {}).get(
         "max_open_trades", 5
     )
     try:
-        guard = OpenPositionGuard(int(max_trades))
-        return AsyncPositionGuardClient(guard)
+        guard_config = config.get("position_guard", {})
+        return PositionGuardServiceClient(
+            config=guard_config,
+            max_open_trades=int(max_trades) if max_trades is not None else None,
+        )
     except Exception:  # pragma: no cover - optional dependency
         logger.warning("Position guard client initialisation failed", exc_info=True)
         return None
