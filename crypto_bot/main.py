@@ -7,8 +7,9 @@ from pathlib import Path
 from datetime import datetime
 from collections import deque, OrderedDict
 from dataclasses import dataclass, field
-from typing import Union, Optional
+from typing import Any, Callable, Optional, Union
 import inspect
+import random
 # Suppress urllib3 OpenSSL warning
 warnings.filterwarnings(
     'ignore',
@@ -1657,7 +1658,13 @@ async def _rotation_loop(
             sleep_remaining -= sleep_chunk
             if not (rotator.config.get("enabled") and state.get("running")):
                 break
-async def _main_impl() -> TelegramNotifier:
+async def _main_impl(
+    *,
+    clock: Optional[Callable[[], datetime]] = None,
+    timer: Optional[Callable[[], float]] = None,
+    rng: Optional[random.Random] = None,
+    numpy_rng: Optional[Any] = None,
+) -> TelegramNotifier:
     """Implementation for running the trading bot."""
     logger.info("Starting bot")
     global UNKNOWN_COUNT, TOTAL_ANALYSES
@@ -2176,6 +2183,8 @@ async def _main_impl() -> TelegramNotifier:
         regime_cache=session_state.regime_cache,
         config=config,
         services=services,
+        rng=rng,
+        numpy_rng=numpy_rng,
     )
     ctx.exchange = exchange
     ctx.ws_client = ws_client
@@ -2482,7 +2491,11 @@ async def _main_impl() -> TelegramNotifier:
             execute_signals,
             handle_exits,
             monitor_positions_phase,
-        ]
+        ],
+        clock=clock,
+        timer=timer,
+        rng=rng,
+        numpy_rng=numpy_rng,
     )
     # Start PositionMonitor for real-time stop loss monitoring
     if hasattr(ctx, 'position_monitor'):
@@ -2842,6 +2855,18 @@ async def _main_impl() -> TelegramNotifier:
                 pass
         WS_PING_TASKS.clear()
     return notifier
+
+
+async def run_bot(
+    *,
+    clock: Optional[Callable[[], datetime]] = None,
+    timer: Optional[Callable[[], float]] = None,
+    rng: Optional[random.Random] = None,
+    numpy_rng: Optional[Any] = None,
+) -> TelegramNotifier:
+    """Public entry point for running the bot with injectable dependencies."""
+
+    return await _main_impl(clock=clock, timer=timer, rng=rng, numpy_rng=numpy_rng)
 async def main() -> None:
     """Entry point for running the trading bot with error handling."""
     bot_pid_file = Path("bot_pid.txt")
@@ -2859,7 +2884,7 @@ async def main() -> None:
     install_signal_handlers(bot_pid_file)
     notifier: Union[TelegramNotifier, None] = None
     try:
-        notifier = await _main_impl()
+        notifier = await run_bot()
     except Exception as exc:  # pragma: no cover - error path
         logger.exception("Unhandled error in main: %s", exc)
         # Check if it's a rate limiting error
