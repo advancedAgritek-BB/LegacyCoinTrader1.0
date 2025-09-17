@@ -1,0 +1,23 @@
+{
+  "decisions": [
+    {
+      "symbol": "BTC/USD",
+      "strategy": "momentum_breakout",
+      "allowed": true,
+      "reason": "Trade allowed (boost 1.00)",
+      "confidence": 0.72,
+      "price": 43615.0,
+      "atr": 120.0,
+      "position_size": 450.0,
+      "can_allocate": true,
+      "allocation_request": 450.0,
+      "allocated": 450.0
+    },
+    {
+      "symbol": "ETH/USD",
+      "strategy": "mean_reversion",
+      "allowed": false,
+      "reason": "Volume < min volume threshold"
+    }
+  ]
+}

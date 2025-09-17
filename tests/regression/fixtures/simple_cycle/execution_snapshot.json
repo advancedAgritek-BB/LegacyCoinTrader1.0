@@ -1,0 +1,16 @@
+{
+  "trades": [
+    {
+      "symbol": "BTC/USD",
+      "strategy": "momentum_breakout",
+      "side": "buy",
+      "notional": 450.0,
+      "amount": 0.0103175513,
+      "price": 43615.0,
+      "confidence": 0.72,
+      "score": 0.82,
+      "regime": "bull",
+      "sentiment_boost": 1.0
+    }
+  ]
+}
