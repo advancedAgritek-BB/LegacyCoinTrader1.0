@@ -22,6 +22,9 @@ python -m crypto_bot.main start --interval 60 --immediate
 # Pause the engine or trigger an emergency liquidation
 python -m crypto_bot.main pause
 python -m crypto_bot.main emergency-stop
+
+# Or call the REST endpoint exposed through the gateway
+curl -X POST http://localhost:8000/api/v1/trading/positions/close-all
 ```
 
 ### Manual setup with Docker Compose

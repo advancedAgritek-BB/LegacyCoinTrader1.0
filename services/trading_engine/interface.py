@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Iterable, Optional
 from services.interface_layer.cycle import CycleExecutionResult, TradingCycleInterface
 
 from .phases import DEFAULT_PHASES
+from .liquidation import LiquidationHelper, LiquidationReport
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +36,11 @@ class TradingEngineInterface:
         *,
         clock: Optional[Callable[[], datetime]] = None,
         timer: Optional[Callable[[], float]] = None,
+        liquidation_helper: Optional[LiquidationHelper] = None,
     ) -> None:
         self._phases = list(phases or DEFAULT_PHASES)
         self._runner = TradingCycleInterface(self._phases, clock=clock, timer=timer)
+        self._liquidation_helper = liquidation_helper or LiquidationHelper()
 
     def set_phases(self, phases: Iterable) -> None:
         self._phases = list(phases)
@@ -52,5 +55,10 @@ class TradingEngineInterface:
         logger.debug("Trading cycle completed with timings: %s", result.timings)
         return result
 
+    async def liquidate_positions(self) -> LiquidationReport:
+        """Trigger emergency liquidation via the configured helper."""
 
-__all__ = ["TradingEngineInterface", "CycleContext"]
+        return await self._liquidation_helper.close_all_positions()
+
+
+__all__ = ["TradingEngineInterface", "CycleContext", "LiquidationReport"]

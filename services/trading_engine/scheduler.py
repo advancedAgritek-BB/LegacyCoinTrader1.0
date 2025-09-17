@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 
 from services.interface_layer.cycle import CycleExecutionResult
 
-from .interface import TradingEngineInterface
+from .interface import LiquidationReport, TradingEngineInterface
 from .redis_state import CycleState, RedisCycleStateStore
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,11 @@ class CycleScheduler:
 
     async def get_state(self) -> CycleState:
         return await self._state_store.load_state()
+
+    async def liquidate_positions(self) -> LiquidationReport:
+        """Delegate liquidation to the trading engine interface."""
+
+        return await self._interface.liquidate_positions()
 
     async def shutdown(self) -> None:
         try:

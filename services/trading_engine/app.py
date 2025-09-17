@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Dict
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 import redis.asyncio as redis
 
 from services.monitoring.config import get_monitoring_settings
@@ -18,7 +18,12 @@ from .config import Settings, get_settings
 from .interface import TradingEngineInterface
 from .redis_state import RedisCycleStateStore
 from .scheduler import CycleScheduler
-from .schemas import CycleStateResponse, RunCycleResponse, StartCycleRequest
+from .schemas import (
+    CycleStateResponse,
+    LiquidationResponse,
+    RunCycleResponse,
+    StartCycleRequest,
+)
 
 
 monitoring_settings = get_monitoring_settings().for_service(get_settings().app_name)
@@ -157,6 +162,20 @@ async def service_settings(settings: Settings = Depends(get_settings_dependency)
         "default_cycle_interval": settings.default_cycle_interval,
         "redis": settings.redis_dsn(),
     }
+
+
+@app.post("/positions/close-all", response_model=LiquidationResponse)
+async def close_all_positions(
+    response: Response,
+    scheduler: CycleScheduler = Depends(get_scheduler),
+) -> LiquidationResponse:
+    report = await scheduler.liquidate_positions()
+    payload = LiquidationResponse.from_report(report)
+    if payload.status == "partial":
+        response.status_code = status.HTTP_207_MULTI_STATUS
+    elif payload.status == "failed":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return payload
 
 
 __all__ = ["app"]
