@@ -1,13 +1,25 @@
 """Global test configuration and fixtures."""
-import pytest
 import asyncio
-from unittest.mock import Mock, MagicMock, AsyncMock, patch
-import pandas as pd
-import numpy as np
-from pathlib import Path
-import sys
 import os
-from typing import Callable, Iterable, Optional
+import sqlite3
+import sys
+import time
+from collections import defaultdict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, Optional
+
+import numpy as np
+import pandas as pd
+import pytest
+from unittest.mock import AsyncMock, Mock, patch
+
+# Ensure integration-heavy features remain disabled during tests to avoid
+# background threads or external service lookups.
+os.environ.setdefault("FRONTEND_SECURITY__RATE_LIMIT_ENABLED", "false")
+os.environ.setdefault("MONITORING_TRACING__ENABLED", "false")
+os.environ.setdefault("EXECUTION_SERVICE_SERVICE_TOKEN", "test-token")
+os.environ.setdefault("EXECUTION_SERVICE_SIGNING_KEY", "test-secret")
 
 # Add crypto_bot to path for proper imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -39,19 +51,164 @@ pytest_plugins = ["pytest_asyncio"]
 skip_net = pytest.mark.skip(reason="network dependencies not installed")
 
 # Standard mocks
+@dataclass
+class FakeOrder:
+    """Simplified order representation used by :func:`exchange_client`."""
+
+    id: str
+    symbol: str
+    side: str
+    amount: float
+    price: float
+    status: str = "open"
+
+
+class ExchangeStub:
+    """Minimal async exchange stub used across tests."""
+
+    def __init__(self) -> None:
+        self._orders: Dict[str, FakeOrder] = {}
+        self.options = {"defaultType": "spot"}
+        self.has = {"fetchOHLCV": True, "fetchTicker": True}
+
+    async def create_order(
+        self,
+        symbol: str,
+        order_type: str,
+        side: str,
+        amount: float,
+        price: float,
+    ) -> Dict[str, Any]:
+        order_id = f"order_{len(self._orders) + 1}"
+        order = FakeOrder(id=order_id, symbol=symbol, side=side, amount=amount, price=price)
+        self._orders[order_id] = order
+        return order.__dict__.copy()
+
+    async def cancel_order(self, order_id: str) -> bool:
+        order = self._orders.get(order_id)
+        if not order:
+            return False
+        order.status = "canceled"
+        return True
+
+    async def fetch_order(self, order_id: str) -> Dict[str, Any]:
+        order = self._orders.get(order_id)
+        if not order:
+            return {"id": order_id, "status": "closed"}
+        return order.__dict__.copy()
+
+    async def fetch_ticker(self, symbol: str) -> Dict[str, float]:
+        base_price = 100.0 if symbol.endswith("USDT") else 50.0
+        return {"last": base_price, "bid": base_price - 0.5, "ask": base_price + 0.5}
+
+    async def fetch_balance(self) -> Dict[str, Dict[str, float]]:
+        return {"BTC": {"free": 1.0, "total": 1.0}, "USDT": {"free": 5000.0, "total": 5000.0}}
+
+    async def fetch_positions(self) -> list:
+        return []
+
+
 @pytest.fixture
-def mock_exchange():
-    """Standard exchange mock for all tests."""
-    exchange = Mock()
-    exchange.create_order = AsyncMock(return_value={'id': 'test_order_123'})
-    exchange.cancel_order = AsyncMock(return_value=True)
-    exchange.fetch_order = AsyncMock(return_value={'status': 'closed'})
-    exchange.fetch_ticker = AsyncMock(return_value={'last': 100.0, 'bid': 99.5, 'ask': 100.5})
-    exchange.fetch_balance = AsyncMock(return_value={'BTC': {'free': 1.0, 'total': 1.0}})
-    exchange.fetch_positions = AsyncMock(return_value=[])
-    exchange.options = {'defaultType': 'spot'}
-    exchange.has = {'fetchOHLCV': True, 'fetchTicker': True}
-    return exchange
+def exchange_client() -> ExchangeStub:
+    """Return a deterministic exchange client stub for tests."""
+
+    return ExchangeStub()
+
+
+@pytest.fixture
+def mock_exchange(exchange_client: ExchangeStub):
+    """Preserve backward compatibility with the original ``mock_exchange`` fixture."""
+
+    return exchange_client
+
+
+class InMemoryRedis:
+    """A tiny async Redis clone used to isolate tests from external services."""
+
+    def __init__(self) -> None:
+        self._store: Dict[str, int] = defaultdict(int)
+        self._expiry: Dict[str, float] = {}
+
+    async def incr(self, key: str, amount: int = 1) -> int:
+        self._cleanup()
+        self._store[key] += amount
+        return self._store[key]
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        if key not in self._store:
+            return False
+        self._expiry[key] = time.monotonic() + max(0, seconds)
+        return True
+
+    async def ttl(self, key: str) -> int:
+        self._cleanup()
+        expiry = self._expiry.get(key)
+        if expiry is None:
+            return -1
+        remaining = int(expiry - time.monotonic())
+        return remaining if remaining >= 0 else -2
+
+    async def get(self, key: str) -> Optional[int]:
+        self._cleanup()
+        return self._store.get(key)
+
+    async def set(self, key: str, value: int, ex: Optional[int] = None) -> bool:
+        self._store[key] = int(value)
+        if ex is not None:
+            await self.expire(key, ex)
+        return True
+
+    async def delete(self, key: str) -> int:
+        existed = key in self._store
+        self._store.pop(key, None)
+        self._expiry.pop(key, None)
+        return int(existed)
+
+    async def ping(self) -> bool:  # pragma: no cover - parity with redis interface
+        return True
+
+    async def close(self) -> None:  # pragma: no cover - included for API parity
+        self._store.clear()
+        self._expiry.clear()
+
+    def _cleanup(self) -> None:
+        now = time.monotonic()
+        expired = [key for key, expiry in self._expiry.items() if expiry <= now]
+        for key in expired:
+            self._store.pop(key, None)
+            self._expiry.pop(key, None)
+
+
+@pytest.fixture
+def redis_client() -> InMemoryRedis:
+    """Provide a simple Redis clone for tests that expect an async client."""
+
+    return InMemoryRedis()
+
+
+@pytest.fixture
+def database_connection():
+    """Return an in-memory SQLite database initialised with a positions table."""
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    with conn:
+        conn.execute(
+            """
+            CREATE TABLE positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                current_price REAL NOT NULL,
+                entry_time TEXT NOT NULL
+            )
+            """
+        )
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 @pytest.fixture
 def mock_solana_client():
@@ -282,6 +439,7 @@ def fix_imports():
         'crypto_bot.utils.regime_pnl_tracker': Mock(),
         'crypto_bot.utils.market_analyzer': Mock(),
         'crypto_bot.strategy.grid_bot': Mock(),
+        'crypto_bot.strategy_router': Mock(),
         'crypto_bot.execution': Mock(),
         'crypto_bot.execution.cex_executor': Mock(),
         'crypto_bot.execution.solana_mempool': Mock(),
