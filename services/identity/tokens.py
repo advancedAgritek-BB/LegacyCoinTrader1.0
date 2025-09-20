@@ -12,7 +12,7 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from services.common.secrets import SecretRetrievalError, resolve_secret
+from services.common.secret_manager import SecretRetrievalError, resolve_secret
 
 from .config import IdentitySettings
 from .models import TenantModel

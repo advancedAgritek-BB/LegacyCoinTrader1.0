@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Iterable, Mapping, MutableMapping, Optional
+from typing import Any, Dict, Iterable, Mapping, MutableMapping, Optional
 
 import pandas as pd
 
@@ -523,7 +524,9 @@ async def discover_markets(context: Any) -> None:
             response: TokenDiscoveryResponse = await discovery.discover_tokens(request)
 
             # Get separate token lists
-            dex_tokens = list(response.dex_tokens or [])
+            raw_dex_tokens = list(response.dex_tokens or [])
+            # Format DEX tokens as CONTRACT_ADDRESS/USDC for geckoterminal compatibility
+            dex_tokens = [f"{token}/USDC" for token in raw_dex_tokens if token]
             raw_cex_tokens = list(response.cex_tokens or [])
             for raw_symbol in raw_cex_tokens:
                 normalised = _normalize_exchange_symbol(raw_symbol)
@@ -586,11 +589,11 @@ async def discover_markets(context: Any) -> None:
     # Keep exchange symbols separate from discovered tokens
     combined = _unique_symbols(exchange_symbols + static_symbols + dex_tokens + cex_tokens)
     context.metadata["exchange_symbol_candidates"] = exchange_symbols
-    context.metadata["discovered_dex_tokens"] = dex_tokens
+    context.metadata["discovered_dex_tokens"] = raw_dex_tokens
     context.metadata["discovered_cex_tokens"] = cex_tokens
     if cex_symbol_sources:
         context.metadata["cex_symbol_sources"] = dict(cex_symbol_sources)
-    context.metadata["dex_token_count"] = len(dex_tokens)
+    context.metadata["dex_token_count"] = len(raw_dex_tokens)
     context.metadata["cex_token_count"] = len(cex_tokens)
 
     # Separate DEX and CEX tokens based on their source and format
@@ -1092,7 +1095,7 @@ async def execute_signals(context: Any) -> None:
     risk_manager = getattr(context, "risk_manager", None)
     position_guard = getattr(context, "position_guard", None)
     balance = float(getattr(context, "balance", 0.0))
-    execution_mode = str(config.get("execution_mode", "dry_run"))
+    execution_mode = str(os.environ.get("EXECUTION_MODE", config.get("execution_mode", "dry_run")))
     dry_run = execution_mode.lower() != "live"
     
     # Initialize default balance for dry run mode (like legacy system)

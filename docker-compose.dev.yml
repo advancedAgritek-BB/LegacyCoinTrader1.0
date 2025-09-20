@@ -12,8 +12,11 @@ services:
       - HYBRID_FEATURE_FLAG_SOURCE=local-dev
       - PORTFOLIO_DATABASE_URL=postgresql+psycopg2://dev_user:dev_password@postgres:5432/legacy_coin_trader_dev
     volumes:
-      - ./services/api_gateway:/app
-      - /app/__pycache__  # Exclude cache
+      - ./services/api_gateway:/app/services/api_gateway
+      - ./crypto_bot:/app/crypto_bot
+      - ./libs:/app/libs
+      - ./microservice_architecture.yaml:/app/microservice_architecture.yaml
+      - /app/services/api_gateway/__pycache__  # Exclude cache
     command: [
       "uvicorn",
       "services.api_gateway.main:app",
@@ -45,9 +48,11 @@ services:
       - MARKET_DATA_LOG_LEVEL=DEBUG
       - MARKET_DATA_CACHE_ENABLED=false  # Disable caching for development
     volumes:
-      - ./services/market_data:/app
+      - ./services/market_data:/app/services/market_data
       - ./crypto_bot:/app/crypto_bot
-      - /app/__pycache__
+      - ./libs:/app/libs
+      - ./schema:/app/schema
+      - /app/services/market_data/__pycache__
 
   portfolio:
     environment:
@@ -55,45 +60,53 @@ services:
       - PORTFOLIO_PAPER_TRADING=true  # Force paper trading in development
       - PORTFOLIO_DATABASE_URL=postgresql+psycopg2://dev_user:dev_password@postgres:5432/legacy_coin_trader_dev
     volumes:
-      - ./services/portfolio:/app
+      - ./services/portfolio:/app/services/portfolio
       - ./crypto_bot:/app/crypto_bot
-      - /app/__pycache__
+      - ./libs:/app/libs
+      - /app/services/portfolio/__pycache__
 
   strategy-engine:
     environment:
       - STRATEGY_ENGINE_LOG_LEVEL=DEBUG
     volumes:
-      - ./services/strategy_engine:/app
+      - ./services/strategy_engine:/app/services/strategy_engine
       - ./crypto_bot:/app/crypto_bot
-      - /app/__pycache__
+      - ./libs:/app/libs
+      - ./schema:/app/schema
+      - /app/services/strategy_engine/__pycache__
 
   token-discovery:
     environment:
       - TOKEN_DISCOVERY_LOG_LEVEL=DEBUG
       - TOKEN_DISCOVERY_SCAN_INTERVAL=60  # Faster scanning for development
     volumes:
-      - ./services/token_discovery:/app
+      - ./services/token_discovery:/app/services/token_discovery
       - ./crypto_bot:/app/crypto_bot
-      - /app/__pycache__
+      - ./libs:/app/libs
+      - ./schema:/app/schema
+      - /app/services/token_discovery/__pycache__
 
   execution:
     environment:
       - EXECUTION_LOG_LEVEL=DEBUG
       - EXECUTION_DRY_RUN=true  # Force dry run in development
     volumes:
-      - ./services/execution:/app
+      - ./services/execution:/app/services/execution
       - ./crypto_bot:/app/crypto_bot
       - ./config:/app/config
-      - /app/__pycache__
+      - ./libs:/app/libs
+      - /app/services/execution/__pycache__
 
   monitoring:
     environment:
       - MONITORING_LOG_LEVEL=DEBUG
     volumes:
-      - ./services/monitoring:/app
+      - ./services/monitoring:/app/services/monitoring
       - ./crypto_bot:/app/crypto_bot
+      - ./libs:/app/libs
       - ./logs:/app/logs
-      - /app/__pycache__
+      - ./schema:/app/schema
+      - /app/services/monitoring/__pycache__
 
   frontend:
     environment:

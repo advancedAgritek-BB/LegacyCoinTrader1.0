@@ -278,6 +278,7 @@ def instrument_fastapi_app(
         compliance_settings=base_settings.compliance,
         default_tenant=base_settings.default_tenant,
         default_service_role=base_settings.service_role,
+        extra_label_names=["tenant", "service_role"],
     )
 
     app.add_middleware(
@@ -418,6 +419,7 @@ def instrument_flask_app(
         compliance_settings=base_settings.compliance,
         default_tenant=base_settings.default_tenant,
         default_service_role=base_settings.service_role,
+        extra_label_names=["tenant", "service_role"],
     )
     header_name = base_settings.correlation_header
 

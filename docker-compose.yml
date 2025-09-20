@@ -94,14 +94,14 @@ services:
     env_file: *default-env
     environment:
       <<: *hybrid-env
-      - GATEWAY_REDIS_HOST=redis
-      - GATEWAY_REDIS_PORT=6379
-      - LEGACY_SERVICE_BASE_URL=${LEGACY_SERVICE_BASE_URL:-http://legacy-monolith:8080}
-      - MODERN_SERVICE_BASE_URL=${MODERN_SERVICE_BASE_URL:-http://api-gateway:8000}
-      - HYBRID_FEATURE_FLAG_SOURCE=${HYBRID_FEATURE_FLAG_SOURCE:-config}
-      - PORTFOLIO_DATABASE_URL=postgresql+psycopg2://legacy_user:legacy_password@postgres:5432/legacy_coin_trader
-      - GATEWAY_REQUIRE_AUTH=0
-      - GATEWAY_SERVICE_TOKEN_FRONTEND=insecure-local-token-frontend
+      GATEWAY_REDIS_HOST: redis
+      GATEWAY_REDIS_PORT: 6379
+      LEGACY_SERVICE_BASE_URL: ${LEGACY_SERVICE_BASE_URL:-http://legacy-monolith:8080}
+      MODERN_SERVICE_BASE_URL: ${MODERN_SERVICE_BASE_URL:-http://api-gateway:8000}
+      HYBRID_FEATURE_FLAG_SOURCE: ${HYBRID_FEATURE_FLAG_SOURCE:-config}
+      PORTFOLIO_DATABASE_URL: postgresql+psycopg2://legacy_user:legacy_password@postgres:5432/legacy_coin_trader
+      GATEWAY_REQUIRE_AUTH: 0
+      GATEWAY_SERVICE_TOKEN_FRONTEND: insecure-local-token-frontend
     volumes:
       - ./microservice_architecture.yaml:/app/microservice_architecture.yaml
     healthcheck:
@@ -126,22 +126,22 @@ services:
     env_file: *default-env
     environment:
       <<: *hybrid-env
-      - TRADING_ENGINE_REDIS_HOST=redis
-      - TRADING_ENGINE_REDIS_PORT=6379
-      - TRADING_ENGINE_API_GATEWAY_HOST=api-gateway
-      - TRADING_ENGINE_API_GATEWAY_PORT=8000
-      - TRADING_ENGINE_LEGACY_BASE_URL=${TRADING_ENGINE_LEGACY_BASE_URL:-http://legacy-monolith:8080}
-      - PORTFOLIO_SERVICE_HOST=portfolio
-      - MARKET_DATA_SERVICE_HOST=market-data
-      - MARKET_DATA_SERVICE_PORT=8002
-      - STRATEGY_ENGINE_SERVICE_HOST=strategy-engine
-      - EXECUTION_SERVICE_HOST=execution
-      - EXECUTION_SERVICE_URL=http://execution:8006/api/v1/execution
-      - TOKEN_DISCOVERY_SERVICE_HOST=token-discovery
-      - TOKEN_DISCOVERY_SERVICE_URL=http://token-discovery:8005
-      - MONITORING_SERVICE_HOST=monitoring
-      - API_KEY=${API_KEY}
-      - API_SECRET=${API_SECRET}
+      TRADING_ENGINE_REDIS_HOST: redis
+      TRADING_ENGINE_REDIS_PORT: 6379
+      TRADING_ENGINE_API_GATEWAY_HOST: api-gateway
+      TRADING_ENGINE_API_GATEWAY_PORT: 8000
+      TRADING_ENGINE_LEGACY_BASE_URL: ${TRADING_ENGINE_LEGACY_BASE_URL:-http://legacy-monolith:8080}
+      PORTFOLIO_SERVICE_HOST: portfolio
+      MARKET_DATA_SERVICE_HOST: market-data
+      MARKET_DATA_SERVICE_PORT: 8002
+      STRATEGY_ENGINE_SERVICE_HOST: strategy-engine
+      EXECUTION_SERVICE_HOST: execution
+      EXECUTION_SERVICE_URL: http://execution:8006/api/v1/execution
+      TOKEN_DISCOVERY_SERVICE_HOST: token-discovery
+      TOKEN_DISCOVERY_SERVICE_URL: http://token-discovery:8005
+      MONITORING_SERVICE_HOST: monitoring
+      API_KEY: ${API_KEY}
+      API_SECRET: ${API_SECRET}
     volumes:
       - ./services/trading_engine:/app/services/trading_engine
       - ./services/interface_layer:/app/services/interface_layer
@@ -201,15 +201,15 @@ services:
     env_file: *default-env
     environment:
       <<: *hybrid-env
-      - PORTFOLIO_REDIS_HOST=redis
-      - PORTFOLIO_REDIS_PORT=6379
-      - PORTFOLIO_API_GATEWAY_HOST=api-gateway
-      - PORTFOLIO_API_GATEWAY_PORT=8000
-      - PORTFOLIO_LEGACY_BASE_URL=${PORTFOLIO_LEGACY_BASE_URL:-http://legacy-monolith:8080}
-      - PORTFOLIO_DATABASE_URL=postgresql+psycopg2://legacy_user:legacy_password@postgres:5432/legacy_coin_trader
-      - OTEL_TRACES_EXPORTER=none
-      - OTEL_METRICS_EXPORTER=none
-      - OTEL_LOGS_EXPORTER=none
+      PORTFOLIO_REDIS_HOST: redis
+      PORTFOLIO_REDIS_PORT: 6379
+      PORTFOLIO_API_GATEWAY_HOST: api-gateway
+      PORTFOLIO_API_GATEWAY_PORT: 8000
+      PORTFOLIO_LEGACY_BASE_URL: ${PORTFOLIO_LEGACY_BASE_URL:-http://legacy-monolith:8080}
+      PORTFOLIO_DATABASE_URL: postgresql+psycopg2://legacy_user:legacy_password@postgres:5432/legacy_coin_trader
+      OTEL_TRACES_EXPORTER: none
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
     volumes:
       - ./services/portfolio:/app/services/portfolio
       - ./crypto_bot:/app/crypto_bot
@@ -280,8 +280,8 @@ services:
       TOKEN_DISCOVERY_API_GATEWAY_HOST: api-gateway
       TOKEN_DISCOVERY_API_GATEWAY_PORT: 8000
       TOKEN_DISCOVERY_LEGACY_BASE_URL: ${TOKEN_DISCOVERY_LEGACY_BASE_URL:-http://legacy-monolith:8080}
-      - TOKEN_DISCOVERY_MARKET_DATA_HOST=market-data
-      - TOKEN_DISCOVERY_MARKET_DATA_PORT=8002
+      TOKEN_DISCOVERY_MARKET_DATA_HOST: market-data
+      TOKEN_DISCOVERY_MARKET_DATA_PORT: 8002
     volumes:
       - ./services/token_discovery:/app/services/token_discovery
       - ./crypto_bot:/app/crypto_bot
@@ -371,14 +371,14 @@ services:
     env_file: *default-env
     environment:
       <<: *hybrid-env
-      - FLASK_ENV=development
-      - API_GATEWAY_URL=http://api-gateway:8000
-      - LEGACY_BACKEND_URL=${LEGACY_BACKEND_URL:-http://legacy-monolith:8080}
-      - SESSION_SECRET_KEY=local-dev-secret
-      - REDIS_URL=redis://redis:6379
-      - OTEL_TRACES_EXPORTER=none
-      - OTEL_METRICS_EXPORTER=none
-      - OTEL_LOGS_EXPORTER=none
+      FLASK_ENV: development
+      API_GATEWAY_URL: http://api-gateway:8000
+      LEGACY_BACKEND_URL: ${LEGACY_BACKEND_URL:-http://legacy-monolith:8080}
+      SESSION_SECRET_KEY: local-dev-secret
+      REDIS_URL: redis://redis:6379
+      OTEL_TRACES_EXPORTER: none
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
     volumes:
       - ./frontend:/app/frontend
       - ./crypto_bot:/app/crypto_bot

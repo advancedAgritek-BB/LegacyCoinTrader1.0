@@ -340,7 +340,6 @@ def load_gateway_settings() -> GatewaySettings:
     service_routes = _load_service_routes(default_rate_limit)
     resolved_tokens = {name: config.service_token or "" for name, config in service_routes.items()}
 
-<<<<<<< Updated upstream
     identity_service_url = os.getenv("IDENTITY_SERVICE_URL", "http://identity:8006").rstrip("/")
     identity_jwks_url = os.getenv("IDENTITY_JWKS_URL") or f"{identity_service_url}/.well-known/jwks.json"
     identity_service_token = os.getenv("IDENTITY_SERVICE_TOKEN") or resolved_tokens.get("identity")

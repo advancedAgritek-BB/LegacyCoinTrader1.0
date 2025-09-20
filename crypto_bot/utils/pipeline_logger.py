@@ -53,6 +53,7 @@ class PipelineLogger:
         self.logger = setup_logger(name, log_file)
         self.metrics = PipelineMetrics()
         self.current_phase: Optional[str] = None
+        self.completed_phases: set[str] = set()  # Track completed phases to prevent duplicates
 
     def start_pipeline(self, cycle_id: Optional[int] = None, metadata: Optional[Dict[str, Any]] = None) -> str:
         """Start tracking a new pipeline run."""
@@ -61,6 +62,7 @@ class PipelineLogger:
         with correlation_id_context(correlation_id):
             self.metrics = PipelineMetrics()
             self.metrics.start_time = time.time()
+            self.completed_phases.clear()  # Reset completed phases for new pipeline
 
             pipeline_ctx = {
                 "cycle_id": cycle_id,
@@ -120,9 +122,14 @@ class PipelineLogger:
         if phase_name not in self.metrics.phase_start_times:
             return
 
+        # Prevent duplicate completion logging
+        if phase_name in self.completed_phases:
+            return
+
         start_time = self.metrics.phase_start_times[phase_name]
         duration = time.time() - start_time
         self.metrics.phase_durations[phase_name] = duration
+        self.completed_phases.add(phase_name)  # Mark phase as completed
 
         phase_summaries = {
             "discovery": f"Discovered {self.metrics.symbols_discovered} symbols",

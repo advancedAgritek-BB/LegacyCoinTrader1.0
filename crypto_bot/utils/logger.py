@@ -9,9 +9,7 @@ import weakref
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-<<<<<<< Updated upstream
 from typing import Iterator, Optional, Union, Dict, Any, Tuple
->>>>>>> Stashed changes
 
 # Default directory for all log files used across the project
 LOG_DIR = Path(__file__).resolve().parents[2] / "crypto_bot" / "logs"

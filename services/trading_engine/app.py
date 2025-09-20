@@ -13,6 +13,7 @@ import redis.asyncio as redis
 
 from libs.bootstrap import load_config
 
+from services.common.tenant import get_tenant_registry, get_tenant_context, TenantContextMiddleware
 from services.monitoring.config import get_monitoring_settings
 from services.monitoring.logging_compat import configure_logging
 from services.monitoring.instrumentation import instrument_fastapi_app
@@ -102,7 +103,7 @@ async def lifespan(app: FastAPI):
     )
 
     scheduler = CycleScheduler(
-        interface=interface,
+        interface_factory=lambda ctx: interface,
         state_store=state_store,
         default_interval=settings.default_cycle_interval,
     )
@@ -135,10 +136,15 @@ async def lifespan(app: FastAPI):
 
     if should_auto_start:
         try:
+            # Get default tenant context for auto-startup
+            registry = get_tenant_registry()
+            tenant_context = registry.get("alpha")  # Use alpha as default tenant
+
             persisted_state = await state_store.load_state()
             interval = persisted_state.interval_seconds or settings.default_cycle_interval
             immediate = persisted_state.last_run_completed_at is None
             await scheduler.start(
+                tenant_context,
                 interval_seconds=interval,
                 immediate=immediate,
                 metadata={
@@ -181,6 +187,10 @@ def get_settings_dependency(request: Request) -> Settings:
 
 
 app = FastAPI(title="Trading Engine", lifespan=lifespan)
+
+# Add tenant context middleware
+app.add_middleware(TenantContextMiddleware)
+
 instrument_fastapi_app(app, settings=monitoring_settings)
 
 
@@ -209,8 +219,10 @@ async def readiness(request: Request, settings: Settings = Depends(get_settings_
 async def start_cycle(
     payload: StartCycleRequest,
     scheduler: CycleScheduler = Depends(get_scheduler),
+    tenant_context = Depends(get_tenant_context),
 ) -> CycleStateResponse:
     state = await scheduler.start(
+        tenant_context,
         interval_seconds=payload.interval_seconds,
         immediate=payload.immediate,
         metadata=payload.metadata,
