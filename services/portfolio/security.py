@@ -11,7 +11,7 @@ DEFAULT_HASH_ITERATIONS = 210_000
 _SALT_BYTES = 16
 
 
-@dataclass(slots=True)
+@dataclass
 class HashedSecret:
     """Container for a salted and iterated PBKDF2 hash."""
 

@@ -1,0 +1,17 @@
+Flask
+flask-cors
+python-dotenv
+PyYAML
+requests
+uvicorn
+asgiref>=3.7.0,<4.0.0
+limits>=3.5.0,<4.0.0
+cryptography
+PyJWT>=2.8.0
+prometheus-client
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http
+redis
+gunicorn
+gevent

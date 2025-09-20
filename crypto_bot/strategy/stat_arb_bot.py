@@ -7,7 +7,7 @@ import pandas as pd
 
 from crypto_bot.utils import stats
 from crypto_bot.utils.indicator_cache import cache_series
-from crypto_bot.utils.logging import setup_strategy_logger
+from crypto_bot.utils.logging_utils import setup_strategy_logger
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 

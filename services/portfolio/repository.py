@@ -97,14 +97,20 @@ class PortfolioRepository:
     # ------------------------------------------------------------------
     # Position helpers
     # ------------------------------------------------------------------
-    def list_positions(self, include_closed: bool = False) -> List[PositionRead]:
-        with get_session(self.config) as sess:
+    def list_positions(self, include_closed: bool = False, session: Session | None = None) -> List[PositionRead]:
+        def _list(sess: Session) -> List[PositionRead]:
             stmt = select(PositionModel)
             if not include_closed:
                 stmt = stmt.where(PositionModel.is_open.is_(True))
             stmt = stmt.order_by(PositionModel.symbol)
             models = sess.scalars(stmt).all()
             return [self._model_to_position(model) for model in models]
+
+        if session is not None:
+            return _list(session)
+
+        with get_session(self.config) as sess:
+            return _list(sess)
 
     def upsert_position(self, position: PositionRead, session: Session) -> None:
         model = session.get(PositionModel, position.symbol)
@@ -220,7 +226,7 @@ class PortfolioRepository:
     def load_state(self) -> PortfolioState:
         with get_session(self.config) as sess:
             trades = self.list_trades(session=sess)
-            positions = self.list_positions(include_closed=False)
+            positions = self.list_positions(include_closed=False, session=sess)
             closed_stmt = select(PositionModel).where(PositionModel.is_open.is_(False))
             closed_positions = [
                 self._model_to_position(model)
@@ -267,11 +273,11 @@ class PortfolioRepository:
                 self.upsert_price(entry, session=sess)
                 seen_symbols.add(entry.symbol)
             if seen_symbols:
-                session.query(PriceCacheModel).filter(
+                sess.query(PriceCacheModel).filter(
                     ~PriceCacheModel.symbol.in_(seen_symbols)
                 ).delete(synchronize_session=False)
             else:
-                session.query(PriceCacheModel).delete()
+                sess.query(PriceCacheModel).delete()
 
             # Statistics
             self.update_statistics(state.statistics, session=sess)
@@ -284,8 +290,21 @@ class PortfolioRepository:
     # Conversion helpers
     # ------------------------------------------------------------------
     def _apply_trade(self, model: TradeModel, trade: TradeCreate) -> None:
-        for field, value in trade.model_dump().items():
-            setattr(model, field, value)
+        payload = trade.model_dump()
+        metadata = payload.pop("metadata", None)
+
+        model.symbol = payload["symbol"]
+        model.side = payload["side"]
+        model.amount = payload["amount"]
+        model.price = payload["price"]
+        model.timestamp = payload["timestamp"]
+        model.strategy = payload.get("strategy")
+        model.exchange = payload.get("exchange")
+        model.fees = payload["fees"]
+        model.status = payload["status"]
+        model.order_id = payload.get("order_id")
+        model.client_order_id = payload.get("client_order_id")
+        model.extra_metadata = dict(metadata or {})
 
     def _model_to_trade(self, model: TradeModel) -> TradeRead:
         return TradeRead(
@@ -301,16 +320,18 @@ class PortfolioRepository:
             status=model.status,
             order_id=model.order_id,
             client_order_id=model.client_order_id,
-            metadata=model.metadata or {},
+            metadata=dict(model.extra_metadata or {}),
             position_symbol=model.position_symbol,
         )
 
     def _apply_position(self, model: PositionModel, position: PositionRead) -> None:
         dump = position.model_dump(exclude={"trades"})
+        metadata = dump.pop("metadata", None)
         for field, value in dump.items():
             setattr(model, field, value)
         model.last_update = position.last_update
         model.entry_time = position.entry_time
+        model.extra_metadata = dict(metadata or {})
 
         # Synchronise trades relationship
         model.trades.clear()
@@ -337,7 +358,7 @@ class PortfolioRepository:
             stop_loss_price=model.stop_loss_price,
             take_profit_price=model.take_profit_price,
             trailing_stop_pct=model.trailing_stop_pct,
-            metadata=model.metadata or {},
+            metadata=dict(model.extra_metadata or {}),
             mark_price=model.mark_price,
             is_open=model.is_open,
             trades=trades,

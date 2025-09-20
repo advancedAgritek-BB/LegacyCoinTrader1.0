@@ -12,7 +12,7 @@ from redis.exceptions import RedisError
 LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(slots=True)
+@dataclass
 class RateLimitResult:
     allowed: bool
     remaining: int

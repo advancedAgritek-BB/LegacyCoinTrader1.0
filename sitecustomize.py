@@ -20,13 +20,24 @@ except Exception as exc:  # pragma: no cover - dependency is mandatory
         "or pyproject.toml."
     ) from exc
 
-# Remove pandas stub import since pandas is available and the stub causes DataFrame conversion issues
-# try:  # prefer real pandas
-#     import pandas  # type: ignore
-# except Exception:  # pragma: no cover - fallback stub
-#     try:
-#         from pandas_stub import *  # type: ignore
-#         import pandas_stub as _pd_stub  # type: ignore
-#         sys.modules.setdefault('pandas', _pd_stub)
-#     except Exception:
-#         pass
+# Ensure critical subpackages register with sys.modules before pytest applies import shims.
+try:  # pragma: no cover - best effort guard
+    import crypto_bot.regime  # noqa: F401
+except Exception:
+    pass
+
+# Load environment variables from project-level .env files early so every entry point sees them.
+try:  # pragma: no cover - optional dependency
+    from dotenv import load_dotenv  # type: ignore
+except Exception:  # pragma: no cover - tolerate missing dependency
+    load_dotenv = None
+
+if load_dotenv is not None:
+    from pathlib import Path
+
+    project_root = Path(__file__).resolve().parent
+    # Standard behaviour: load working-directory .env first, then project fallbacks without overriding.
+    load_dotenv(override=False)
+    for candidate in (project_root / ".env", project_root / "crypto_bot" / ".env"):
+        if candidate.exists():
+            load_dotenv(candidate, override=False)

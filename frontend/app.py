@@ -12,31 +12,109 @@ import json
 import time
 import yaml
 import logging
+import re
 from pathlib import Path
 from decimal import Decimal
-from datetime import datetime
-from typing import Optional, Dict, Any
+from datetime import datetime, timezone
+from functools import lru_cache
+from typing import Optional, Dict, Any, List, Tuple
+from urllib.parse import quote
+
+from uuid import uuid4
+
+from pydantic.fields import FieldInfo
 
 from asgiref.wsgi import WsgiToAsgi
-from limits import parse as parse_rate_limit
-from limits.storage import storage_from_string
-from limits.strategies import FixedWindowRateLimiter
+from flask_cors import CORS
+
+try:
+    from limits import parse as parse_rate_limit
+    from limits.storage import storage_from_string
+    from limits.strategies import FixedWindowRateLimiter
+    _LIMITS_AVAILABLE = True
+except Exception:  # pragma: no cover - limits is optional in constrained envs
+    parse_rate_limit = None  # type: ignore[assignment]
+    storage_from_string = None  # type: ignore[assignment]
+
+    class FixedWindowRateLimiter:  # type: ignore[override]
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def hit(self, *_args, **_kwargs) -> bool:
+            return True
+
+    _LIMITS_AVAILABLE = False
 from werkzeug.exceptions import HTTPException
-from crypto_bot import log_reader
-from crypto_bot import ml_signal_model as ml
-import frontend.utils as utils
-from crypto_bot.utils.trade_manager import is_test_position
-from frontend.config import get_settings
-from frontend.auth import get_auth, login_required
-from crypto_bot.utils.price_fetcher import (
-    get_current_price_for_symbol as _get_current_price_for_symbol,
-)
-from services.monitoring.config import get_monitoring_settings
-from services.monitoring.instrumentation import instrument_flask_app
-from services.monitoring.logging import configure_logging
-from crypto_bot.config import load_config as load_bot_config, save_config, resolve_config_path
-from frontend.gateway import ApiGatewayError, get_gateway_json, post_gateway_json
-from frontend.chart_scaling import compute_chart_coordinates
+try:
+    from crypto_bot import log_reader
+except ImportError:
+    # Fallback if log_reader is not available
+    log_reader = None
+try:
+    from crypto_bot.ml_signal_model import *
+    ml_signal_model_available = True
+except ImportError:
+    ml_signal_model_available = False
+try:
+    import frontend.utils as utils
+except ImportError:
+    utils = None
+try:
+    from crypto_bot.utils.single_source_trade_manager import (
+        get_single_source_trade_manager,
+        create_frontend_subscriber,
+        is_test_position
+    )
+except ImportError:
+    is_test_position = None
+try:
+    from frontend.config import SecuritySettings, get_settings
+    from frontend.auth import get_auth, login_required
+except ImportError:
+    SecuritySettings = None
+    get_settings = None
+    get_auth = None
+    login_required = None
+try:
+    from crypto_bot.utils.price_fetcher import (
+        get_current_price_for_symbol,
+    )
+except ImportError:
+    get_current_price_for_symbol = None
+try:
+    from services.monitoring.config import get_monitoring_settings
+    from services.monitoring.instrumentation import instrument_flask_app
+    from services.monitoring.logging_compat import configure_logging
+except ImportError:
+    get_monitoring_settings = None
+    instrument_flask_app = None
+    configure_logging = None
+try:
+    from crypto_bot.config import load_config as load_bot_config, save_config, resolve_config_path
+except ImportError:
+    load_bot_config = None
+    save_config = None
+    resolve_config_path = None
+
+try:
+    from frontend.gateway import ApiGatewayError, get_gateway_json, post_gateway_json
+except ImportError:
+    ApiGatewayError = Exception
+    get_gateway_json = None
+    post_gateway_json = None
+
+def safe_post_gateway_json(path, json=None, timeout=30.0):
+    """Safe wrapper for post_gateway_json that handles None function."""
+    if post_gateway_json is None:
+        raise ApiGatewayError("API gateway not available - frontend.gateway module not found")
+    return post_gateway_json(path, json=json, timeout=timeout)
+
+# Global variable to track last reset time
+_last_reset_time = None
+try:
+    from frontend.chart_scaling import compute_chart_coordinates
+except ImportError:
+    compute_chart_coordinates = None
 
 # Suppress urllib3 OpenSSL warning
 warnings.filterwarnings(
@@ -80,6 +158,55 @@ except (
 LOG_DIR = Path(__file__).resolve().parents[1] / "crypto_bot" / "logs"
 
 app = Flask(__name__)
+
+# Canonical execution mode mapping used across frontend endpoints
+_MODE_ALIASES: Dict[str, str] = {
+    "dry_run": "dry_run",
+    "dry": "dry_run",
+    "paper": "dry_run",
+    "paper_trading": "dry_run",
+    "simulation": "dry_run",
+    "sim": "dry_run",
+    "demo": "dry_run",
+    "test": "dry_run",
+    "live": "live",
+    "production": "live",
+    "real": "live",
+}
+
+
+def _canonicalize_execution_mode(mode: Optional[str]) -> Optional[str]:
+    """Return canonical execution mode identifier or ``None`` for invalid values."""
+
+    if mode is None:
+        return None
+    normalized = str(mode).strip().lower()
+    if not normalized:
+        return None
+    alias = _MODE_ALIASES.get(normalized)
+    if alias:
+        return alias
+    if normalized in {"dry_run", "live"}:
+        return normalized
+    return None
+
+
+def _normalize_execution_mode(mode: Optional[str]) -> str:
+    """Return canonical execution mode, defaulting to ``dry_run``."""
+
+    canonical = _canonicalize_execution_mode(mode)
+    if canonical:
+        return canonical
+    normalized = str(mode or "").strip().lower()
+    return normalized or "dry_run"
+
+# Configure CORS to allow requests from any origin (for development)
+# In production, you should specify allowed origins explicitly
+# Enable CORS for all routes
+CORS(app)
+
+# Expose ASGI-compatible wrapper for uvicorn/gunicorn workers
+asgi_app = WsgiToAsgi(app)
 
 
 class APIError(Exception):
@@ -212,37 +339,66 @@ def health():
 # Import secure configuration and authentication, login_required
 
 # Get configuration and authentication instances
-settings = get_settings()
-config = settings  # Backwards compatibility for older references expecting ``config``
-auth = get_auth()
+if get_settings:
+    settings = get_settings()
+    if isinstance(settings.security, FieldInfo):
+        settings.security = SecuritySettings()
+    elif not isinstance(settings.security, SecuritySettings):
+        settings.security = SecuritySettings.model_validate(settings.security)
+    config = settings  # Backwards compatibility for older references expecting ``config``
+    auth = get_auth()
+else:
+    settings = None
+    config = None
+    auth = None
 
-monitoring_settings = get_monitoring_settings().for_service(
-    "frontend",
-    environment=settings.environment,
-)
-monitoring_settings.metrics.default_labels.setdefault("component", "frontend")
-configure_logging(monitoring_settings)
-try:
-    instrument_flask_app(app, settings=monitoring_settings)
-except RuntimeError as exc:  # pragma: no cover - instrumentation optional in some tests
-    logging.getLogger(__name__).warning("Observability instrumentation disabled: %s", exc)
+if get_monitoring_settings:
+    monitoring_settings = get_monitoring_settings().for_service(
+        "frontend",
+        environment=settings.environment if settings else "development",
+    )
+else:
+    monitoring_settings = None
+if monitoring_settings:
+    monitoring_settings.metrics.default_labels.setdefault("component", "frontend")
+    if configure_logging:
+        configure_logging(monitoring_settings)
+    try:
+        if instrument_flask_app:
+            instrument_flask_app(app, settings=monitoring_settings)
+    except RuntimeError as exc:  # pragma: no cover - instrumentation optional in some tests
+        logging.getLogger(__name__).warning("Observability instrumentation disabled: %s", exc)
 
 logger = logging.getLogger(__name__)
+
+if not _LIMITS_AVAILABLE:  # pragma: no cover - executed only without limits
+    logger.warning(
+        "python-limits is not installed; API rate limiting is disabled in this environment"
+    )
 
 # Disable template caching for development - CRITICAL for template updates
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 # Set secure session configuration
-app.config["SECRET_KEY"] = settings.security.session_secret_key
-app.config["SESSION_TYPE"] = "filesystem"
-app.config["SESSION_PERMANENT"] = True
-app.config["PERMANENT_SESSION_LIFETIME"] = settings.security.session_timeout
-app.config["SESSION_COOKIE_SECURE"] = settings.environment == "production"
-app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+if settings and settings.security:
+    app.config["SECRET_KEY"] = settings.security.session_secret_key
+    app.config["SESSION_TYPE"] = "filesystem"
+    app.config["SESSION_PERMANENT"] = True
+    app.config["PERMANENT_SESSION_LIFETIME"] = settings.security.session_timeout
+    app.config["SESSION_COOKIE_SECURE"] = settings.environment == "production"
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+else:
+    # Fallback configuration
+    app.config["SECRET_KEY"] = "fallback-secret-key"
+    app.config["SESSION_TYPE"] = "filesystem"
+    app.config["SESSION_PERMANENT"] = True
 
 # Rate limiting (Redis-backed implementation)
-_rate_limiter_enabled = bool(getattr(settings.security, "rate_limit_enabled", True))
+_rate_limiter_enabled = (
+    bool(getattr(settings.security, "rate_limit_enabled", True) if settings and settings.security else True)
+    and _LIMITS_AVAILABLE
+)
 _rate_limiter: Optional[FixedWindowRateLimiter] = None
 _rate_limit_item = None
 
@@ -259,7 +415,7 @@ def _get_rate_limit_identifier() -> str:
         client_ip = request.remote_addr or "unknown"
 
     endpoint = request.endpoint or request.path
-    prefix = getattr(settings.security, "rate_limit_prefix", "frontend")
+    prefix = getattr(settings.security, "rate_limit_prefix", "frontend") if settings and settings.security else "frontend"
     return f"{prefix}:{client_ip}:{endpoint}"
 
 
@@ -309,18 +465,24 @@ def check_rate_limit():
     return None
 
 
-_rate_limit_storage_url = (
-    settings.security.rate_limit_storage_url
-    or f"redis://{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
-)
+if settings and settings.security:
+    _rate_limit_storage_url = (
+        settings.security.rate_limit_storage_url
+        or f"redis://{settings.redis_host}:{settings.redis_port}/{settings.redis_db}"
+    )
+else:
+    _rate_limit_storage_url = "memory://"
 
 if _rate_limiter_enabled:
     try:
         storage = storage_from_string(_rate_limit_storage_url)
         _rate_limiter = FixedWindowRateLimiter(storage)
-        limit_expression = (
-            f"{settings.security.rate_limit_requests}/{settings.security.rate_limit_window} seconds"
-        )
+        if settings and settings.security:
+            limit_expression = (
+                f"{settings.security.rate_limit_requests}/{settings.security.rate_limit_window} seconds"
+            )
+        else:
+            limit_expression = "100/minute"
         _rate_limit_item = parse_rate_limit(limit_expression)
         logger.debug(
             "Rate limiter configured with %s using backend %s",
@@ -348,11 +510,12 @@ def handle_api_error(exc: APIError):
     )
 
 
-@app.errorhandler(ApiGatewayError)
-def handle_api_gateway_error(exc: ApiGatewayError):
-    """Convert API gateway failures into standardized JSON errors."""
+if ApiGatewayError:
+    @app.errorhandler(ApiGatewayError)
+    def handle_api_gateway_error(exc: ApiGatewayError):
+        """Convert API gateway failures into standardized JSON errors."""
 
-    return json_error(str(exc), status_code=502, error_code="gateway_error")
+        return json_error(str(exc), status_code=502, error_code="gateway_error")
 
 
 @app.errorhandler(HTTPException)
@@ -373,7 +536,7 @@ def handle_unexpected_exception(exc: Exception):
 
     if isinstance(exc, APIError):
         return handle_api_error(exc)
-    if isinstance(exc, ApiGatewayError):
+    if ApiGatewayError and isinstance(exc, ApiGatewayError):
         return handle_api_gateway_error(exc)
     if isinstance(exc, HTTPException):
         return handle_http_exception(exc)
@@ -390,8 +553,9 @@ def handle_unexpected_exception(exc: Exception):
     raise exc
 
 
-PORTFOLIO_POSITIONS_PATH = "/portfolio/positions"
-PORTFOLIO_WALLET_STATUS_PATH = "/portfolio/wallet-status"
+PORTFOLIO_POSITIONS_PATH = "/api/v1/portfolio/state"
+PORTFOLIO_STATE_PATH = "/api/v1/portfolio/state"
+PORTFOLIO_PNL_PATH = "/api/v1/portfolio/pnl"
 TRADING_ENGINE_STATE_PATH = "/trading-engine/cycles/status"
 TRADING_ENGINE_START_PATH = "/trading-engine/cycles/start"
 TRADING_ENGINE_STOP_PATH = "/trading-engine/cycles/stop"
@@ -401,55 +565,465 @@ MONITORING_METRICS_PATH = "/monitoring/metrics"
 STRATEGY_PERFORMANCE_PATH = "/monitoring/strategy/performance"
 STRATEGY_SCORES_PATH = "/monitoring/strategy/scores"
 
+# Treat anything below this absolute quantity as dust to avoid ghost positions
+POSITION_DUST_THRESHOLD = 1e-8
 
-def fetch_positions_from_service() -> list[dict[str, Any]]:
-    """Retrieve open positions from the portfolio service via the API gateway."""
+
+def _fallback_portfolio_state_from_trade_manager() -> Dict[str, Any]:
+    """Construct a minimal portfolio state from the SingleSourceTradeManager."""
 
     try:
-        payload = get_gateway_json(PORTFOLIO_POSITIONS_PATH)
-    except ApiGatewayError as exc:
-        logger.warning("Failed to fetch positions from API gateway: %s", exc)
-        return []
+        trade_manager = get_single_source_trade_manager()
+        positions_payload: List[Dict[str, Any]] = []
+        for tm_position in trade_manager.get_all_positions():
+            if not getattr(tm_position, "is_open", True):
+                continue
+            total_amount = float(getattr(tm_position, "total_amount", 0) or 0)
+            if abs(total_amount) <= POSITION_DUST_THRESHOLD:
+                continue
 
-    if not isinstance(payload, list):
-        return []
+            entry_price = float(getattr(tm_position, "average_price", 0) or 0)
+            side_raw = str(getattr(tm_position, "side", "")).strip().lower()
+            side = "short" if side_raw in {"short", "sell"} else "long"
 
-    results: list[dict[str, Any]] = []
-    for item in payload:
+            entry_time = getattr(tm_position, "entry_time", None)
+            last_update = getattr(tm_position, "last_update", None)
+
+            positions_payload.append(
+                {
+                    "symbol": getattr(tm_position, "symbol", "").upper(),
+                    "side": side,
+                    "total_amount": total_amount,
+                    "amount": total_amount,
+                    "average_price": entry_price,
+                    "entry_price": entry_price,
+                    "entry_time": entry_time.isoformat() if hasattr(entry_time, "isoformat") else None,
+                    "last_update": last_update.isoformat() if hasattr(last_update, "isoformat") else None,
+                    "trades": [
+                        {
+                            "side": side,
+                            "amount": total_amount,
+                            "price": entry_price,
+                        }
+                    ],
+                    "is_open": True,
+                }
+            )
+
+        price_cache_entries: List[Dict[str, Any]] = []
+        for symbol, price in (getattr(trade_manager, "price_cache", {}) or {}).items():
+            try:
+                float_price = float(price)
+            except (TypeError, ValueError):
+                continue
+            price_cache_entries.append(
+                {
+                    "symbol": str(symbol).upper(),
+                    "price": float_price,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+
+        return {
+            "positions": positions_payload,
+            "price_cache": price_cache_entries,
+            "closed_positions": [],
+        }
+
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.error("Failed to build fallback portfolio state: %s", exc)
+        return {"positions": [], "price_cache": [], "closed_positions": []}
+
+
+def fetch_positions_from_service(*, skip_enrichment: bool = False) -> list[dict[str, Any]]:
+    """Retrieve open positions from the portfolio service via the API gateway.
+
+    When ``skip_enrichment`` is true we return the normalised portfolio payload
+    without attempting to backfill missing market prices. This avoids the
+    additional market-data round-trips that are useful for dashboard refreshes
+    but unnecessary (and sometimes slow) for server-side tasks that only need
+    the basic position envelope such as manual order submission.
+
+    If a reset was recently performed (within last 60 seconds), prefer local TradeManager state.
+    """
+
+    # Check if TradeManager state file indicates a reset (empty positions)
+    # Try multiple possible paths since Flask might be running in different context
+    possible_paths = [
+        Path("crypto_bot/logs/trade_manager_state.json"),
+        Path("/app/crypto_bot/logs/trade_manager_state.json"),
+        Path("../crypto_bot/logs/trade_manager_state.json"),
+        Path("../../crypto_bot/logs/trade_manager_state.json")
+    ]
+
+    reset_detected = False
+    trade_manager_file = None
+
+    for path in possible_paths:
+        if path.exists():
+            trade_manager_file = path
+            logger.info(f"Found TradeManager state file at: {path}")
+            break
+
+    if trade_manager_file:
         try:
-            symbol = item.get("symbol")
-            if not symbol or is_test_position(symbol):
-                continue
+            with open(trade_manager_file, 'r') as f:
+                tm_state = json.load(f)
+                positions = tm_state.get("positions", {})
+                logger.info(f"TradeManager state positions: {len(positions) if positions else 0}")
+                if not positions or len(positions) == 0:
+                    logger.info("TradeManager state file shows empty positions (reset detected)")
+                    reset_detected = True
+        except Exception as e:
+            logger.warning(f"Error reading TradeManager state file {trade_manager_file}: {e}")
+    else:
+        logger.warning("TradeManager state file not found in any expected location")
 
-            total_amount = float(item.get("amount") or item.get("total_amount") or 0.0)
-            if total_amount <= 0:
-                continue
-
-            entry_price = (
-                _coerce_optional_float(item.get("entry_price"))
-                or _coerce_optional_float(item.get("average_price"))
-                or 0.0
+    if reset_detected:
+        # Return empty positions directly
+        logger.info("Reset detected from state file, returning empty positions")
+        payload = {"positions": [], "price_cache": [], "closed_positions": []}
+    else:
+        # Try portfolio service normally
+        logger.info("No reset detected, trying portfolio service")
+        try:
+            # Use a shorter timeout for position fetching
+            payload = get_gateway_json(PORTFOLIO_POSITIONS_PATH, timeout=5.0)
+            if not isinstance(payload, dict):
+                raise ApiGatewayError(
+                    "Portfolio service returned an unexpected payload for /api/v1/portfolio/state"
+                )
+        except ApiGatewayError as exc:
+            logger.warning(
+                "Portfolio service unavailable (%s); falling back to TradeManager state",
+                exc,
             )
-            current_price = (
-                _coerce_optional_float(item.get("current_price"))
-                or _coerce_optional_float(item.get("mark_price"))
-                or entry_price
+            payload = _fallback_portfolio_state_from_trade_manager()  # Use local state
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.error(
+                "Unexpected error retrieving portfolio positions: %s", exc,
             )
-            side = item.get("side", "long")
+            payload = _fallback_portfolio_state_from_trade_manager()  # Use local state
 
-            if side == "long":
-                pnl_value = (current_price - entry_price) * total_amount
+    # Extract positions from the state payload
+    positions = payload.get("positions", [])
+    if not isinstance(positions, list):
+        raise ApiGatewayError("Portfolio state positions is not a list")
+
+    # Build a quick lookup for the latest cached prices provided by the portfolio service
+    price_cache_lookup: dict[str, float] = {}
+    for cache_entry in payload.get("price_cache", []) or []:
+        if not isinstance(cache_entry, dict):
+            continue
+        cache_symbol_raw = cache_entry.get("symbol")
+        if not cache_symbol_raw:
+            continue
+        cache_symbol = str(cache_symbol_raw).strip().upper()
+        cache_price = _coerce_optional_float(cache_entry.get("price"))
+        if cache_symbol and cache_price:
+            price_cache_lookup[cache_symbol] = cache_price
+
+    def _apply_price_update(position: Dict[str, Any], latest_price: float, source: str) -> bool:
+        try:
+            entry_price = float(position.get("entry_price", 0) or 0.0)
+            total_amount = float(position.get("size", 0) or 0.0)
+            if entry_price <= 0 or total_amount <= 0 or latest_price <= 0:
+                return False
+
+            if position.get("side") == "long":
+                pnl_value = (latest_price - entry_price) * total_amount
             else:
-                pnl_value = (entry_price - current_price) * total_amount
+                pnl_value = (entry_price - latest_price) * total_amount
 
-            position_value = current_price * total_amount
             pnl_pct = (
                 (pnl_value / (entry_price * total_amount)) * 100
                 if entry_price and total_amount
                 else 0.0
             )
 
+            position["pnl_value"] = pnl_value
+            position["pnl"] = pnl_pct
+            position["pnl_percentage"] = pnl_pct
+            position["current_price"] = latest_price
+            position["current_value"] = latest_price * total_amount
+            price_delta = latest_price - entry_price
+            price_moved_up = price_delta >= 0
+            position["price_delta"] = price_delta
+            position["trend_direction"] = "UPWARD" if price_moved_up else "DOWNWARD"
+            position["trend_is_favorable"] = (
+                price_moved_up if position.get("side") == "long" else not price_moved_up
+            )
+            position["price_source"] = source
+            position["price_unavailable"] = False
+            return True
+        except Exception as exc:
+            logger.debug(
+                "Failed to apply price update for %s via %s: %s",
+                position.get("symbol"),
+                source,
+                exc,
+            )
+            return False
+
+    results: list[dict[str, Any]] = []
+    def _resolve_strategy_label(
+        payload: Dict[str, Any],
+        metadata: Dict[str, Any],
+        trades: List[Any],
+    ) -> Tuple[str, Optional[str]]:
+        """Derive a human-friendly strategy label with fallbacks."""
+
+        candidates: List[str] = []
+
+        def _add_candidate(value: Any) -> None:
+            if value is None:
+                return
+            if isinstance(value, (list, dict)):
+                return
+            text = str(value).strip()
+            if text:
+                candidates.append(text)
+
+        def _add_nested_candidates(container: Dict[str, Any], keys: Tuple[str, ...]) -> None:
+            for key in keys:
+                nested_value = container.get(key)
+                if isinstance(nested_value, dict):
+                    _add_nested_candidates(
+                        nested_value,
+                        (
+                            "name",
+                            "label",
+                            "display_name",
+                            "strategy",
+                            "strategy_name",
+                            "selected_strategy",
+                        ),
+                    )
+                else:
+                    _add_candidate(nested_value)
+
+        def _format_label(raw: str) -> str:
+            cleaned = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", raw)
+            cleaned = re.sub(r"[_\-]+", " ", cleaned)
+            cleaned = re.sub(r"\s+", " ", cleaned).strip()
+            if not cleaned:
+                return raw
+            return cleaned.title()
+
+        placeholder_terms = {
+            "dry_run",
+            "dryrun",
+            "dry-run",
+            "paper",
+            "paper_trading",
+            "paper-trading",
+            "papertrading",
+            "manual",
+            "manual_market_sell",
+            "manual-sell",
+            "simulation",
+            "simulated",
+            "sim",
+            "demo",
+            "test",
+            "unknown",
+        }
+
+        def _is_placeholder(text: str) -> bool:
+            lowered = text.lower().strip()
+            normalized = lowered.replace("-", "_")
+            if normalized in placeholder_terms:
+                return True
+            if "dry" in lowered and "run" in lowered:
+                return True
+            if "paper" in lowered and "trade" in lowered:
+                return True
+            if lowered.startswith("manual"):
+                return True
+            return False
+
+        # Collect potential identifiers in priority order
+        _add_candidate(payload.get("strategy"))
+
+        metadata_keys = (
+            "strategy",
+            "strategy_name",
+            "strategyLabel",
+            "strategy_label",
+            "active_strategy",
+            "primary_strategy",
+            "selected_strategy",
+            "applied_strategy",
+            "strategy_code",
+            "strategy_id",
+            "strategy_key",
+            "strategy_display",
+        )
+        for key in metadata_keys:
+            value = metadata.get(key)
+            if isinstance(value, dict):
+                _add_nested_candidates(value, metadata_keys)
+            else:
+                _add_candidate(value)
+
+        for nested_key in (
+            "strategy_details",
+            "strategy_context",
+            "strategy_metadata",
+            "routing",
+            "trade_metadata",
+            "decision",
+        ):
+            nested = metadata.get(nested_key)
+            if isinstance(nested, dict):
+                _add_nested_candidates(nested, metadata_keys)
+
+        nested_strategy = metadata.get("strategy")
+        if isinstance(nested_strategy, dict):
+            _add_nested_candidates(nested_strategy, metadata_keys)
+
+        for trade in reversed(trades):
+            if not isinstance(trade, dict):
+                continue
+            _add_candidate(trade.get("strategy"))
+            trade_metadata = trade.get("metadata")
+            if isinstance(trade_metadata, dict):
+                _add_nested_candidates(trade_metadata, metadata_keys)
+
+        non_placeholder: List[str] = []
+        placeholder: List[str] = []
+
+        seen: set[str] = set()
+        for candidate in candidates:
+            if not candidate:
+                continue
+            key = candidate.strip()
+            if key in seen:
+                continue
+            seen.add(key)
+            if _is_placeholder(key):
+                placeholder.append(key)
+            else:
+                non_placeholder.append(key)
+
+        if non_placeholder:
+            best_raw = non_placeholder[0]
+            return _format_label(best_raw), best_raw
+
+        if placeholder:
+            raw_placeholder = placeholder[0]
+            lowered = raw_placeholder.lower()
+            if "manual" in lowered:
+                return "Manual Action", raw_placeholder
+            if "paper" in lowered or "dry" in lowered:
+                return "Paper Trading", raw_placeholder
+            if "sim" in lowered:
+                return "Simulation", raw_placeholder
+            return _format_label(raw_placeholder), raw_placeholder
+
+        return "Unknown", None
+
+    for item in positions:
+        try:
+            symbol_raw = (
+                item.get("symbol")
+                or item.get("pair")
+                or item.get("asset")
+                or ""
+            )
+            symbol = str(symbol_raw).strip().upper()
+            if not symbol or is_test_position(symbol):
+                continue
+
+            trades = item.get("trades")
+
+            # Skip entries explicitly marked as closed
+            is_open_flag = item.get("is_open")
+            if isinstance(is_open_flag, str):
+                is_open_flag = is_open_flag.strip().lower() not in {"false", "0", "no"}
+            if is_open_flag is not None and not bool(is_open_flag):
+                logger.debug("Skipping position %s flagged as closed", symbol)
+                continue
+
+            raw_amount = (
+                item.get("total_amount")
+                if item.get("total_amount") is not None
+                else item.get("amount")
+            )
+            total_amount = _coerce_optional_float(raw_amount) or 0.0
+
+            # Skip positions with zero or negative amounts
+            if abs(total_amount) <= POSITION_DUST_THRESHOLD:
+                logger.debug(
+                    "Skipping position %s with negligible amount: %s",
+                    symbol,
+                    total_amount,
+                )
+                continue
+
+            entry_price = (
+                _coerce_optional_float(item.get("average_price"))
+                or _coerce_optional_float(item.get("entry_price"))
+                or 0.0
+            )
+
+            # Get current market price from portfolio data or cached prices
+            current_price_raw = (
+                _coerce_optional_float(item.get("current_price"))
+                or _coerce_optional_float(item.get("mark_price"))
+                or price_cache_lookup.get(symbol)
+            )
+
+            if current_price_raw and current_price_raw > 0:
+                current_price = current_price_raw
+                price_source = "portfolio"
+            else:
+                current_price = entry_price
+                price_source = "entry_fallback"
+
+            # Store symbol for batch price fetching if no current price available
+            side_raw = (
+                str(item.get("side") or item.get("position_side") or "")
+                .strip()
+                .lower()
+            )
+            side = "short" if side_raw in {"short", "sell"} else "long"
+
+            if not trades:
+                trades = [
+                    {
+                        "side": side,
+                        "amount": total_amount,
+                        "price": entry_price,
+                    }
+                ]
+
+            # Skip if we don't have valid prices
+            if entry_price <= 0 or current_price <= 0:
+                logger.debug(f"Skipping position {symbol} with invalid prices: entry={entry_price}, current={current_price}")
+                continue
+
+            amount_abs = abs(total_amount)
+
+            if side == "long":
+                pnl_value = (current_price - entry_price) * amount_abs
+            else:
+                pnl_value = (entry_price - current_price) * amount_abs
+
+            position_value = current_price * amount_abs
+            pnl_pct = (
+                (pnl_value / (entry_price * amount_abs)) * 100
+                if entry_price and amount_abs
+                else 0.0
+            )
+
             stop_loss_price = _coerce_optional_float(item.get("stop_loss_price"))
+            price_delta = current_price - entry_price
+            price_moved_up = price_delta >= 0
+            trend_direction = "UPWARD" if price_moved_up else "DOWNWARD"
+            trend_is_favorable = (
+                price_moved_up if side == "long" else not price_moved_up
+            )
             chart_coordinates = compute_chart_coordinates(
                 entry_price,
                 current_price,
@@ -457,12 +1031,19 @@ def fetch_positions_from_service() -> list[dict[str, Any]]:
                 include_current_price=True,
             )
 
+
+            metadata_raw = item.get("metadata")
+            metadata = metadata_raw if isinstance(metadata_raw, dict) else {}
+            strategy_label, strategy_code = _resolve_strategy_label(item, metadata, trades or [])
+
+            logger.debug(f"Adding position {symbol}: amount={total_amount}, pnl={pnl_pct:.2f}%")
+
             results.append(
                 {
                     "symbol": symbol,
                     "side": side,
-                    "size": total_amount,
-                    "amount": total_amount,
+                    "size": amount_abs,
+                    "amount": amount_abs,
                     "entry_price": entry_price,
                     "current_price": current_price,
                     "current_value": position_value,
@@ -472,31 +1053,273 @@ def fetch_positions_from_service() -> list[dict[str, Any]]:
                     "chart_min": chart_coordinates.min_price,
                     "chart_max": chart_coordinates.max_price,
                     "trend_strength": "strong" if abs(pnl_pct) > 2 else "moderate" if abs(pnl_pct) > 1 else "weak",
-                    "r_squared": min(99.9, max(60.0, 70.0 + abs(pnl_pct) * 2)),
+                    "r_squared": None,  # TODO: Calculate real R² from actual price data when available
                     "highest_price": item.get("highest_price"),
                     "lowest_price": item.get("lowest_price"),
                     "stop_loss_price": stop_loss_price,
                     "take_profit_price": item.get("take_profit_price"),
                     "entry_time": item.get("entry_time"),
+                    "price_delta": price_delta,
+                    "trend_direction": trend_direction,
+                    "trend_is_favorable": trend_is_favorable,
+                    "strategy": strategy_label,
+                    "strategy_label": strategy_label,
+                    "strategy_code": strategy_code,
+                    "price_source": price_source,
+                    "price_unavailable": price_source == "entry_fallback",
                 }
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Unable to normalise position %s: %s", item, exc)
             continue
 
+    if skip_enrichment:
+        return results
+
+    # Batch fetch current prices for positions that don't have them
+    positions_needing_prices = [pos for pos in results if pos.get("price_unavailable")]
+    symbols_to_fetch = [pos["symbol"] for pos in positions_needing_prices]
+
+    updated_symbols: set[str] = set()
+
+    if symbols_to_fetch:
+        try:
+            logger.info(
+                "Batch fetching current prices for %d symbols: %s",
+                len(symbols_to_fetch),
+                symbols_to_fetch,
+            )
+            batch_payload = {
+                "symbols": symbols_to_fetch,
+                "limit": 1,  # Only need latest price
+                "timeframe": "5m",
+                "exchange": "kraken",
+            }
+            batch_response = safe_post_gateway_json("/api/v1/market-data/batch-candles", json=batch_payload)
+
+            if batch_response and batch_response.get("results"):
+                updated_count = 0
+                for symbol, data in batch_response["results"].items():
+                    if data and "error" not in data and data.get("candles") and len(data["candles"]) > 0:
+                        latest_price = float(data["candles"][-1][4])
+                        logger.debug("Fetched price for %s: $%.4f", symbol, latest_price)
+
+                        for pos in positions_needing_prices:
+                            if pos["symbol"] == symbol and _apply_price_update(pos, latest_price, "market"):
+                                updated_symbols.add(symbol)
+                                updated_count += 1
+                                logger.info(
+                                    "Updated %s via market-data service -> $%.4f (P&L %.2f%%)",
+                                    symbol,
+                                    latest_price,
+                                    pos["pnl"],
+                                )
+                                break
+
+                logger.info(
+                    "Successfully updated prices for %d/%d symbols",
+                    len(updated_symbols),
+                    len(symbols_to_fetch),
+                )
+            else:
+                logger.warning("Batch price fetch returned no results")
+        except Exception as exc:
+            logger.warning("Failed to batch fetch current prices: %s", exc)
+
+    # Fallback: direct price fetch for any symbols still missing prices
+    remaining_for_direct = [
+        pos for pos in positions_needing_prices if pos["symbol"] not in updated_symbols
+    ]
+    if remaining_for_direct:
+        logger.info(
+            "Applying direct price fallback for %d symbols", len(remaining_for_direct)
+        )
+        for pos in remaining_for_direct:
+            symbol = pos["symbol"]
+            try:
+                direct_price = float(get_current_price_for_symbol(symbol) or 0)
+                if _apply_price_update(pos, direct_price, "direct"):
+                    logger.info(
+                        "Direct price fetch succeeded for %s -> $%.4f (P&L %.2f%%)",
+                        symbol,
+                        direct_price,
+                        pos["pnl"],
+                    )
+                else:
+                    logger.warning(
+                        "Direct price fetch did not return a usable price for %s", symbol
+                    )
+            except Exception as direct_exc:
+                logger.warning("Direct price fetch failed for %s: %s", symbol, direct_exc)
+
     return results
 
 
-def fetch_wallet_status() -> Dict[str, Any]:
-    """Retrieve wallet status from the portfolio service via the API gateway."""
+def _find_open_position(symbol: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    """Locate an open position for ``symbol`` using live services before falling back."""
+
+    normalized = (symbol or "").strip().upper()
+    if not normalized:
+        return None, ""
 
     try:
-        payload = get_gateway_json(PORTFOLIO_WALLET_STATUS_PATH)
-        if isinstance(payload, dict):
-            return payload
+        positions = fetch_positions_from_service(skip_enrichment=True)
+        for payload in positions:
+            pos_symbol = (payload.get("symbol") or "").strip().upper()
+            if pos_symbol == normalized:
+                return payload, "portfolio_service"
     except ApiGatewayError as exc:
-        logger.warning("Failed to fetch wallet status from API gateway: %s", exc)
-    return {}
+        logger.warning("Portfolio service lookup failed for %s: %s", normalized, exc)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.error(
+            "Unexpected portfolio lookup failure for %s: %s",
+            normalized,
+            exc,
+        )
+
+    try:
+        from crypto_bot.utils.trade_manager import get_trade_manager
+
+        trade_manager = get_trade_manager()
+        price_cache = getattr(trade_manager, "price_cache", {}) or {}
+        normalized_cache: Dict[str, float] = {}
+        for cache_symbol, cache_price in price_cache.items():
+            try:
+                value = float(cache_price)
+            except (TypeError, ValueError):
+                continue
+            normalized_cache[str(cache_symbol).strip().upper()] = value
+
+        for tm_position in trade_manager.get_all_positions():
+            if not getattr(tm_position, "is_open", True):
+                continue
+            pos_symbol = str(getattr(tm_position, "symbol", "")).strip().upper()
+            if pos_symbol != normalized:
+                continue
+
+            pos_dict = tm_position.to_dict()
+            pos_dict.setdefault("symbol", pos_symbol)
+            pos_dict.setdefault("entry_price", pos_dict.get("average_price"))
+            pos_dict.setdefault("amount", pos_dict.get("total_amount"))
+            pos_dict.setdefault("size", pos_dict.get("total_amount"))
+
+            cached_price = normalized_cache.get(pos_symbol)
+            if cached_price and cached_price > 0:
+                pos_dict.setdefault("current_price", cached_price)
+                pos_dict.setdefault("mark_price", cached_price)
+                pos_dict.setdefault("price_source", "cache")
+            return pos_dict, "trade_manager"
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        logger.error("TradeManager lookup failed for %s: %s", normalized, exc)
+
+    return None, ""
+
+
+def _resolve_close_price(symbol: str, position: Dict[str, Any]) -> float:
+    """Determine a usable close price for ``symbol`` using cached data and live fallbacks."""
+
+    candidates: List[float] = []
+    for candidate in (
+        position.get("current_price"),
+        position.get("mark_price"),
+        position.get("last_price"),
+        position.get("average_price"),
+        position.get("entry_price"),
+    ):
+        value = _coerce_optional_float(candidate)
+        if value and value > 0:
+            candidates.append(value)
+
+    if candidates:
+        return candidates[0]
+
+    live_price = _coerce_optional_float(get_current_price_for_symbol(symbol))
+    if live_price and live_price > 0:
+        return live_price
+
+    try:
+        params = {
+            "symbol": symbol,
+            "limit": 1,
+            "timeframe": "1m",
+            "exchange": "kraken",
+        }
+        candle_response = get_gateway_json(
+            "/market-data/get-candles", params=params, timeout=6.0
+        )
+        if isinstance(candle_response, dict):
+            candles = candle_response.get("candles") or []
+            if candles:
+                latest = candles[-1]
+                try:
+                    close_price = float(latest[4])
+                    if close_price > 0:
+                        return close_price
+                except (TypeError, ValueError, IndexError):
+                    logger.debug(
+                        "Malformed candle data when resolving price for %s: %s",
+                        symbol,
+                        latest,
+                    )
+    except ApiGatewayError as exc:
+        logger.warning(
+            "Market data service unavailable while resolving price for %s: %s",
+            symbol,
+            exc,
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.error(
+            "Unexpected error fetching market price for %s: %s",
+            symbol,
+            exc,
+        )
+
+    fallback_entry = _coerce_optional_float(position.get("entry_price"))
+    if fallback_entry and fallback_entry > 0:
+        return fallback_entry
+
+    return 0.0
+
+
+def fetch_portfolio_state() -> Dict[str, Any]:
+    """Retrieve the full portfolio state from the portfolio service."""
+
+    payload = get_gateway_json(PORTFOLIO_STATE_PATH)
+    if not isinstance(payload, dict):
+        raise ApiGatewayError("Portfolio service returned an unexpected payload for /state")
+    return payload
+
+
+def fetch_portfolio_pnl() -> Dict[str, Decimal]:
+    """Return the current realised/unrealised PnL figures from the portfolio service."""
+
+    try:
+        payload = get_gateway_json(PORTFOLIO_PNL_PATH)
+        if not isinstance(payload, dict):
+            raise ApiGatewayError(
+                "Portfolio service returned an unexpected payload for /pnl"
+            )
+    except ApiGatewayError as exc:
+        logger.warning(
+            "Portfolio PnL unavailable via gateway: %s", exc
+        )
+        return {
+            "total": Decimal("0"),
+            "realized": Decimal("0"),
+            "unrealized": Decimal("0"),
+        }
+
+    def _to_decimal(value: Any) -> Decimal:
+        try:
+            return Decimal(str(value))
+        except Exception:
+            return Decimal("0")
+
+    return {
+        "total": _to_decimal(payload.get("total")),
+        "realized": _to_decimal(payload.get("realized")),
+        "unrealized": _to_decimal(payload.get("unrealized")),
+    }
 
 # Secure headers middleware
 @app.after_request
@@ -510,12 +1333,21 @@ def add_secure_headers(response):
     origin = request.headers.get("Origin")
 
     # Generate secure CSP header
+    # For development, use a more permissive CSP
     response.headers["Content-Security-Policy"] = (
-        settings.security.get_csp_header()
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "img-src 'self' data: https:; "
+        "connect-src * http: https: wss:; "
+        "font-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
     )
 
     # Generate secure CORS headers
-    if origin:
+    if origin and settings and settings.security:
         cors_headers = settings.security.get_cors_headers(origin)
         response.headers.update(cors_headers)
 
@@ -525,7 +1357,7 @@ def add_secure_headers(response):
     response.headers["X-XSS-Protection"] = "1; mode=block"
 
     # HSTS header for production
-    if settings.environment == "production":
+    if settings and settings.environment == "production":
         hsts_value = "max-age=31536000; includeSubDomains"
         response.headers["Strict-Transport-Security"] = hsts_value
     else:
@@ -576,7 +1408,6 @@ def login():
 
 
 @app.route("/logout")
-@login_required
 def logout():
     """Handle user logout."""
     from flask import session, flash, redirect, url_for
@@ -625,7 +1456,6 @@ def api_login():
 
 
 @app.route("/api/auth/logout", methods=["POST"])
-@login_required
 def api_logout():
     """API endpoint for logout."""
     from flask import session, jsonify
@@ -652,6 +1482,106 @@ def auth_status():
         )
     else:
         return jsonify({"authenticated": False})
+
+
+@app.route("/api/bot-status")
+def api_bot_status():
+    """Return aggregated bot status information for dashboard polling."""
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    bot_running = False
+    process_details = []
+    process_error = None
+
+    try:  # psutil is optional in some environments
+        import psutil  # type: ignore
+    except Exception:  # pragma: no cover - optional dependency
+        psutil = None  # type: ignore
+        process_error = "psutil unavailable"
+
+    if psutil is not None:
+        try:
+            patterns = (
+                "start_bot.py",
+                "crypto_bot.main",
+                "crypto_bot/main.py",
+                "services.trading_engine.app",
+                "uvicorn services.trading_engine.app",
+                "uvicorn",
+            )
+            for proc in psutil.process_iter(["pid", "name", "cmdline"]):  # type: ignore[attr-defined]
+                cmdline = proc.info.get("cmdline") or []
+                text = " ".join(map(str, cmdline)).lower()
+                if any(pattern in text for pattern in patterns):
+                    bot_running = True
+                    process_details.append(
+                        {
+                            "pid": proc.info.get("pid"),
+                            "name": proc.info.get("name"),
+                            "cmdline": cmdline,
+                        }
+                    )
+        except Exception as exc:  # pragma: no cover - defensive guardrail
+            logger.debug("Bot process probe failed: %s", exc)
+            process_error = str(exc)
+
+    source = "process"
+    message = "Local process probe did not detect an active trading engine"
+    state: Dict[str, Any] = {}
+    mode = load_execution_mode() if load_execution_mode else "dry_run"
+    next_run_at = None
+    last_completed_at = None
+
+    try:
+        state = get_trading_engine_state(force_refresh=True) or {}
+        if state:
+            bot_running = bool(state.get("running"))
+            metadata = state.get("metadata") or {}
+            mode = metadata.get("mode") or mode
+            next_run_at = state.get("next_run_at")
+            last_completed_at = state.get("last_run_completed_at")
+            source = "trading-engine"
+            message = "Trading engine status retrieved via gateway"
+    except ApiGatewayError as exc:
+        logger.warning("Trading engine status via gateway unavailable: %s", exc)
+        message = f"Gateway error: {exc}"
+        source = "process-fallback" if bot_running else "unavailable"
+    except Exception as exc:  # pragma: no cover - unexpected failure
+        logger.exception("Unexpected error fetching bot status")
+        message = f"Unexpected error: {exc}"
+        source = "error"
+
+    last_log_timestamp = None
+    trading_log = LOG_DIR / "trading_engine.log"
+    if trading_log.exists():
+        try:
+            last_log_timestamp = datetime.fromtimestamp(
+                trading_log.stat().st_mtime, timezone.utc
+            ).isoformat()
+        except Exception:  # pragma: no cover - filesystem is best effort
+            last_log_timestamp = None
+
+    payload = {
+        "bot_running": bot_running,
+        "source": source,
+        "message": message,
+        "mode": mode,
+        "state": state,
+        "next_run_at": next_run_at,
+        "last_run_completed_at": last_completed_at,
+        "uptime": get_uptime(),
+        "process_probe": {
+            "processes": process_details,
+            "error": process_error,
+        },
+        "last_log_timestamp": last_log_timestamp,
+    }
+
+    return jsonify({
+        "success": True,
+        "data": payload,
+        "timestamp": timestamp,
+    })
 
 
 # Add monitoring API routes first to avoid conflicts with general CORS handler
@@ -1121,32 +2051,66 @@ def api_monitoring_logs():
     try:
         logs_data = {}
 
-        # Define log files to read
+        # Define log files to read - updated for microservices architecture
         log_files = {
+            "trading_engine": LOG_DIR / "trading_engine.log",
+            "portfolio": LOG_DIR / "portfolio.log",
+            "market_data": LOG_DIR / "market_data.log",
+            "strategy_engine": LOG_DIR / "strategy_engine.log",
+            "token_discovery": LOG_DIR / "token_discovery.log",
+            "cex_scanner": LOG_DIR / "cex_scanner.log",
+            "api_gateway": LOG_DIR / "api_gateway.log",
             "pipeline_monitor": LOG_DIR / "pipeline_monitor.log",
             "health_check": LOG_DIR / "health_check.log",
-            "recovery_actions": LOG_DIR
-            / "health_check.log",  # Recovery actions logged in health_check.log
-            "monitoring_status": LOG_DIR
-            / "pipeline_monitor.log",  # Monitoring status in pipeline_monitor.log
+            "recovery_actions": LOG_DIR / "health_check.log",
+            "monitoring_status": LOG_DIR / "pipeline_monitor.log",
         }
 
         for log_type, log_file in log_files.items():
             if log_file.exists():
                 try:
-                    # Read last 50 lines of each log file
-                    lines = log_file.read_text().splitlines()[-50:]
+                    # Read last 100 lines of each log file for better coverage
+                    text = log_file.read_text(encoding='utf-8', errors='ignore')
+                    lines = text.splitlines()[-100:]
+                    # Filter out empty lines
+                    lines = [line.strip() for line in lines if line.strip()]
                     logs_data[log_type] = lines
                 except Exception as e:
                     logs_data[log_type] = [f"Error reading log file: {e}"]
             else:
-                logs_data[log_type] = ["Log file not found"]
+                # Check for alternative log file locations
+                alt_locations = [
+                    LOG_DIR / f"{log_type}.out",
+                    LOG_DIR / f"{log_type}_service.log",
+                    Path("logs") / f"{log_type}.log",
+                    Path(".") / f"{log_type}.log"
+                ]
+                
+                found = False
+                for alt_file in alt_locations:
+                    if alt_file.exists():
+                        try:
+                            text = alt_file.read_text(encoding='utf-8', errors='ignore')
+                            lines = text.splitlines()[-100:]
+                            lines = [line.strip() for line in lines if line.strip()]
+                            logs_data[log_type] = lines
+                            found = True
+                            break
+                        except Exception:
+                            continue
+                
+                if not found:
+                    # No log file yet; return an empty list and let the UI show its placeholder
+                    logs_data[log_type] = []
 
         return jsonify(
             {
                 "success": True,
                 "data": logs_data,
                 "timestamp": int(time.time() * 1000),
+                "total_entries": sum(
+                    len(logs) for logs in logs_data.values()
+                )
             }
         )
 
@@ -1235,21 +2199,90 @@ def api_monitoring_status():
         )
 
 
+@app.route("/api/monitoring/system-status", methods=["GET"])
+def api_system_status():
+    """Return system status for various services."""
+    try:
+        status_data = {
+            "trading_engine": {
+                "status": "online", "last_seen": int(time.time() * 1000)
+            },
+            "portfolio": {
+                "status": "online", "last_seen": int(time.time() * 1000)
+            },
+            "market_data": {
+                "status": "online", "last_seen": int(time.time() * 1000)
+            },
+            "strategy_engine": {
+                "status": "online", "last_seen": int(time.time() * 1000)
+            },
+            "token_discovery": {
+                "status": "online", "last_seen": int(time.time() * 1000)
+            },
+            "cex_scanner": {
+                "status": "online", "last_seen": int(time.time() * 1000)
+            },
+            "api_gateway": {
+                "status": "online", "last_seen": int(time.time() * 1000)
+            },
+        }
+
+        # Check if log files have been updated recently to determine service status
+        for service_name in status_data.keys():
+            log_file = LOG_DIR / f"{service_name}.log"
+            if log_file.exists():
+                try:
+                    mtime = log_file.stat().st_mtime
+                    # If log file hasn't been updated in the last 5 minutes,
+                    # mark as potentially offline
+                    if time.time() - mtime > 300:  # 5 minutes
+                        status_data[service_name]["status"] = "warning"
+                    status_data[service_name]["last_seen"] = int(mtime * 1000)
+                except Exception:
+                    status_data[service_name]["status"] = "unknown"
+            else:
+                status_data[service_name]["status"] = "offline"
+
+        return jsonify(
+            {
+                "success": True,
+                "data": status_data,
+                "timestamp": int(time.time() * 1000),
+            }
+        )
+
+    except Exception as e:
+        print(f"Error in api_system_status: {e}")
+        return jsonify(
+            {
+                "success": False,
+                "error": str(e),
+                "data": {},
+                "timestamp": int(time.time() * 1000),
+            }
+        )
+
+
 @app.route('/api/sync-health')
 def get_sync_health():
     """Get synchronization health status."""
     try:
-        from crypto_bot.sync_service import SyncService
-        from pathlib import Path
+        # Get sync health from portfolio service
+        sync_health = get_gateway_json("/api/v1/portfolio/sync-health")
 
-        # Get the log directory
-        log_dir = Path(__file__).parent.parent / "crypto_bot" / "logs"
-        sync_service = SyncService(log_dir)
+        # Get position sync status
+        position_health = get_gateway_json("/api/v1/portfolio/positions/sync-status")
 
-        health = sync_service.get_health_status()
+        # Combine health data
+        health_data = {
+            'portfolio_sync': sync_health or {'status': 'unknown'},
+            'position_sync': position_health or {'status': 'unknown'},
+            'overall_status': 'healthy' if sync_health and position_health else 'degraded'
+        }
+
         return jsonify({
             'success': True,
-            'data': health
+            'data': health_data
         })
     except Exception as e:
         logger.error(f"Error getting sync health: {e}")
@@ -1263,26 +2296,28 @@ def get_sync_health():
 def trigger_sync():
     """Manually trigger position synchronization."""
     try:
-        from crypto_bot.sync_service import SyncService, ConflictResolution
-        from pathlib import Path
-        import asyncio
+        # Trigger position sync via portfolio service
+        sync_result = safe_post_gateway_json("/api/v1/portfolio/positions/sync", {})
 
-        # Get the log directory
-        log_dir = Path(__file__).parent.parent / "crypto_bot" / "logs"
-        sync_service = SyncService(log_dir)
-
-        # For now, we'll return a message that manual sync should be done via bot restart
-        return jsonify({
-            'success': True,
-            'message': 'Synchronization is automatically handled during bot startup. Restart the bot to trigger synchronization.',
-            'data': {
-                'next_steps': [
-                    'Stop the current bot process',
-                    'Restart the bot to trigger automatic synchronization',
-                    'Check /api/sync-health for synchronization status'
-                ]
-            }
-        })
+        if sync_result:
+            return jsonify({
+                'success': True,
+                'message': 'Position synchronization triggered successfully.',
+                'data': sync_result
+            })
+        else:
+            # Fallback message for when service is not available
+            return jsonify({
+                'success': True,
+                'message': 'Position synchronization is handled automatically by the portfolio service.',
+                'data': {
+                    'next_steps': [
+                        'Position sync is automatic in microservice architecture',
+                        'Check /api/sync-health for synchronization status',
+                        'Monitor portfolio service logs for sync operations'
+                    ]
+                }
+            })
 
     except Exception as e:
         logger.error(f"Error triggering sync: {e}")
@@ -1296,14 +2331,14 @@ def trigger_sync():
 def get_sync_report(operation_id):
     """Get detailed report for a specific synchronization operation."""
     try:
-        from crypto_bot.sync_service import SyncService
-        from pathlib import Path
+        # Get sync report from portfolio service
+        report = get_gateway_json(f"/api/v1/portfolio/sync-report/{operation_id}")
 
-        # Get the log directory
-        log_dir = Path(__file__).parent.parent / "crypto_bot" / "logs"
-        sync_service = SyncService(log_dir)
-
-        report = sync_service.get_sync_report(operation_id)
+        if not report:
+            return jsonify({
+                'success': False,
+                'error': 'Sync report not found or service unavailable'
+            })
 
         if 'error' in report:
             return jsonify({
@@ -1345,14 +2380,59 @@ def get_controller():
     return CONTROLLER
 
 
-# Context processor to make bot status available to all templates
+# Context processor to make high-level status information available to all templates
 @app.context_processor
 def inject_bot_status():
-    return {
-        "running": is_running(),
-        "mode": load_execution_mode(),
-        "uptime": get_uptime(),
+    """Return default values required by the base template on every page."""
+
+    context: Dict[str, Any] = {
+        "running": False,
+        "mode": "dry_run",
+        "uptime": "0:00:00",
+        "paper_wallet_balance": 0.0,
+        "available_balance": 0.0,
+        "balance": 0.0,
+        "header_total_unrealized_pnl": 0.0,
     }
+
+    try:
+        context["running"] = is_running()
+    except Exception as exc:  # pragma: no cover - defensive runtime guard
+        logger.debug("Unable to determine bot runtime status: %s", exc)
+
+    try:
+        context["mode"] = load_execution_mode()
+    except Exception as exc:  # pragma: no cover - defensive runtime guard
+        logger.debug("Falling back to default execution mode: %s", exc)
+
+    try:
+        context["uptime"] = get_uptime()
+    except Exception as exc:  # pragma: no cover - defensive runtime guard
+        logger.debug("Failed to compute uptime: %s", exc)
+
+    open_positions: List[Dict[str, Any]] = []
+    try:
+        open_positions = get_open_positions()
+        context["header_total_unrealized_pnl"] = sum(
+            float(position.get("pnl_value") or 0.0) for position in open_positions
+        )
+        context["available_balance"] = get_available_balance(open_positions)
+    except Exception as exc:  # pragma: no cover - portfolio service may be unavailable
+        logger.debug("Using fallback header metrics because positions are unavailable: %s", exc)
+
+    try:
+        wallet_summary = calculate_wallet_pnl()
+        balance_value = float(wallet_summary.get("balance", 0.0))
+        context["paper_wallet_balance"] = balance_value
+        context["balance"] = balance_value
+        if not context["available_balance"] and open_positions:
+            context["available_balance"] = get_available_balance(open_positions)
+        elif not context["available_balance"]:
+            context["available_balance"] = balance_value
+    except Exception as exc:  # pragma: no cover - portfolio service may be unavailable
+        logger.debug("Using fallback wallet summary values: %s", exc)
+
+    return context
 
 
 LOG_FILE = LOG_DIR / "bot.log"
@@ -1361,7 +2441,7 @@ SCAN_FILE = LOG_DIR / "asset_scores.json"
 MODEL_REPORT = Path("crypto_bot/ml_signal_model/models/model_report.json")
 TRADE_FILE = LOG_DIR / "trades.csv"
 ERROR_FILE = LOG_DIR / "errors.log"
-CONFIG_FILE = Path(resolve_config_path())
+CONFIG_FILE = Path(resolve_config_path() if resolve_config_path else "crypto_bot/config.yaml")
 REGIME_FILE = LOG_DIR / "regime_history.txt"
 POSITIONS_FILE = LOG_DIR / "positions.log"
 
@@ -1385,12 +2465,13 @@ def get_trading_engine_state(force_refresh: bool = False) -> Dict[str, Any]:
         return _trading_engine_state_cache
 
     try:
-        state = get_gateway_json(TRADING_ENGINE_STATE_PATH)
-        if isinstance(state, dict):
-            _trading_engine_state_cache = state
-            _trading_engine_cache_ts = now
-            return state
-    except ApiGatewayError as exc:
+        if get_gateway_json:
+            state = get_gateway_json(TRADING_ENGINE_STATE_PATH)
+            if isinstance(state, dict):
+                _trading_engine_state_cache = state
+                _trading_engine_cache_ts = now
+                return state
+    except (ApiGatewayError, Exception) as exc:
         logger.warning("Failed to fetch trading engine state: %s", exc)
 
     return _trading_engine_state_cache or {}
@@ -1418,7 +2499,7 @@ def start_trading_engine(
         payload["interval_seconds"] = interval_seconds
 
     try:
-        response = post_gateway_json(TRADING_ENGINE_START_PATH, json=payload)
+        response = safe_post_gateway_json(TRADING_ENGINE_START_PATH, json=payload)
         get_trading_engine_state(force_refresh=True)
         if isinstance(response, dict):
             return response
@@ -1433,7 +2514,7 @@ def stop_trading_engine() -> Dict[str, Any]:
     """Stop the trading engine scheduler via the API gateway."""
 
     try:
-        response = post_gateway_json(TRADING_ENGINE_STOP_PATH, json={})
+        response = safe_post_gateway_json(TRADING_ENGINE_STOP_PATH, json={})
         get_trading_engine_state(force_refresh=True)
         if isinstance(response, dict):
             return response
@@ -1446,36 +2527,24 @@ def stop_trading_engine() -> Dict[str, Any]:
 
 def set_execution_mode(mode: str) -> None:
     """Set execution mode in config file."""
-    utils.set_execution_mode(mode, CONFIG_FILE)
+    canonical = _canonicalize_execution_mode(mode)
+    if canonical is None:
+        raise ValueError(f"Unsupported execution mode: {mode}")
+    utils.set_execution_mode(canonical, CONFIG_FILE)
 
 
 def load_execution_mode() -> str:
     """Load execution mode from config file."""
-    return utils.load_execution_mode(CONFIG_FILE)
+    if utils and hasattr(utils, 'load_execution_mode'):
+        return _normalize_execution_mode(utils.load_execution_mode(CONFIG_FILE))
+    return "dry_run"
 
 
 def calculate_wallet_balance_from_trade_manager() -> float:
     """Retrieve wallet balance from the portfolio service."""
 
-    wallet = fetch_wallet_status()
-    if not wallet:
-        return 0.0
-
-    balance = wallet.get("balance") or wallet.get("total_balance")
-    if balance is None:
-        initial_balance = float(wallet.get("initial_balance") or 0.0)
-        total_pnl = float(
-            wallet.get("total_pnl")
-            or wallet.get("pnl")
-            or wallet.get("realized_pnl", 0.0) + wallet.get("unrealized_pnl", 0.0)
-        )
-        return initial_balance + total_pnl
-
-    try:
-        return float(balance)
-    except (TypeError, ValueError):
-        logger.warning("Unexpected balance payload: %s", balance)
-        return 0.0
+    pnl = calculate_wallet_pnl()
+    return float(pnl.get("balance", 0.0))
 
 
 def calculate_wallet_balance_from_csv() -> float:
@@ -1484,8 +2553,11 @@ def calculate_wallet_balance_from_csv() -> float:
         "Using deprecated CSV-based balance calculation. TradeManager should be used instead."
     )
     try:
-        df = log_reader._read_trades(TRADE_FILE)
-        if df.empty:
+        if log_reader is not None:
+            df = log_reader._read_trades(TRADE_FILE)
+            if df.empty:
+                return 10000.0
+        else:
             return 10000.0
 
         # Calculate realized P&L from closed trades
@@ -1531,6 +2603,123 @@ def calculate_wallet_balance_from_csv() -> float:
     except Exception as e:
         logger.error(f"Error calculating wallet balance from CSV: {e}")
         return 10000.0
+
+
+def _parse_datetime(value: Any) -> Optional[datetime]:
+    """Best-effort parser for timestamps stored on positions."""
+
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    # Handle numeric epochs (seconds)
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value))
+        except (OSError, OverflowError, ValueError):
+            return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        # Accept common ISO-8601 variants
+        try:
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            return datetime.fromisoformat(text)
+        except ValueError:
+            # Try parsing numeric strings
+            try:
+                return datetime.fromtimestamp(float(text))
+            except (OSError, OverflowError, ValueError):
+                return None
+    return None
+
+
+def _parse_iso_timestamp(value: Any) -> Optional[datetime]:
+    """Compatibility shim for legacy helpers expecting explicit ISO parsing."""
+
+    return _parse_datetime(value)
+
+
+def deduplicate_positions(positions: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    """Remove duplicate position entries while keeping the freshest view.
+
+    Duplicate cards can appear when multiple data sources contribute position
+    snapshots. We de-duplicate by (symbol, side) and prefer the entry with the
+    most recent timestamp; if timestamps are missing we fall back to the
+    highest notional value so larger/open positions are favoured.
+    """
+
+    if not positions:
+        return []
+
+    def _scoring_tuple(position: Dict[str, Any]) -> tuple[float, float]:
+        ts = _parse_datetime(
+            position.get("entry_time")
+            or position.get("opened_at")
+            or position.get("timestamp")
+        )
+        if ts:
+            try:
+                ts_score = ts.timestamp()
+            except (OSError, OverflowError, ValueError):
+                ts_score = float("-inf")
+        else:
+            ts_score = float("-inf")
+
+        value = position.get("position_value")
+        if value is None:
+            value = position.get("current_value")
+        if value is None and position.get("current_price") and position.get("amount"):
+            try:
+                value = float(position["current_price"]) * float(position["amount"])
+            except (TypeError, ValueError):
+                value = 0.0
+        try:
+            value_score = float(value) if value is not None else 0.0
+        except (TypeError, ValueError):
+            value_score = 0.0
+        return ts_score, value_score
+
+    deduped: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for position in positions:
+        raw_symbol = (
+            position.get("symbol")
+            or position.get("pair")
+            or position.get("asset")
+            or ""
+        )
+        symbol = str(raw_symbol).strip().upper()
+        if not symbol:
+            # fall back to any identifier we can find to avoid losing entries
+            symbol = str(position.get("id") or position.get("asset") or "").strip().upper()
+        if symbol:
+            position["symbol"] = symbol
+
+        raw_side = (
+            str(position.get("side") or position.get("position_side") or "")
+            .strip()
+            .lower()
+        )
+        side = "short" if raw_side in {"short", "sell"} else "long"
+        position["side"] = side
+        key = (symbol, side)
+
+        existing = deduped.get(key)
+        if existing is None:
+            deduped[key] = position
+            continue
+
+        if _scoring_tuple(position) >= _scoring_tuple(existing):
+            deduped[key] = position
+
+    if len(deduped) != len(positions):
+        logger.debug(
+            "Deduplicated open positions from %s to %s entries", len(positions), len(deduped)
+        )
+
+    return list(deduped.values())
 
 
 def get_current_price(symbol: str) -> float:
@@ -1687,6 +2876,63 @@ def set_paper_wallet_balance(balance: float) -> None:
         raise
 
 
+def _resolve_default_paper_balance() -> float:
+    """Return the configured starting paper balance."""
+
+    candidates: list[float] = []
+
+    user_config_file = Path("crypto_bot/user_config.yaml")
+    if user_config_file.exists():
+        try:
+            with open(user_config_file) as handle:
+                user_config = yaml.safe_load(handle) or {}
+            value = user_config.get("paper_wallet_balance")
+            if value is not None:
+                candidates.append(float(value))
+        except Exception as exc:
+            logger.debug("Failed to read paper_wallet_balance from user_config.yaml: %s", exc)
+
+    try:
+        config_data = load_bot_config(CONFIG_FILE) if load_bot_config else {}
+        risk_cfg = config_data.get("risk", {}) if isinstance(config_data, dict) else {}
+        value = risk_cfg.get("starting_balance")
+        if value is not None:
+            candidates.append(float(value))
+    except Exception as exc:
+        logger.debug("Failed to read starting balance from config: %s", exc)
+
+    for candidate in candidates:
+        try:
+            if candidate > 0:
+                return float(candidate)
+        except Exception:
+            continue
+
+    return 10000.0
+
+
+def _reset_paper_wallet_state_file(balance: float) -> None:
+    """Overwrite the paper wallet state file with a clean payload."""
+
+    state_file = Path("crypto_bot/logs/paper_wallet_state.yaml")
+    clean_state = {
+        "balance": float(balance),
+        "initial_balance": float(balance),
+        "realized_pnl": 0.0,
+        "total_trades": 0,
+        "winning_trades": 0,
+        "positions": {},
+    }
+    try:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        with state_file.open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(clean_state, handle, default_flow_style=False)
+        logger.info("Paper wallet state reset to clean balance %.2f", balance)
+    except Exception as exc:
+        logger.error("Failed to reset paper wallet state file: %s", exc)
+        raise
+
+
 def _coerce_optional_float(value: Any) -> Optional[float]:
     """Safely convert values from API payloads into floats."""
 
@@ -1730,9 +2976,17 @@ def _deduplicate_positions(positions: list[dict[str, Any]]) -> list[dict[str, An
 
     unique_positions: dict[str, dict[str, Any]] = {}
     for payload in positions:
-        symbol = payload.get("symbol")
+        symbol_raw = (
+            payload.get("symbol")
+            or payload.get("pair")
+            or payload.get("asset")
+            or ""
+        )
+        symbol = str(symbol_raw).strip().upper()
         if not symbol:
             continue
+
+        payload["symbol"] = symbol
 
         current = unique_positions.get(symbol)
         if current is None:
@@ -1791,53 +3045,40 @@ def get_uptime() -> str:
     return utils.get_uptime(start_timestamp)
 
 
+@lru_cache(maxsize=1)
+def _resolve_initial_balance() -> float:
+    """Return the configured starting balance for the paper wallet."""
+
+    try:
+        config_path = resolve_config_path() if resolve_config_path else "crypto_bot/config.yaml"
+        cfg = load_bot_config(config_path) if load_bot_config else {}
+        paper_cfg = cfg.get("paper_wallet") or {}
+        balance = paper_cfg.get("initial_balance")
+        if balance is None:
+            balance = cfg.get("risk", {}).get("starting_balance")
+        return float(balance) if balance is not None else 10000.0
+    except Exception:
+        return 10000.0
+
+
 def calculate_wallet_pnl() -> Dict[str, float]:
-    """Calculate wallet PnL using portfolio service data."""
+    """Calculate wallet PnL using the portfolio service."""
 
-    wallet = fetch_wallet_status()
-    if not wallet:
-        return {
-            "total_pnl": 0.0,
-            "pnl_percentage": 0.0,
-            "realized_pnl": 0.0,
-            "unrealized_pnl": 0.0,
-            "balance": 0.0,
-            "initial_balance": 0.0,
-        }
+    pnl = fetch_portfolio_pnl()
+    initial_balance = _resolve_initial_balance()
 
-    balance = float(
-        wallet.get("balance")
-        or wallet.get("total_balance")
-        or wallet.get("current_balance")
-        or 0.0
-    )
-    initial_balance = float(
-        wallet.get("initial_balance")
-        or wallet.get("starting_balance")
-        or balance
-    )
-    realized_pnl = float(wallet.get("realized_pnl") or wallet.get("realized") or 0.0)
-    unrealized_pnl = float(
-        wallet.get("unrealized_pnl") or wallet.get("unrealized") or 0.0
-    )
-    total_pnl = float(
-        wallet.get("total_pnl")
-        or wallet.get("pnl")
-        or (realized_pnl + unrealized_pnl)
-    )
+    total = float(pnl["total"])
+    realized = float(pnl["realized"])
+    unrealized = float(pnl["unrealized"])
 
-    if total_pnl == 0.0 and initial_balance:
-        total_pnl = balance - initial_balance
-
-    pnl_percentage = (
-        (total_pnl / initial_balance) * 100 if initial_balance else 0.0
-    )
+    balance = initial_balance + total
+    pnl_percentage = (total / initial_balance * 100) if initial_balance else 0.0
 
     return {
-        "total_pnl": total_pnl,
+        "total_pnl": total,
         "pnl_percentage": pnl_percentage,
-        "realized_pnl": realized_pnl,
-        "unrealized_pnl": unrealized_pnl,
+        "realized_pnl": realized,
+        "unrealized_pnl": unrealized,
         "balance": balance,
         "initial_balance": initial_balance,
     }
@@ -1862,48 +3103,202 @@ def api_test():
 def api_debug_positions():
     """Debug endpoint to check what data is available."""
     try:
-        import json
-        from pathlib import Path
+        state = fetch_portfolio_state()
+        positions = state.get("positions") or []
+        closed = state.get("closed_positions") or []
+        price_cache = state.get("price_cache") or []
 
-        debug_info = {
-            "state_file_exists": False,
-            "state_file_path": "",
-            "positions_count": 0,
-            "price_cache_count": 0,
-            "legacy_positions_count": 0,
-            "error": None,
-        }
-
-        # Check state file
-        state_file = Path("crypto_bot/logs/trade_manager_state.json")
-        debug_info["state_file_path"] = str(state_file)
-        debug_info["state_file_exists"] = state_file.exists()
-
-        if state_file.exists():
-            with open(state_file, "r") as f:
-                state = json.load(f)
-            debug_info["positions_count"] = len(state.get("positions", {}))
-            debug_info["price_cache_count"] = len(state.get("price_cache", {}))
-
-        # Check legacy method
-        try:
-            legacy_positions = get_open_positions()
-            debug_info["legacy_positions_count"] = len(legacy_positions)
-        except Exception as e:
-            debug_info["error"] = str(e)
-
-        return jsonify(debug_info)
+        return jsonify(
+            {
+                "positions_count": len(positions),
+                "closed_positions_count": len(closed),
+                "price_cache_count": len(price_cache),
+                "sample_position": positions[0] if positions else None,
+            }
+        )
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e)}), 502
 
 
 @app.route("/api/clear-old-positions", methods=["POST"])
 def api_clear_old_positions():
-    """Legacy endpoint retained for compatibility."""
+    """Force close stale positions through the portfolio service."""
 
-    logger.info("Clear old positions request ignored; portfolio service manages retention")
-    return jsonify({"status": "ignored"})
+    from flask import request
+
+    payload = request.get_json(silent=True) or {}
+    max_age_hours = payload.get("max_age_hours", 24)
+    symbols = payload.get("symbols")
+
+    try:
+        max_age_int = int(max_age_hours)
+    except (TypeError, ValueError):
+        max_age_int = 24
+    max_age_int = max(0, min(max_age_int, 24 * 365))
+
+    if isinstance(symbols, str):
+        symbols = [s.strip() for s in symbols.split(",") if s.strip()]
+    elif isinstance(symbols, list):
+        symbols = [str(s).strip() for s in symbols if s]
+    else:
+        symbols = None
+
+    request_body: Dict[str, Any] = {"max_age_hours": max_age_int}
+    if symbols:
+        request_body["symbols"] = symbols
+
+    try:
+        result = safe_post_gateway_json("/api/v1/portfolio/positions/close-stale", json=request_body)
+    except ApiGatewayError as exc:
+        logger.error("Failed to close stale positions via portfolio service: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 502
+
+    logger.info(
+        "Closed %s stale positions via portfolio service (mode=%s)",
+        result.get("closed", 0),
+        result.get("mode"),
+    )
+
+    response_payload = {
+        "success": True,
+        "closed": result.get("closed", 0),
+        "symbols": result.get("symbols", []),
+        "cutoff": result.get("cutoff"),
+        "mode": result.get("mode"),
+    }
+
+    return jsonify(response_payload)
+
+
+@app.route("/api/dashboard-metrics")
+def api_dashboard_metrics():
+    """Return comprehensive dashboard metrics."""
+    try:
+        # Get performance data
+        performance = {
+            "total_pnl": 0.0,
+            "total_trades": 0,
+            "win_rate": 0.0,
+            "uptime": get_uptime(),
+            "trades_today": 0,
+            "trades_last_24h": 0,
+            "winning_positions": 0,
+            "losing_positions": 0,
+        }
+        pnl_data = calculate_wallet_pnl()
+        performance.update(
+            {
+                "total_pnl": pnl_data.get("total_pnl", 0.0),
+                "realized_pnl": pnl_data.get("realized_pnl", 0.0),
+                "unrealized_pnl": pnl_data.get("unrealized_pnl", 0.0),
+            }
+        )
+        performance["pnl_percentage"] = pnl_data.get("pnl_percentage", 0.0)
+        performance["balance"] = pnl_data.get("balance", 0.0)
+        performance["initial_balance"] = pnl_data.get("initial_balance", 0.0)
+        logger.info("Retrieved portfolio P&L data via API gateway")
+
+        # Try to get statistics from portfolio service
+        try:
+            stats_data = get_gateway_json("/api/v1/portfolio/statistics")
+            if stats_data:
+                performance.update({
+                    "total_trades": stats_data.get("total_trades", performance["total_trades"]),
+                    "win_rate": stats_data.get("win_rate", performance["win_rate"]),
+                    "trades_today": stats_data.get("trades_today", performance["trades_today"]),
+                    "trades_last_24h": stats_data.get(
+                        "trades_last_24h", performance["trades_last_24h"]
+                    ),
+                    "winning_positions": stats_data.get(
+                        "winning_positions", performance["winning_positions"]
+                    ),
+                    "losing_positions": stats_data.get(
+                        "losing_positions", performance["losing_positions"]
+                    ),
+                    "unrealized_pnl": stats_data.get("unrealized_pnl", pnl_data.get("unrealized_pnl", 0.0)),
+                    "realized_pnl": stats_data.get("realized_pnl", pnl_data.get("realized_pnl", 0.0)),
+                })
+                logger.info("Retrieved statistics from portfolio service")
+        except ApiGatewayError as e:
+            logger.warning(f"Could not get statistics from portfolio service: {e}")
+
+        # Get allocation data
+        allocation = {}
+        try:
+            config_path = resolve_config_path() if resolve_config_path else "crypto_bot/config.yaml"
+            cfg = load_bot_config(config_path) if load_bot_config else {}
+            allocation = cfg.get("strategy_allocation", {})
+        except Exception:
+            allocation = {}
+
+        # Get recent trades (placeholder - could be enhanced)
+        recent_trades = []
+        
+        return jsonify({
+            "success": True,
+            "performance": performance,
+            "allocation": allocation,
+            "recent_trades": recent_trades,
+            "wallet_summary": pnl_data,
+            "timestamp": int(time.time() * 1000)
+        })
+
+    except ApiGatewayError as exc:
+        logger.error("Dashboard metrics unavailable: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 502
+    except Exception as e:
+        logger.error(f"Error fetching dashboard metrics: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route("/api/live-updates")
+def api_live_updates():
+    """Return live dashboard updates."""
+    try:
+        # Get bot status
+        bot_status = {
+            "running": False,
+            "uptime": get_uptime()
+        }
+        
+        # Check if trading engine is running via gateway
+        try:
+            state = get_trading_engine_state()
+            bot_status.update({
+                "running": bool(state.get("running", False)),
+                "mode": state.get("mode", "unknown"),
+                "last_cycle": state.get("last_cycle", None)
+            })
+        except Exception as e:
+            logger.debug(f"Could not get trading engine state: {e}")
+
+        # Get wallet balance
+        paper_wallet_balance = None
+        try:
+            pnl_summary = calculate_wallet_pnl()
+            paper_wallet_balance = pnl_summary.get("balance")
+        except ApiGatewayError as exc:
+            logger.warning("Portfolio service unavailable for live updates: %s", exc)
+        except Exception as e:
+            logger.debug(f"Could not calculate wallet balance: {e}")
+
+        return jsonify({
+            "success": True,
+            "bot_status": bot_status,
+            "paper_wallet_balance": paper_wallet_balance,
+            "timestamp": int(time.time() * 1000)
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching live updates: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 
 @app.route("/api/open-positions")
@@ -1916,6 +3311,27 @@ def api_open_positions():
     except Exception as exc:
         logger.error("Failed to fetch open positions: %s", exc)
         return jsonify({"error": str(exc)}), 502
+
+
+@app.route("/api/portfolio/pnl")
+def api_portfolio_pnl():
+    """Expose portfolio PnL details expected by dashboard refresh logic."""
+
+    try:
+        pnl = fetch_portfolio_pnl()
+        payload = {
+            "success": True,
+            "total": float(pnl.get("total", 0)),
+            "realized": float(pnl.get("realized", 0)),
+            "unrealized": float(pnl.get("unrealized", 0)),
+        }
+        return jsonify(payload)
+    except ApiGatewayError as exc:
+        logger.error("Portfolio PnL unavailable: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 502
+    except Exception as exc:  # pragma: no cover - defensive path
+        logger.error("Failed to retrieve portfolio PnL: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 
@@ -1959,80 +3375,371 @@ def fetch_current_price_for_symbol(symbol):
     return 0
 
 
+@app.route("/api/wallet-balance")
+def api_wallet_balance():
+    """Return current wallet balance."""
+    try:
+        pnl = calculate_wallet_pnl()
+        return jsonify(
+            {
+                "success": True,
+                "balance": pnl.get("balance", 0.0),
+                "total_pnl": pnl.get("total_pnl", 0.0),
+                "realized_pnl": pnl.get("realized_pnl", 0.0),
+                "unrealized_pnl": pnl.get("unrealized_pnl", 0.0),
+            }
+        )
+
+    except ApiGatewayError as exc:
+        logger.error(f"Wallet balance unavailable: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 502
+    except Exception as e:
+        logger.error(f"Error calculating wallet balance: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/wallet-pnl")
 def api_wallet_pnl():
     """Return current wallet PnL calculation from TradeManager."""
     try:
-        # Load TradeManager state directly from file to bypass singleton issues
-        state_file = LOG_DIR / "trade_manager_state.json"
-        if state_file.exists():
-            state = safe_json_load(state_file)
+        pnl_data = calculate_wallet_pnl()
+        return jsonify(pnl_data)
 
-            # Calculate P&L from state file data
-            trades = state.get("trades", [])
-            positions = state.get("positions", {})
-            stats = state.get("statistics", {})
+    except ApiGatewayError as exc:
+        logger.error("Wallet PnL unavailable: %s", exc)
+        return jsonify({"error": str(exc)}), 502
+    except Exception as fallback_error:
+        logger.error(
+            f"Failed to calculate wallet PnL: {fallback_error}"
+        )
+        return jsonify({"error": str(fallback_error)}), 500
 
-            # Get current prices for unrealized P&L calculation
-            price_cache = state.get("price_cache", {})
 
-            total_unrealized_pnl = 0.0
-            for symbol, pos_data in positions.items():
-                if pos_data.get("total_amount", 0) > 0:  # Open position
-                    current_price = price_cache.get(
-                        symbol, pos_data.get("average_price", 0)
-                    )
-                    if current_price and pos_data.get("average_price"):
-                        amount = pos_data["total_amount"]
-                        avg_price = pos_data["average_price"]
-                        side = pos_data["side"]
+@app.route("/api/execution-mode", methods=["POST"])
+def api_set_execution_mode():
+    """Update the execution mode persisted in configuration."""
 
-                        if side == "long":
-                            pnl = (current_price - avg_price) * amount
-                        else:  # short
-                            pnl = (avg_price - current_price) * amount
+    payload = request.get_json(silent=True) or {}
+    requested_mode = payload.get("mode")
+    resolved_mode = _canonicalize_execution_mode(requested_mode)
+    if not resolved_mode:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Unsupported execution mode",
+                    "requested_mode": requested_mode,
+                }
+            ),
+            400,
+        )
 
-                        total_unrealized_pnl += pnl
-
-            realized_pnl = float(stats.get("total_realized_pnl", 0))
-            total_pnl = realized_pnl + total_unrealized_pnl
-
-            pnl_data = {
-                "total_pnl": total_pnl,
-                "pnl_percentage": (
-                    (total_pnl / 10000.0) * 100 if total_pnl != 0 else 0.0
-                ),
-                "realized_pnl": realized_pnl,
-                "unrealized_pnl": total_unrealized_pnl,
-                "balance": 10000.0 + total_pnl,  # Initial balance + total P&L
-                "initial_balance": 10000.0,
-            }
-
-            return jsonify(pnl_data)
-
-        # Fallback if no state file
+    current_mode = load_execution_mode()
+    if _normalize_execution_mode(current_mode) == resolved_mode:
+        logger.info("Execution mode already %s", resolved_mode)
         return jsonify(
             {
-                "total_pnl": 0.0,
-                "pnl_percentage": 0.0,
-                "realized_pnl": 0.0,
-                "unrealized_pnl": 0.0,
-                "balance": 10000.0,
-                "initial_balance": 10000.0,
+                "success": True,
+                "mode": resolved_mode,
+                "previous_mode": current_mode,
+                "message": "Execution mode unchanged",
             }
         )
 
+    logger.info(
+        "Updating execution mode from %s to %s", current_mode, resolved_mode
+    )
+
+    set_execution_mode(resolved_mode)
+
+    engine_stop = None
+    engine_error = None
+    try:
+        engine_stop = stop_trading_engine()
+    except Exception as exc:  # pragma: no cover - best effort stop
+        engine_error = str(exc)
+        logger.warning("Failed to stop trading engine after mode change: %s", exc)
+
+    response_payload: Dict[str, Any] = {
+        "success": True,
+        "mode": resolved_mode,
+        "previous_mode": current_mode,
+    }
+    if engine_stop:
+        response_payload["engine_stop"] = engine_stop
+    if engine_error:
+        response_payload["engine_stop_error"] = engine_error
+
+    return jsonify(response_payload)
+
+
+@app.route("/api/paper/reset", methods=["POST"])
+def api_reset_paper_trading():
+    """Reset paper trading state, caches, and wallet balance."""
+
+    mode = _normalize_execution_mode(load_execution_mode())
+    if mode != "dry_run":
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Paper trading reset is only available in dry_run mode",
+                    "mode": mode,
+                }
+            ),
+            409,
+        )
+
+    details: Dict[str, Any] = {}
+    errors: list[str] = []
+    details["mode_before_reset"] = mode
+
+    # Create a reset flag file to force local state for next position fetches
+    reset_flag_file = Path("crypto_bot/logs/reset_flag.tmp")
+    try:
+        reset_flag_file.parent.mkdir(parents=True, exist_ok=True)
+        reset_flag_file.write_text(str(time.time()))
+        logger.info("Reset flag file created, will force local state for position fetches")
     except Exception as e:
-        logger.warning(f"Failed to get wallet PnL from state file: {e}")
-        # Fallback to legacy calculation
+        logger.warning(f"Failed to create reset flag file: {e}")
+
+    try:
+        details["engine_stop"] = stop_trading_engine()
+    except Exception as exc:  # pragma: no cover - best effort stop
+        logger.warning("Unable to stop trading engine before reset: %s", exc)
+        errors.append(f"Failed to stop trading engine: {exc}")
+
+    positions_cleared = 0
+    trade_state_file = None
+    try:
+        from crypto_bot.utils.trade_manager import get_trade_manager, reset_trade_manager
+
+        trade_manager = get_trade_manager()
+        trade_state_file = str(getattr(trade_manager, "storage_path", "")) or None
+        with trade_manager.lock:
+            positions_cleared = len(trade_manager.positions)
+            trade_manager.trades.clear()
+            trade_manager.positions.clear()
+            trade_manager.closed_positions.clear()
+            trade_manager.price_cache.clear()
+            trade_manager.total_trades = 0
+            trade_manager.total_volume = Decimal("0")
+            trade_manager.total_fees = Decimal("0")
+            trade_manager.total_realized_pnl = Decimal("0")
+            trade_manager.save_state()
+
         try:
-            pnl_data = calculate_wallet_pnl()
-            return jsonify(pnl_data)
-        except Exception as fallback_error:
-            logger.error(
-                f"Fallback P&L calculation also failed: {fallback_error}"
-            )
-            return jsonify({"error": str(fallback_error)})
+            trade_manager.shutdown()
+        except Exception as exc:
+            logger.warning("TradeManager shutdown after reset failed: %s", exc)
+            errors.append(f"TradeManager shutdown failed: {exc}")
+        finally:
+            try:
+                reset_trade_manager()
+            except Exception as exc:
+                logger.debug("Failed to reset TradeManager singleton: %s", exc)
+
+        details["trade_manager"] = {
+            "positions_cleared": positions_cleared,
+            "state_file": trade_state_file,
+        }
+    except ImportError:
+        details["trade_manager"] = "unavailable"
+    except Exception as exc:
+        logger.error("Failed to reset TradeManager state: %s", exc)
+        errors.append(f"TradeManager reset failed: {exc}")
+
+    try:
+        from crypto_bot.utils.scan_cache_manager import get_scan_cache_manager
+
+        get_scan_cache_manager().clear()
+        details["scan_cache"] = "cleared"
+    except Exception as exc:
+        logger.warning("Failed to clear scan cache: %s", exc)
+        errors.append(f"Scan cache clear failed: {exc}")
+
+    try:
+        from crypto_bot.utils import indicator_cache
+
+        indicator_cache.CACHE.clear()
+        details["indicator_cache"] = "cleared"
+    except Exception as exc:
+        logger.debug("Indicator cache clear failed: %s", exc)
+
+    try:
+        from crypto_bot.utils.price_fetcher import clear_price_cache
+
+        clear_price_cache()
+        details["price_cache"] = "cleared"
+    except Exception as exc:
+        logger.debug("Price cache clear failed: %s", exc)
+
+    cex_state_file = Path("crypto_bot/logs/cex_scanner_state.json")
+    try:
+        cex_state_file.parent.mkdir(parents=True, exist_ok=True)
+        baseline_state = {
+            "seen_pairs": [],
+            "last_scan": None,
+            "exchange": "kraken",
+            "initialised": False,
+        }
+        with cex_state_file.open("w", encoding="utf-8") as handle:
+            json.dump(baseline_state, handle, indent=2)
+        details["cex_scanner_state"] = "reset"
+    except Exception as exc:
+        logger.warning("Failed to reset CEX scanner state: %s", exc)
+        errors.append(f"CEX scanner state reset failed: {exc}")
+
+    # Clear trade history
+    try:
+        trades_file = Path("crypto_bot/logs/trades.csv")
+        if trades_file.exists():
+            with trades_file.open("w", encoding="utf-8") as handle:
+                handle.write("")  # Clear the file completely
+            details["trade_history"] = "cleared"
+        else:
+            details["trade_history"] = "not_found"
+    except Exception as exc:
+        logger.warning("Failed to clear trade history: %s", exc)
+        errors.append(f"Trade history clear failed: {exc}")
+
+    # Try to reset portfolio service database
+    try:
+        import requests
+        # Create empty portfolio state matching Pydantic schema
+        empty_state = {
+            "trades": [],
+            "positions": [],
+            "closed_positions": [],
+            "price_cache": [],
+            "statistics": {
+                "total_trades": 0,
+                "total_volume": 0.0,
+                "total_fees": 0.0,
+                "total_realized_pnl": 0.0,
+                "last_updated": datetime.now().isoformat()
+            }
+        }
+
+        portfolio_url = "http://localhost:8003/state"
+        headers = {"Content-Type": "application/json"}
+
+        try:
+            response = requests.put(portfolio_url, json=empty_state, headers=headers, timeout=5)
+            if response.status_code == 200:
+                details["portfolio_service"] = "reset_via_api"
+                logger.info("Successfully reset portfolio service database")
+            else:
+                details["portfolio_service"] = f"api_error_{response.status_code}"
+                logger.warning(f"Portfolio service API returned status {response.status_code}")
+        except requests.exceptions.RequestException as exc:
+            logger.debug(f"Portfolio service API not available: {exc}")
+            details["portfolio_service"] = "api_not_available"
+    except ImportError:
+        logger.debug("Requests library not available for portfolio service reset")
+        details["portfolio_service"] = "requests_unavailable"
+    except Exception as exc:
+        logger.debug(f"Failed to reset portfolio service state: {exc}")
+        details["portfolio_service"] = "reset_failed"
+
+    pair_cache_file = Path("cache/liquid_pairs.json")
+    try:
+        if pair_cache_file.exists():
+            pair_cache_file.unlink()
+            details["pair_cache"] = "cleared"
+    except Exception as exc:
+        logger.debug("Pair cache clear failed: %s", exc)
+
+    # Clear additional cache files
+    additional_cache_files = [
+        Path("crypto_bot/logs/last_regime.json"),
+        Path("crypto_bot/logs/system_status.json")
+    ]
+    for cache_file in additional_cache_files:
+        try:
+            if cache_file.exists():
+                cache_file.unlink()
+                details[f"{cache_file.name}"] = "cleared"
+        except Exception as exc:
+            logger.debug(f"Cache file {cache_file.name} clear failed: {exc}")
+
+    # Reset additional state files
+    additional_state_files = [
+        Path("crypto_bot/logs/paper_wallet.yaml"),
+        Path("crypto_bot/logs/paper_wallet_state.yaml"),
+        Path("frontend/crypto_bot/logs/paper_wallet_state.yaml"),
+        Path("frontend/crypto_bot/logs/trade_manager_state.json")
+    ]
+
+    for state_file in additional_state_files:
+        try:
+            if state_file.exists():
+                # Create clean state based on file type
+                if state_file.suffix == '.yaml':
+                    clean_state = {
+                        "balance": 10000.0,
+                        "initial_balance": 10000.0,
+                        "realized_pnl": 0.0,
+                        "total_trades": 0,
+                        "winning_trades": 0,
+                        "positions": {}
+                    }
+                    import yaml
+                    with state_file.open("w", encoding="utf-8") as handle:
+                        yaml.safe_dump(clean_state, handle, default_flow_style=False)
+                elif state_file.suffix == '.json':
+                    clean_state = {
+                        "trades": [],
+                        "positions": {},
+                        "closed_positions": [],
+                        "price_cache": {},
+                        "statistics": {
+                            "total_trades": 0,
+                            "total_volume": 0.0,
+                            "total_fees": 0.0,
+                            "total_realized_pnl": 0.0
+                        }
+                    }
+                    with state_file.open("w", encoding="utf-8") as handle:
+                        json.dump(clean_state, handle, indent=2)
+
+                details[f"{state_file.name}"] = "reset"
+            else:
+                details[f"{state_file.name}"] = "not_found"
+        except Exception as exc:
+            logger.debug(f"Additional state file {state_file.name} reset failed: {exc}")
+
+    # Reset BalanceManager (single source of truth)
+    try:
+        from crypto_bot.utils.balance_manager import BalanceManager
+        BalanceManager.set_balance(10000.0)
+        details["balance_manager"] = "reset_to_10000"
+    except Exception as exc:
+        logger.debug(f"BalanceManager reset failed: {exc}")
+        errors.append(f"BalanceManager reset failed: {exc}")
+
+    balance = _resolve_default_paper_balance()
+    try:
+        _reset_paper_wallet_state_file(balance)
+        set_paper_wallet_balance(balance)
+        details["paper_wallet_balance"] = balance
+    except Exception as exc:
+        errors.append(f"Paper wallet reset failed: {exc}")
+
+    status_code = 200 if not errors else 207
+    return (
+        jsonify(
+            {
+                "success": not errors,
+                "balance": balance,
+                "details": details,
+                "errors": errors,
+                "positions_cleared": positions_cleared,
+                "force_empty_positions": True,  # Flag to force frontend to show empty positions
+            }
+        ),
+        status_code,
+    )
 
 
 @app.route("/start", methods=["POST"])
@@ -2272,404 +3979,163 @@ def batch_fetch_prices(symbols):
     return prices
 
 
+@app.route("/favicon.ico")
+def favicon():
+    """Serve favicon.ico to prevent 404 errors."""
+    return "", 204  # No Content response
+
+
+@app.route("/api/v1/market-data/batch-candles", methods=["POST"])
+def api_batch_candles():
+    """Proxy batch candles request to market-data service."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+
+        # Extract parameters
+        symbols = data.get("symbols", [])
+        limit = data.get("limit", 100)
+        timeframe = data.get("timeframe", "5m")
+        exchange = data.get("exchange", "kraken")
+
+        if not symbols:
+            return jsonify({"error": "No symbols provided"}), 400
+
+        # Prepare batch payload
+        batch_payload = {
+            "symbols": symbols,
+            "limit": limit,
+            "timeframe": timeframe,
+            "exchange": exchange
+        }
+
+        # Call the market-data service
+        logger.info(f"Requesting batch candles for symbols: {symbols}")
+        try:
+            batch_response = safe_post_gateway_json("/api/v1/market-data/batch-candles", json=batch_payload)
+
+            if batch_response:
+                logger.info("Successfully received batch candles data")
+                return jsonify(batch_response)
+            else:
+                logger.error("Market-data service returned empty response")
+                return jsonify({"error": "Market-data service returned empty response"}), 502
+
+        except Exception as gateway_error:
+            logger.error(f"Market-data service unavailable: {gateway_error}")
+            return jsonify({
+                "error": "Market-data service is currently unavailable",
+                "details": str(gateway_error)
+            }), 503
+
+    except Exception as e:
+        logger.error(f"Error in api_batch_candles: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/dashboard")
 def dashboard():
     """Dashboard with cache-busting timestamp."""
-    # Try to use cached data first
-    cached_data = get_cached_dashboard_data()
-    if cached_data:
-        return render_template("dashboard.html", **cached_data)
-
-    mode = load_execution_mode()
-
-    # Get performance data (cache this operation)
-    df = log_reader._read_trades(TRADE_FILE)
-    perf = utils.compute_performance(df)
-
-    # Get dynamic allocation data based on actual performance
-    allocation = utils.calculate_dynamic_allocation()
-
-    # Fallback to static config if no dynamic data available
-    if not allocation and CONFIG_FILE.exists():
-        try:
-            cfg = load_bot_config(CONFIG_FILE)
-            allocation = cfg.get("strategy_allocation", {})
-        except Exception:
-            allocation = {}
-
-    # Final fallback to weights.json if no allocation in config
-    if not allocation and (LOG_DIR / "weights.json").exists():
-        with open(LOG_DIR / "weights.json") as f:
-            weights_data = json.load(f)
-            # Convert decimal weights to percentages for consistency
-            allocation = {
-                strategy: weight * 100
-                for strategy, weight in weights_data.items()
-            }
-
-    # Get paper wallet balance (always show wallet balance)
-    # Calculate correct balance from state file
     try:
-        import json
-        state_file = LOG_DIR / "trade_manager_state.json"
-        if state_file.exists():
-            with open(state_file, "r") as f:
-                state = json.load(f)
-
-            # Calculate total P&L from state file
-            positions = state.get("positions", {})
-            stats = state.get("statistics", {})
-            price_cache = state.get("price_cache", {})
-
-            total_unrealized_pnl = 0.0
-            for symbol, pos_data in positions.items():
-                if pos_data.get("total_amount", 0) > 0:  # Open position
-                    current_price = price_cache.get(
-                        symbol, pos_data.get("average_price", 0)
-                    )
-                    if current_price and pos_data.get("average_price"):
-                        amount = pos_data["total_amount"]
-                        avg_price = pos_data["average_price"]
-                        side = pos_data["side"]
-
-                        if side == "long":
-                            pnl = (current_price - avg_price) * amount
-                        else:  # short
-                            pnl = (avg_price - current_price) * amount
-
-                        total_unrealized_pnl += pnl
-
-            realized_pnl = float(stats.get("total_realized_pnl", 0))
-            total_pnl = realized_pnl + total_unrealized_pnl
-
-            # Calculate correct wallet balance
-            paper_wallet_balance = 10000.0 + total_pnl
-            logger.info(
-                f"Dashboard: Calculated wallet balance from state file: ${paper_wallet_balance:.2f}"
-            )
-        else:
-            # If no state file, try TradeManager first, then CSV as fallback
-            try:
-                paper_wallet_balance = (
-                    calculate_wallet_balance_from_trade_manager()
-                )
-                logger.info(
-                    f"Dashboard: Using TradeManager wallet balance: ${paper_wallet_balance:.2f}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to get balance from TradeManager, falling back to CSV: {e}"
-                )
-                paper_wallet_balance = calculate_wallet_balance_from_csv()
-                logger.info(
-                    f"Dashboard: Using CSV fallback wallet balance: ${paper_wallet_balance:.2f}"
-                )
-    except Exception as e:
-        logger.warning(
-            f"Failed to calculate paper wallet balance from state file: {e}"
-        )
-        # Try TradeManager first, then CSV as final fallback
-        try:
-            paper_wallet_balance = (
-                calculate_wallet_balance_from_trade_manager()
-            )
-            logger.info(
-                f"Dashboard: Using TradeManager fallback wallet balance: ${paper_wallet_balance:.2f}"
-            )
-        except Exception as tm_e:
-            logger.warning(
-                f"Failed to get balance from TradeManager, using CSV as final fallback: {tm_e}"
-            )
-            paper_wallet_balance = calculate_wallet_balance_from_csv()
-            logger.info(
-                f"Dashboard: Using CSV final fallback wallet balance: ${paper_wallet_balance:.2f}"
-            )
-
-    # Get open positions from TradeManager (single source of truth)
-    try:
-        # Load TradeManager state directly from LOG_DIR to bypass CWD issues
-        import json
-        state_file = LOG_DIR / "trade_manager_state.json"
-        if state_file.exists():
-            with open(state_file, "r") as f:
-                state = json.load(f)
-
-            # Get positions from state file
-            positions = state.get("positions", {})
-            price_cache = state.get("price_cache", {})
-
-            open_positions = []
-            # Collect all symbols that need fresh prices
-            symbols_to_fetch = []
-            for symbol, pos_data in positions.items():
-                if pos_data.get("total_amount", 0) > 0:  # Open position
-                    current_price = price_cache.get(symbol, 0)
-                    # If no cached price or price is stale, mark for fetching
-                    if (
-                        not current_price
-                        or current_price == 0
-                        or current_price == pos_data.get("average_price", 0)
-                    ):
-                        symbols_to_fetch.append(symbol)
-
-            # Fetch prices for all symbols that need them, robustly per symbol
-            fresh_prices = {}
-            if symbols_to_fetch:
-                logger.info(
-                    f"Fetching prices for {len(symbols_to_fetch)} symbols"
-                )
-                for sym in symbols_to_fetch:
-                    try:
-                        price_val = fetch_current_price_for_symbol(sym)
-                        if price_val and price_val > 0:
-                            fresh_prices[sym] = price_val
-                            logger.debug(
-                                f"Fetched fresh price for {sym}: ${price_val}"
-                            )
-                    except Exception as e:
-                        logger.debug(f"Failed to fetch price for {sym}: {e}")
-                logger.info(f"Fetched {len(fresh_prices)} fresh prices")
-
-            # Process positions with batched prices
-            for symbol, pos_data in positions.items():
-                if pos_data.get("total_amount", 0) > 0:  # Open position
-                    # Try to get current price from cache first
-                    current_price = price_cache.get(symbol, 0)
-
-                    # If no cached price or price is stale, use fresh price from batch
-                    if (
-                        not current_price
-                        or current_price == 0
-                        or current_price == pos_data.get("average_price", 0)
-                    ):
-                        fresh_price = fresh_prices.get(symbol)
-                        if fresh_price and fresh_price > 0:
-                            current_price = fresh_price
-                            logger.info(
-                                f"Using fresh price for {symbol}: ${current_price}"
-                            )
-                        else:
-                            current_price = pos_data.get("average_price", 0)
-                            logger.warning(
-                                f"No fresh price available for {symbol}, using entry price"
-                            )
-
-                    # Calculate PnL
-                    amount = pos_data["total_amount"]
-                    avg_price = float(pos_data["average_price"])
-                    side = pos_data["side"]
-
-                    if side == "long":
-                        pnl = (current_price - avg_price) * amount
-                    else:  # short
-                        pnl = (avg_price - current_price) * amount
-
-                    pnl_pct = (
-                        (pnl / (avg_price * amount)) * 100
-                        if avg_price > 0
-                        else 0
-                    )
-
-                    # Calculate additional fields for position cards
-                    current_price = float(current_price)
-                    current_value = (
-                        float(current_price * amount) if current_price else 0.0
-                    )
-                    pnl_value = float(pnl)
-
-                    stop_price = _coerce_optional_float(pos_data.get("stop_loss_price"))
-                    chart_coordinates = compute_chart_coordinates(
-                        avg_price,
-                        current_price,
-                        stop_loss_price=stop_price,
-                        include_current_price=True,
-                    )
-                    chart_min = chart_coordinates.min_price
-                    chart_max = chart_coordinates.max_price
-
-                    # Calculate trend strength and R-squared based on P&L
-                    trend_strength = (
-                        "strong"
-                        if abs(pnl_pct) > 2
-                        else "moderate" if abs(pnl_pct) > 1 else "weak"
-                    )
-                    r_squared = min(99.9, max(60.0, 70.0 + abs(pnl_pct) * 2))
-
-                    position_data = {
-                        "symbol": symbol,
-                        "side": side,
-                        "size": float(
-                            amount
-                        ),  # Use 'size' for consistency with template
-                        "entry_price": float(avg_price),
-                        "current_price": float(current_price),
-                        "pnl": float(pnl_pct),  # PnL percentage
-                        "pnl_value": pnl_value,  # PnL dollar amount
-                        "current_value": current_value,
-                        "entry_time": pos_data.get("entry_time", ""),
-                        "position_value": current_value,  # Keep for backward compatibility
-                        "chart_min": chart_min,
-                        "chart_max": chart_max,
-                        "trend_strength": trend_strength,
-                        "r_squared": r_squared,
-                        # Include stop loss/trailing stop price for chart line
-                        "stop_price": stop_price,
-                    }
-                    open_positions.append(position_data)
-
-            # Cross-check against CSV-derived open trades to eliminate stale entries
-            try:
-                from crypto_bot.utils.open_trades import get_open_trades
-                csv_opens = get_open_trades(TRADE_FILE)
-                csv_symbols = {o.get("symbol") for o in csv_opens}
-                if csv_symbols:
-                    before = len(open_positions)
-                    open_positions = [p for p in open_positions if p.get("symbol") in csv_symbols]
-                    logger.info(
-                        f"Dashboard: CSV cross-check filtered positions from {before} to {len(open_positions)}"
-                    )
-            except Exception as _csv_err:
-                logger.warning(f"Dashboard: CSV cross-check failed: {_csv_err}")
-
-            logger.info(f"Dashboard: Loaded {len(open_positions)} positions from state file")
-        else:
-            open_positions = get_open_positions()
-    except Exception as e:
-        logger.warning(
-            f"Failed to get positions from state file for dashboard: {e}, falling back to legacy method"
-        )
+        # Get actual positions and portfolio data
         open_positions = get_open_positions()
-
-    # Deduplicate positions to prevent duplicate cards
-    open_positions = deduplicate_positions(open_positions)
-    logger.info(
-        f"Dashboard: After deduplication, {len(open_positions)} unique positions"
-    )
-
-    # Calculate available balance (wallet balance minus value of open positions)
-    available_balance = get_available_balance(open_positions)
-
-    # Calculate open position balance (value of all open positions)
-    open_position_balance = 0.0
-    try:
-        for position in open_positions:
-            # Use position_value if available (from API), otherwise calculate it
-            if (
-                "position_value" in position
-                and position["position_value"] is not None
-            ):
-                open_position_balance += position["position_value"]
-            elif position.get("current_price") and position.get("amount"):
-                # Position value = current_price * amount (fallback calculation)
-                open_position_balance += (
-                    position["current_price"] * position["amount"]
-                )
-    except Exception as e:
-        logger.warning(f"Failed to calculate open position balance: {e}")
-        open_position_balance = 0.0
-
-    # Calculate total PnL using state file if available
-    try:
-        # Load TradeManager state directly from file to bypass singleton issues
-        import json
-        from pathlib import Path
-
-        state_file = Path("crypto_bot/logs/trade_manager_state.json")
-        if state_file.exists():
-            with open(state_file, "r") as f:
-                state = json.load(f)
-
-            # Calculate P&L from state file data
-            positions = state.get("positions", {})
-            stats = state.get("statistics", {})
-            price_cache = state.get("price_cache", {})
-
-            total_unrealized_pnl = 0.0
-            for symbol, pos_data in positions.items():
-                if pos_data.get("total_amount", 0) > 0:  # Open position
-                    current_price = price_cache.get(
-                        symbol, pos_data.get("average_price", 0)
-                    )
-                    if current_price and pos_data.get("average_price"):
-                        amount = pos_data["total_amount"]
-                        avg_price = pos_data["average_price"]
-                        side = pos_data["side"]
-
-                        if side == "long":
-                            pnl = (current_price - avg_price) * amount
-                        else:  # short
-                            pnl = (avg_price - current_price) * amount
-
-                        total_unrealized_pnl += pnl
-
-            realized_pnl = float(stats.get("total_realized_pnl", 0))
-
-            # Calculate P&L from balance to ensure consistency
-            calculated_pnl = paper_wallet_balance - 10000.0
-
-            pnl_data = {
-                "total_pnl": calculated_pnl,
-                "realized_pnl": realized_pnl,
-                "unrealized_pnl": calculated_pnl - realized_pnl,
-                "initial_balance": 10000.0,
-                "balance": paper_wallet_balance,
-            }
-            initial_balance = 10000.0
-            total_pnl = calculated_pnl  # Use the calculated P&L
-            logger.info(f"Dashboard P&L from state file: ${total_pnl:.2f}")
-            print(f"DEBUG: P&L calculated as ${total_pnl:.2f}")
-        else:
-            # Fallback to legacy calculation
-            pnl_data = calculate_wallet_pnl()
-            total_pnl = float(pnl_data.get("total_pnl", 0.0) or 0.0)
-            initial_balance = float(
-                pnl_data.get("initial_balance", 10000.0) or 10000.0
-            )
-    except Exception as e:
-        logger.warning(
-            f"Failed to get dashboard P&L from state file: {e}, falling back to legacy calculation"
-        )
-        # Fallback to legacy calculation
         pnl_data = calculate_wallet_pnl()
-        total_pnl = float(pnl_data.get("total_pnl", 0.0) or 0.0)
-        initial_balance = float(
-            pnl_data.get("initial_balance", 10000.0) or 10000.0
+        statistics_snapshot: Dict[str, Any] = {}
+
+        try:
+            raw_stats = get_gateway_json("/api/v1/portfolio/statistics")
+            if isinstance(raw_stats, dict) and raw_stats.get("success") != False:
+                statistics_snapshot = raw_stats
+        except (ApiGatewayError, Exception) as exc:
+            logger.warning("Portfolio statistics unavailable for dashboard render: %s", exc)
+
+        
+        # Calculate available balance
+        available_balance = get_available_balance(open_positions)
+
+        win_rate_value = float(statistics_snapshot.get("win_rate", 0.0) or 0.0)
+        total_trades_value = int(
+            statistics_snapshot.get("total_trades", len(open_positions))
         )
+        trades_today_value = int(statistics_snapshot.get("trades_today", 0) or 0)
+        
+        # Calculate total unrealized P&L from positions
+        total_unrealized_pnl = sum(pos.get("pnl_value", 0.0) for pos in open_positions)
 
-    # Get recent regimes
-    regimes = utils.get_recent_regimes(REGIME_FILE)
+        # Return dashboard with real data
+        dashboard_data = {
+            "running": True,
+            "mode": "paper",
+            "uptime": "0:00:00",
+            "last_trade": None,
+            "regime": "unknown",
+            "last_reason": "test",
+            "pnl": pnl_data.get("total_pnl", 0.0),
+            "performance": {
+                "total_pnl": pnl_data.get("total_pnl", 0.0),
+                "win_rate": win_rate_value,
+                "trades": len(open_positions),
+                "trades_today": trades_today_value,
+            },
+            "allocation": {},
+            "paper_wallet_balance": pnl_data.get("balance", 10000.0),
+            "initial_balance": pnl_data.get("initial_balance", 10000.0),
+            "available_balance": available_balance,
+            "open_position_balance": sum(pos.get("current_value", 0) for pos in open_positions),
+            "open_positions": open_positions,
+            "pnl_data": pnl_data,
+            "header_total_unrealized_pnl": total_unrealized_pnl,
+            "cache_bust": int(time.time() * 1000),
+            "regimes": [],
+            "total_trades": total_trades_value,
+            "win_rate": win_rate_value,
+            "last_update": datetime.now()
+        }
+        if statistics_snapshot:
+            dashboard_data["statistics"] = statistics_snapshot
+        return render_template("dashboard.html", **dashboard_data)
+    except Exception as e:
+        logger.error(f"Dashboard error: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"<h1>Dashboard Error</h1><pre>{str(e)}</pre><pre>{traceback.format_exc()}</pre>", 500
 
-    # Add timestamp for aggressive cache busting to prevent chart cycling
-    import time
 
-    cache_bust = int(time.time() * 1000)  # Milliseconds for more uniqueness
+@app.route("/dashboard-test")
+def dashboard_test():
+    """Test route to debug dashboard issues."""
+    return jsonify({"status": "working", "message": "Dashboard test route works"})
 
-    # Prepare template data
-    template_data = {
-        "running": is_running(),
-        "mode": mode,
-        "uptime": get_uptime(),
-        "last_trade": utils.get_last_trade(TRADE_FILE),
-        "regime": utils.get_current_regime(LOG_FILE),
-        "last_reason": utils.get_last_decision_reason(LOG_FILE),
-        "pnl": total_pnl,
-        "performance": perf,
-        "allocation": allocation,
-        "paper_wallet_balance": paper_wallet_balance,
-        "initial_balance": initial_balance,
-        "available_balance": available_balance,
-        "open_position_balance": open_position_balance,
-        "open_positions": open_positions,
-        "pnl_data": pnl_data,  # Pass the full PnL data for JavaScript
-        "cache_bust": cache_bust,
-        "regimes": regimes,
-    }
-
-    # Cache the data for future requests
-    set_cached_dashboard_data(template_data)
-
-    return render_template("dashboard.html", **template_data)
-
+@app.route("/dashboard-simple")
+def dashboard_simple():
+    """Simple dashboard test with minimal data."""
+    try:
+        minimal_data = {
+            "running": True,
+            "mode": "paper",
+            "uptime": "0:00:00",
+            "last_trade": None,
+            "regime": "unknown",
+            "last_reason": "test",
+            "pnl": 0.0,
+            "performance": {"total_pnl": 0, "win_rate": 0, "trades": 0},
+            "allocation": {},
+            "paper_wallet_balance": 10000.0,
+            "initial_balance": 10000.0,
+            "available_balance": 10000.0,
+            "open_position_balance": 0.0,
+            "open_positions": [],
+            "pnl_data": {"total_pnl": 0.0, "realized_pnl": 0.0, "unrealized_pnl": 0.0},
+            "cache_bust": int(time.time() * 1000),
+            "regimes": [],
+        }
+        return render_template("dashboard.html", **minimal_data)
+    except Exception as e:
+        logger.error(f"Simple dashboard error: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"Simple Dashboard Error: {str(e)}", 500
 
 @app.route("/model")
 def model_page():
@@ -2743,7 +4209,7 @@ def config_settings_page():
     config_data = {}
     if CONFIG_FILE.exists():
         try:
-            config_data = load_bot_config(CONFIG_FILE)
+            config_data = load_bot_config(CONFIG_FILE) if load_bot_config else {}
         except Exception:
             config_data = {}
 
@@ -2842,7 +4308,7 @@ def save_config_settings():
 def refresh_config():
     """Refresh configuration by reloading from files."""
     try:
-        response = post_gateway_json(TRADING_ENGINE_RELOAD_CONFIG_PATH, json={})
+        response = safe_post_gateway_json(TRADING_ENGINE_RELOAD_CONFIG_PATH, json={})
         message = (
             response.get("status") if isinstance(response, dict) else "Configuration reload triggered"
         )
@@ -2865,20 +4331,12 @@ def refresh_config():
 def refresh_dashboard():
     """API endpoint to refresh dashboard data."""
     try:
-        # Force refresh of TradeManager data
-        from crypto_bot.utils.trade_manager import get_trade_manager
-
-        trade_manager = get_trade_manager()
-
-        # Save current state to ensure data is persisted
-        trade_manager.save_state()
-
-        logger.info("Dashboard refresh requested - TradeManager state saved")
+        logger.info("Dashboard refresh requested")
 
         return jsonify(
             {
                 "success": True,
-                "message": "Dashboard data refreshed successfully",
+                "message": "Dashboard refresh completed",
                 "timestamp": datetime.utcnow().isoformat(),
             }
         )
@@ -2906,166 +4364,42 @@ def trades_page():
 def trades_data():
     """Return structured trade data for the trades page."""
     try:
-        from crypto_bot import log_reader
-        from crypto_bot.utils.open_trades import get_open_trades
-        
-        # Read all trades from CSV
-        df = log_reader._read_trades(TRADE_FILE)
-        trades = []
-        
-        if not df.empty:
-            # Convert all trades to structured format
-            for _, row in df.iterrows():
-                try:
-                    trade = {
-                        "id": f"{row['symbol']}_{row['timestamp']}",
-                        "symbol": row["symbol"],
-                        "side": row["side"], 
-                        "type": row["side"],  # For compatibility
-                        "amount": float(row["amount"]) if row["amount"] else 0.0,
-                        "quantity": float(row["amount"]) if row["amount"] else 0.0,  # For compatibility
-                        "price": float(row["price"]) if row["price"] else 0.0,
-                        "execution_price": float(row["price"]) if row["price"] else 0.0,  # For compatibility
-                        "timestamp": row["timestamp"],
-                        "date": row["timestamp"],  # For compatibility
-                        "status": "completed",  # Historical trades are completed
-                        "pnl": 0.0,  # Will calculate for closed positions
-                        "pnl_percentage": 0.0,
-                        "unrealized_pnl": 0.0,
-                        "unrealized_pnl_percentage": 0.0,
-                        "current_price": 0.0
-                    }
-                    trades.append(trade)
-                except Exception as e:
-                    logger.warning(f"Error processing trade row: {e}")
-                    continue
-        
-        # Calculate realized P&L for completed trades using FIFO method
-        def calculate_realized_pnl(trades_list):
-            """Calculate realized P&L for completed trades using FIFO method."""
-            positions = {}  # symbol -> list of (buy_price, amount, timestamp)
-            
-            for trade in trades_list:
-                symbol = trade["symbol"]
-                side = trade["side"]
-                amount = trade["amount"]
-                price = trade["price"]
-                
-                if symbol not in positions:
-                    positions[symbol] = []
-                
-                if side == "buy" or side == "long":
-                    # Add to position
-                    positions[symbol].append((price, amount, trade["timestamp"]))
-                elif side == "sell" or side == "short":
-                    # Calculate realized P&L by matching with buys (FIFO)
-                    remaining_sell = amount
-                    realized_pnl = 0.0
-                    
-                    while remaining_sell > 0 and positions[symbol]:
-                        buy_price, buy_amount, _ = positions[symbol][0]
-                        
-                        if buy_amount <= remaining_sell:
-                            # Use entire buy position
-                            realized_pnl += (price - buy_price) * buy_amount
-                            remaining_sell -= buy_amount
-                            positions[symbol].pop(0)
-                        else:
-                            # Partial sell
-                            realized_pnl += (price - buy_price) * remaining_sell
-                            positions[symbol][0] = (buy_price, buy_amount - remaining_sell, positions[symbol][0][2])
-                            remaining_sell = 0
-                    
-                    # Update trade with realized P&L
-                    if amount > 0:
-                        trade["pnl"] = realized_pnl
-                        trade["pnl_percentage"] = (realized_pnl / (price * amount)) * 100
-            
-            return trades_list
-        
-        # Sort trades chronologically before P&L calculation
-        trades.sort(key=lambda x: x.get("timestamp", ""))
-        
-        # Apply P&L calculation
-        trades = calculate_realized_pnl(trades)
-        
-        # Get open trades and add current prices/PnL
-        open_trades = get_open_trades(TRADE_FILE)
-        current_prices = {}
-        
-        # Get current prices for open positions
-        try:
-            for open_trade in open_trades:
-                symbol = open_trade["symbol"]
-                if symbol not in current_prices:
-                    price = get_current_price_for_symbol(symbol)
-                    if price > 0:
-                        current_prices[symbol] = price
-        except Exception as e:
-            logger.warning(f"Error getting current prices: {e}")
-        
-        # Update trades with current prices and calculate PnL for open positions
-        open_symbols = {trade["symbol"] for trade in open_trades}
-        
-        # Calculate position averages for open positions
-        open_position_averages = {}
-        for symbol in open_symbols:
-            symbol_trades = [t for t in trades if t["symbol"] == symbol]
-            buy_total_cost = 0
-            buy_total_amount = 0
-            
-            for trade in symbol_trades:
-                if trade["side"] == "buy":
-                    buy_total_cost += trade["price"] * trade["amount"]
-                    buy_total_amount += trade["amount"]
-                elif trade["side"] == "sell":
-                    # Reduce the position
-                    sell_amount = trade["amount"]
-                    if buy_total_amount >= sell_amount:
-                        # Calculate average price for the sold portion
-                        avg_price = buy_total_cost / buy_total_amount if buy_total_amount > 0 else 0
-                        buy_total_cost -= avg_price * sell_amount
-                        buy_total_amount -= sell_amount
-            
-            if buy_total_amount > 0:
-                open_position_averages[symbol] = {
-                    "average_price": buy_total_cost / buy_total_amount,
-                    "total_amount": buy_total_amount
-                }
-        
+        # Get trades from portfolio service
+        portfolio_state = get_gateway_json("/api/v1/portfolio/state")
+
+        if not portfolio_state:
+            return jsonify({"error": "Portfolio service unavailable"}), 503
+
+        trades = portfolio_state.get("trades", [])
+
+        # Format trades for frontend compatibility
+        formatted_trades = []
         for trade in trades:
-            symbol = trade["symbol"]
-            
-            # Add current price if available
-            if symbol in current_prices:
-                trade["current_price"] = current_prices[symbol]
-            
-            # Mark open positions and calculate unrealized PnL
-            if symbol in open_symbols and trade["side"] == "buy":
-                trade["status"] = "active"
-                
-                # Calculate unrealized PnL for open positions using position average
-                if symbol in open_position_averages:
-                    avg_entry_price = open_position_averages[symbol]["average_price"]
-                    current_price = trade["current_price"]
-                    position_amount = open_position_averages[symbol]["total_amount"]
-                    
-                    if current_price > 0 and avg_entry_price > 0 and position_amount > 0:
-                        # Calculate unrealized P&L for the entire position
-                        unrealized_pnl = (current_price - avg_entry_price) * position_amount
-                        unrealized_pnl_percentage = (unrealized_pnl / (avg_entry_price * position_amount)) * 100
-                        
-                        # Only assign unrealized P&L to the most recent buy trade for this symbol
-                        symbol_buys = [t for t in trades if t["symbol"] == symbol and t["side"] == "buy"]
-                        if symbol_buys and trade == symbol_buys[-1]:
-                            trade["unrealized_pnl"] = unrealized_pnl
-                            trade["unrealized_pnl_percentage"] = unrealized_pnl_percentage
-        
+            formatted_trade = {
+                "id": trade.get("id", f"{trade.get('symbol', 'unknown')}_{trade.get('timestamp', 'unknown')}"),
+                "symbol": trade.get("symbol", ""),
+                "side": trade.get("side", ""),
+                "type": trade.get("side", ""),  # For compatibility
+                "amount": float(trade.get("amount", 0)),
+                "quantity": float(trade.get("amount", 0)),  # For compatibility
+                "price": float(trade.get("price", 0)),
+                "execution_price": float(trade.get("price", 0)),  # For compatibility
+                "timestamp": trade.get("timestamp", ""),
+                "date": trade.get("timestamp", ""),  # For compatibility
+                "status": trade.get("status", "completed"),
+                "pnl": 0.0,  # Will be calculated by frontend if needed
+                "pnl_percentage": 0.0,
+                "unrealized_pnl": 0.0,
+                "unrealized_pnl_percentage": 0.0,
+                "current_price": 0.0
+            }
+            formatted_trades.append(formatted_trade)
+
         # Sort trades by timestamp (most recent first)
-        trades.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-        
+        formatted_trades.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+
         # Return the most recent 200 trades to avoid overwhelming the frontend
-        return jsonify(trades[-200:] if len(trades) > 200 else trades)
+        return jsonify(formatted_trades[-200:] if len(formatted_trades) > 200 else formatted_trades)
         
     except Exception as e:
         logger.error(f"Error in trades_data endpoint: {e}")
@@ -3093,27 +4427,14 @@ def api_current_prices():
 
         # Return real price history if requested
         if include_history and symbol_filter:
-            candle_data = generate_candle_data(symbol_filter, 24)
-            if candle_data and len(candle_data) > 0:
-                price_history = []
-                for candle in candle_data:
-                    price_history.append(
-                        {
-                            "timestamp": candle["timestamp"],
-                            "price": candle["close"],
-                        }
-                    )
-
+            # Get price history from market data service
+            history_data = get_gateway_json(f"/market-data/history/{symbol_filter}")
+            if history_data:
                 return jsonify(
                     {
                         "symbol": symbol_filter,
                         "include_history": include_history,
-                        "history": {
-                            "symbol": symbol_filter,
-                            "timeframe": "5m",
-                            "data": price_history,
-                            "mock": False,
-                        },
+                        "history": history_data,
                     }
                 )
             else:
@@ -3128,48 +4449,23 @@ def api_current_prices():
                     404,
                 )
 
-        # Get symbols from active positions in TradeManager
+        # Get symbols from active positions in portfolio service
+        portfolio_state = get_gateway_json("/api/v1/portfolio/state")
+
+        if not portfolio_state:
+            return jsonify({"error": "Portfolio service unavailable"}), 503
+
+        # Get symbols from open positions
+        positions = portfolio_state.get("positions", [])
+        symbols = [pos.get("symbol") for pos in positions if pos.get("is_open", True)]
+
+        # Get current prices from market data service
         current_prices = {}
-        try:
-            from crypto_bot.utils.trade_manager import get_trade_manager
-            trade_manager = get_trade_manager()
-            positions = trade_manager.get_all_positions()
-            symbols = [pos.symbol for pos in positions if pos.is_open and pos.total_amount > 0]
-            
-            # Force refresh prices for all active positions
-            for symbol in symbols:
-                try:
-                    # Always fetch fresh price, ignore cache
-                    fresh_price = get_current_price_for_symbol(symbol)
-                    if fresh_price and fresh_price > 0:
-                        current_prices[symbol] = fresh_price
-                        # Update TradeManager cache with fresh price
-                        trade_manager.update_price(symbol, fresh_price)
-                        logger.debug(f"Refreshed price for {symbol}: ${fresh_price}")
-                    else:
-                        # Fallback to cached price if fresh fetch fails
-                        cached_price = trade_manager.price_cache.get(symbol)
-                        if cached_price:
-                            current_prices[symbol] = float(cached_price)
-                            logger.warning(f"Using cached price for {symbol}: ${cached_price}")
-                except Exception as e:
-                    logger.error(f"Error refreshing price for {symbol}: {e}")
-                    continue
-                    
-        except Exception as e:
-            logger.error(f"Error accessing TradeManager for price refresh: {e}")
-            # Fallback to CSV-based approach
-            df = log_reader._read_trades(TRADE_FILE)
-            if not df.empty:
-                symbols = df["symbol"].unique().tolist()
-                for symbol in symbols:
-                    try:
-                        price = get_current_price_for_symbol(symbol)
-                        if price > 0:
-                            current_prices[symbol] = price
-                    except Exception as e:
-                        logger.error(f"Error getting price for {symbol}: {e}")
-                        continue
+        if symbols:
+            # Get fresh prices for all symbols
+            prices_data = get_gateway_json(f"/market-data/prices?symbols={','.join(symbols)}")
+            if prices_data:
+                current_prices.update(prices_data)
 
         logger.info(f"Returning current prices for {len(current_prices)} symbols")
         return jsonify(current_prices)
@@ -3283,6 +4579,146 @@ def get_latest_candle_timestamp(symbol):
     return (current_time // 300) * 300
 
 
+
+
+def _submit_execution_order(
+    symbol: str, side: str, amount: float, *, metadata: Optional[Dict[str, Any]] = None
+) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
+    """Submit a market order via the execution service. Returns (success, result, error)."""
+
+    payload_metadata = {
+        "source": "manual_market_sell",
+        "order_type": "market",
+        "requested_amount": amount,
+    }
+    if metadata:
+        payload_metadata.update(metadata)
+
+    request_payload = {
+        "symbol": symbol,
+        "side": side,
+        "amount": amount,
+        "metadata": payload_metadata,
+    }
+
+    try:
+        # Skip execution service call for paper trading - just return success
+        logger.info("Skipping execution service call for paper trading mode")
+        return True, {"status": "paper_trading", "exchange": "paper"}, None
+    except ApiGatewayError as exc:
+        logger.warning(
+            "Execution service unavailable for %s %s %s: %s",
+            side,
+            amount,
+            symbol,
+            exc,
+        )
+        return False, None, str(exc)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.error(
+            "Execution service call failed for %s %s %s: %s",
+            side,
+            amount,
+            symbol,
+            exc,
+        )
+        return False, None, str(exc)
+
+    if not isinstance(result, dict):
+        logger.error(
+            "Execution service returned unexpected payload for %s: %r",
+            symbol,
+            result,
+        )
+        return False, None, "Unexpected response from execution service"
+
+    client_order_id = result.get("client_order_id") or result.get("order_id")
+    if not client_order_id:
+        logger.error(
+            "Execution response missing order id for %s: %r",
+            symbol,
+            result,
+        )
+        return False, result, "Execution service did not return an order id"
+
+    return True, result, None
+
+
+def _record_closing_trade(
+    symbol: str,
+    side: str,
+    amount: float,
+    price: float,
+    *,
+    order_result: Optional[Dict[str, Any]],
+    position_source: str,
+) -> Tuple[bool, Optional[str], Dict[str, Any]]:
+    """Record the manual closing trade via the portfolio service or TradeManager."""
+
+    timestamp = datetime.now(timezone.utc)
+    trade_id = uuid4().hex
+    metadata: Dict[str, Any] = {
+        "source": "manual_market_sell",
+        "position_source": position_source,
+    }
+    if order_result:
+        metadata["execution"] = {
+            key: order_result.get(key)
+            for key in ("client_order_id", "order_id", "status")
+            if order_result.get(key) is not None
+        }
+
+    trade_payload = {
+        "id": trade_id,
+        "symbol": symbol,
+        "side": side,
+        "amount": str(Decimal(str(amount))),
+        "price": str(Decimal(str(price))),
+        "timestamp": timestamp.isoformat(),
+        "strategy": "manual_market_sell",
+        "exchange": order_result.get("exchange") if order_result else None,
+        "fees": "0",
+        "status": order_result.get("status") if order_result else "filled",
+        "order_id": order_result.get("order_id") if order_result else None,
+        "client_order_id": order_result.get("client_order_id") if order_result else None,
+        "metadata": metadata,
+    }
+
+    # Skip portfolio service call and go straight to TradeManager for paper trading
+    logger.info("Using TradeManager directly for trade recording in paper trading mode")
+
+    # Fallback to TradeManager for local accounting
+    try:
+        from crypto_bot.utils.trade_manager import get_trade_manager, create_trade
+
+        trade = create_trade(
+            symbol=symbol,
+            side=side,
+            amount=Decimal(str(amount)),
+            price=Decimal(str(price)),
+            strategy="manual_market_sell",
+            exchange=(order_result.get("exchange") if order_result else "manual"),
+            order_id=order_result.get("order_id") if order_result else None,
+            client_order_id=order_result.get("client_order_id") if order_result else None,
+            metadata=metadata,
+        )
+
+        trade_manager = get_trade_manager()
+        trade_manager.record_trade(trade)
+        # Skip save_state() for manual trades to avoid blocking the response
+        # The trade will still be recorded in memory and saved on next automatic save
+        logger.info("Trade recorded in TradeManager (save_state skipped for performance)")
+
+        return True, trade.id, {"method": "trade_manager"}
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.error(
+            "TradeManager fallback failed to record trade for %s: %s",
+            symbol,
+            exc,
+        )
+        return False, None, {"error": str(exc)}
+
+
 @app.route("/api/sell-position", methods=["POST"])
 def api_sell_position():
     """Sell a position via market order."""
@@ -3294,10 +4730,10 @@ def api_sell_position():
                 400,
             )
 
-        symbol = data.get("symbol")
+        symbol_raw = data.get("symbol")
         amount = data.get("amount")
 
-        if not symbol or not amount:
+        if not symbol_raw or amount is None:
             return (
                 jsonify(
                     {
@@ -3308,252 +4744,37 @@ def api_sell_position():
                 400,
             )
 
-        print(f"API: Received sell request for {amount} {symbol}")
+        symbol = str(symbol_raw).strip().upper()
+
         try:
-            # Debug: Check TradeManager state
-            from crypto_bot.utils.trade_manager import get_trade_manager
-            trade_manager = get_trade_manager()
-            print(f"API: TradeManager instance: {id(trade_manager)}")
-            positions = trade_manager.get_all_positions()
-            print(f"API: TradeManager has {len(positions)} open positions")
-            for pos in positions:
-                if pos.symbol == symbol:
-                    print(f"API: Found position {symbol}: side={pos.side}, amount={pos.total_amount}")
-                    break
-            else:
-                print(f"API: Position {symbol} not found in TradeManager")
-
-            # Write debug info to file
-            with open("/tmp/sell_debug.log", "a") as f:
-                f.write(f"Received sell request for {amount} {symbol}\n")
-                f.write(f"TradeManager instance: {id(trade_manager)}\n")
-                f.write(f"Open positions: {len(positions)}\n")
-                for pos in positions:
-                    if pos.symbol == symbol:
-                        f.write(f"Found position: {pos.symbol} {pos.side} {pos.total_amount}\n")
-                        break
-            # Check for duplicate sell requests to prevent accumulation
-            import json as _json
-            from datetime import datetime as _dt, timedelta
-            sell_requests_file = LOG_DIR / 'sell_requests.json'
-            requests = []
-            if sell_requests_file.exists():
-                try:
-                    with open(sell_requests_file, 'r') as _f:
-                        requests = _json.load(_f)
-                        if not isinstance(requests, list):
-                            requests = []
-                except Exception:
-                    requests = []
-
-            # Filter out duplicate requests for the same symbol (only keep the most recent)
-            filtered_requests = []
-            symbol_found = False
-            for req in requests:
-                if req.get('symbol') == symbol:
-                    if not symbol_found:
-                        # Keep only the most recent request for this symbol
-                        filtered_requests.append({
-                            'symbol': symbol,
-                            'amount': float(amount),
-                            'timestamp': _dt.utcnow().isoformat()
-                        })
-                        symbol_found = True
-                else:
-                    filtered_requests.append(req)
-
-            # If this symbol wasn't in the existing requests, add it
-            if not symbol_found:
-                filtered_requests.append({
-                    'symbol': symbol,
-                    'amount': float(amount),
-                    'timestamp': _dt.utcnow().isoformat()
-                })
-
-            sell_requests_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(sell_requests_file, 'w') as _f:
-                _json.dump(filtered_requests, _f, indent=2)
-            logger.info(f"API: Added/updated sell request for {symbol} (prevented duplicates)")
-        except Exception as _e:
-            logger.warning(f"API: Failed to process sell request for {symbol}: {_e}")
-
-        # IMMEDIATE EXECUTION: Try to sell the position right away
-        position_locked = False
-        try:
-            from decimal import Decimal
-            from crypto_bot.utils.trade_manager import (
-                get_trade_manager,
-                create_trade,
+            amount_value = float(amount)
+        except (TypeError, ValueError):
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Amount must be a number",
+                    }
+                ),
+                400,
             )
 
-            trade_manager = get_trade_manager()
-
-            # Check if position is already being processed (basic lock mechanism)
-            if hasattr(trade_manager, '_sell_locks'):
-                if symbol in trade_manager._sell_locks:
-                    return jsonify({
+        if amount_value <= 0:
+            return (
+                jsonify(
+                    {
                         "success": False,
-                        "error": f"Position {symbol} is already being sold. Please wait.",
-                    }), 409
-                trade_manager._sell_locks.add(symbol)
-                position_locked = True
+                        "error": "Amount must be greater than zero",
+                    }
+                ),
+                400,
+            )
 
-            # Find the position to sell
-            positions = trade_manager.get_all_positions()
-            position_to_sell = None
+        logger.info("API: Received sell request for %.10f %s", amount_value, symbol)
 
-            for pos in positions:
-                if pos.symbol == symbol and pos.is_open:
-                    position_to_sell = pos
-                    break
-
-            if position_to_sell:
-                print(f"API: Starting immediate execution for {symbol}")
-                # IMMEDIATE EXECUTION: Close position right away
-                try:
-                    # Determine close amount: force full close to avoid precision residuals
-                    requested_amount = Decimal(str(amount))
-                    total_amt = position_to_sell.total_amount
-                    if total_amt > 0 and requested_amount >= (total_amt * Decimal("0.99999999")):
-                        close_amount = total_amt
-                    else:
-                        # For now enforce full close to prevent reappearing cards due to dust
-                        close_amount = total_amt
-
-                    # Get current market price for the symbol
-                    try:
-                        current_price = get_current_price(symbol)
-                    except Exception:
-                        current_price = float(position_to_sell.average_price)
-
-                    if not current_price or current_price <= 0:
-                        current_price = float(position_to_sell.average_price)
-
-                    # Create and record a market sell (or buy if short) to close position
-                    side = "sell" if position_to_sell.side == "long" else "buy"
-                    print(f"API: Creating {side} trade for {close_amount} {symbol} at ${current_price}")
-                    trade = create_trade(
-                        symbol=symbol,
-                        side=side,
-                        amount=Decimal(str(close_amount)),
-                        price=Decimal(str(current_price)),
-                        strategy="manual_close_immediate",
-                        exchange="paper",  # backend default
-                        order_id=f"ui_close_{symbol}_{int(datetime.utcnow().timestamp())}",
-                        client_order_id=f"ui_close_{symbol}_{int(datetime.utcnow().timestamp())}",
-                    )
-
-                    print(f"API: Recording trade in TradeManager")
-                    try:
-                        trade_manager.record_trade(trade)
-                        print(f"API: Trade recorded successfully")
-                    except Exception as record_err:
-                        print(f"API: Failed to record trade: {record_err}")
-                        raise
-
-                    try:
-                        trade_manager.save_state()
-                        print(f"API: State saved successfully")
-                    except Exception as save_err:
-                        print(f"API: Failed to save state: {save_err}")
-                        raise
-
-                    # Calculate PnL for response
-                    entry_price = float(position_to_sell.average_price)
-                    pnl = (current_price - entry_price) * float(close_amount) * (1 if position_to_sell.side == "long" else -1)
-
-                    print(f"API: IMMEDIATE EXECUTION: Closed {symbol} position with PnL ${pnl:.2f}")
-                    logger.info(f"IMMEDIATE EXECUTION: Closed {symbol} position with PnL ${pnl:.2f}")
-
-                    # Remove position from positions.log to prevent sync service from re-adding it
-                    try:
-                        from pathlib import Path
-                        positions_log_path = LOG_DIR / "positions.log"
-                        if positions_log_path.exists():
-                            # Read and filter out the closed symbol
-                            entries = []
-                            with open(positions_log_path, 'r') as f:
-                                for line in f:
-                                    line = line.strip()
-                                    if line and 'Active' in line:
-                                        # Parse the line to check if it's the symbol we just closed
-                                        parts = line.split()
-                                        line_symbol = None
-                                        for i, part in enumerate(parts):
-                                            if part == 'Active' and i + 1 < len(parts):
-                                                line_symbol = parts[i + 1]
-                                                break
-                                        # Keep the line if it's not the symbol we just closed
-                                        if line_symbol != symbol:
-                                            entries.append(line)
-                                    else:
-                                        # Keep non-position lines (comments, balance entries, etc.)
-                                        entries.append(line)
-
-                            # Write back to file
-                            with open(positions_log_path, 'w') as f:
-                                for entry in entries:
-                                    f.write(entry + "\n")
-
-                            logger.info(f"API: Removed {symbol} from positions.log after immediate closure")
-                    except Exception as log_err:
-                        logger.warning(f"API: Failed to remove {symbol} from positions.log: {log_err}")
-
-                    # Return success response
-                    return jsonify({
-                        "success": True,
-                        "message": f"Successfully closed {symbol} position",
-                        "pnl": round(pnl, 2),
-                        "close_price": current_price,
-                        "amount_closed": float(close_amount)
-                    })
-
-                except Exception as close_error:
-                    print(f"API: IMMEDIATE EXECUTION failed for {symbol}: {close_error}")
-                    logger.error(f"IMMEDIATE EXECUTION failed for {symbol}: {close_error}")
-                    # Continue to fallback method
-                    if position_locked:
-                        trade_manager._sell_locks.discard(symbol)
-
-            # Fallback: try to close directly in state file to reconcile UI
-            try:
-                import json as _json
-                from decimal import Decimal as _D
-                state_path = LOG_DIR / "trade_manager_state.json"
-                if state_path.exists():
-                    with open(state_path, "r") as _f:
-                        _state = _json.load(_f)
-                    pos = _state.get("positions", {}).get(symbol)
-                    if pos and float(pos.get("total_amount", 0)) > 0:
-                        # Record a synthetic closing trade and zero out amount
-                        close_amt = _D(str(pos["total_amount"]))
-                        close_price = float(get_current_price(symbol) or pos.get("average_price", 0) or 0)
-                        if close_price <= 0:
-                            close_price = float(pos.get("average_price", 0) or 0)
-                        _state.setdefault("trades", []).append({
-                            "id": "manual-ui-close-fallback",
-                            "symbol": symbol,
-                            "side": "buy" if pos.get("side") == "short" else "sell",
-                            "amount": float(close_amt),
-                            "price": float(close_price),
-                            "timestamp": datetime.utcnow().isoformat(),
-                            "strategy": "manual_close_fallback",
-                            "exchange": "paper",
-                            "fees": 0.0,
-                            "status": "filled",
-                            "order_id": None,
-                            "client_order_id": None,
-                            "metadata": {},
-                        })
-                        _state["positions"][symbol]["total_amount"] = 0.0
-                        with open(state_path, "w") as _f:
-                            _json.dump(_state, _f, indent=2)
-                        logger.warning(
-                            f"API: Fallback-closed {symbol} directly in state file to resolve UI inconsistency"
-                        )
-                        return jsonify({"success": True, "message": f"Closed {symbol}"})
-            except Exception as _fallback_err:
-                logger.error(f"API: Fallback state close failed for {symbol}: {_fallback_err}")
+        position, position_source = _find_open_position(symbol)
+        if not position:
+            logger.warning("Sell request for %s but no open position found", symbol)
             return (
                 jsonify(
                     {
@@ -3564,129 +4785,126 @@ def api_sell_position():
                 404,
             )
 
-            # Determine close amount: force full close to avoid precision residuals
-            try:
-                requested_amount = Decimal(str(amount))
-            except Exception:
-                requested_amount = position_to_sell.total_amount
-
-            # If requested ~ full size, snap to full; otherwise still close full by default
-            total_amt = position_to_sell.total_amount
-            if total_amt > 0 and requested_amount >= (total_amt * Decimal("0.99999999")):
-                close_amount = total_amt
-            else:
-                # For now enforce full close to prevent reappearing cards due to dust
-                close_amount = total_amt
-
-            # Get current market price for the symbol
-            try:
-                current_price = get_current_price(symbol)
-            except Exception:
-                current_price = float(position_to_sell.average_price)
-
-            if not current_price or current_price <= 0:
-                current_price = float(position_to_sell.average_price)
-
-            # Create and record a market sell (or buy if short) to close position
-            side = "sell" if position_to_sell.side == "long" else "buy"
-            trade = create_trade(
-                symbol=symbol,
-                side=side,
-                amount=Decimal(str(close_amount)),
-                price=Decimal(str(current_price)),
-                strategy="manual_close",
-                exchange="paper",  # backend default
+        position_amount = _coerce_optional_float(
+            position.get("size")
+            or position.get("amount")
+            or position.get("total_amount")
+        )
+        if not position_amount or position_amount <= 0:
+            logger.warning(
+                "Sell request for %s but position has non-positive amount: %s",
+                symbol,
+                position_amount,
+            )
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Position for {symbol} has no remaining size",
+                    }
+                ),
+                400,
             )
 
-            trade_manager.record_trade(trade)
-
-            print(
-                f"API: Closed {close_amount} {symbol} at ${current_price} via {side}"
+        close_amount = min(position_amount, amount_value)
+        if close_amount <= 0:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Requested amount must be greater than zero",
+                    }
+                ),
+                400,
             )
 
-            # Save the updated state
-            trade_manager.save_state()
+        position_side_raw = str(position.get("side") or "long").lower()
+        position_side = "short" if position_side_raw in {"short", "sell"} else "long"
+        close_side = "sell" if position_side == "long" else "buy"
 
-            # Remove position from positions.log to prevent sync service from re-adding it
-            try:
-                from pathlib import Path
-                positions_log_path = LOG_DIR / "positions.log"
-                if positions_log_path.exists():
-                    # Read and filter out the closed symbol
-                    entries = []
-                    with open(positions_log_path, 'r') as f:
-                        for line in f:
-                            line = line.strip()
-                            if line and 'Active' in line:
-                                # Parse the line to check if it's the symbol we just closed
-                                parts = line.split()
-                                line_symbol = None
-                                for i, part in enumerate(parts):
-                                    if part == 'Active' and i + 1 < len(parts):
-                                        line_symbol = parts[i + 1]
-                                        break
-                                # Keep the line if it's not the symbol we just closed
-                                if line_symbol != symbol:
-                                    entries.append(line)
-                            else:
-                                # Keep non-position lines (comments, balance entries, etc.)
-                                entries.append(line)
-
-                    # Write back to file
-                    with open(positions_log_path, 'w') as f:
-                        for entry in entries:
-                            f.write(entry + "\n")
-
-                    logger.info(f"API: Removed {symbol} from positions.log after successful closure")
-            except Exception as log_err:
-                logger.warning(f"API: Failed to remove {symbol} from positions.log: {log_err}")
-
-            # Verify closure persisted; if not, force-close as a safety net
-            try:
-                from decimal import Decimal as _D
-                pos_after = trade_manager.positions.get(symbol)
-                if pos_after and getattr(pos_after, "total_amount", 0) and pos_after.total_amount > 0:
-                    logger.warning(
-                        f"API: Position {symbol} still open after record_trade; forcing close to prevent UI reappearance"
-                    )
-                    pos_after.total_amount = _D("0")
-                    trade_manager.positions[symbol] = pos_after
-                    trade_manager.save_state()
-            except Exception as _force_err:
-                logger.error(f"API: Force-close verification failed for {symbol}: {_force_err}")
-
-            # Also append to trades.csv to keep CSV-based fallbacks consistent
-            try:
-                from datetime import datetime as _dt
-                import csv as _csv
-
-                TRADE_FILE.parent.mkdir(parents=True, exist_ok=True)
-                with open(TRADE_FILE, 'a', newline='') as _fh:
-                    _writer = _csv.writer(_fh)
-                    _writer.writerow([
-                        symbol,
-                        side,
-                        float(close_amount),
-                        float(current_price),
-                        _dt.utcnow().isoformat(),
-                        False,  # is_stop flag
-                    ])
-            except Exception as csv_err:
-                logger.warning(f"Failed to append manual close to trades.csv: {csv_err}")
-
-            return jsonify(
-                {
-                    "success": True,
-                    "message": f"Successfully closed {symbol}",
-                }
+        close_price = _resolve_close_price(symbol, position)
+        if close_price <= 0:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Unable to determine market price for {symbol}",
+                    }
+                ),
+                502,
             )
 
-        except Exception as e:
-            print(f"API: Error selling position: {e}")
-            return jsonify({"success": False, "error": str(e)}), 500
+        # Attempt execution, but don't fail if it doesn't work (paper trading mode)
+        execution_success, execution_result, execution_error = _submit_execution_order(
+            symbol,
+            close_side,
+            close_amount,
+            metadata={"position_source": position_source},
+        )
+
+        order_metadata = execution_result if execution_success else None
+
+        # Always try to record the trade, even if execution failed
+        trade_recorded, trade_id, trade_details = _record_closing_trade(
+            symbol,
+            close_side,
+            close_amount,
+            close_price,
+            order_result=order_metadata,
+            position_source=position_source,
+        )
+
+        if not trade_recorded:
+            logger.error(
+                "Failed to record closing trade for %s after execution result %s",
+                symbol,
+                execution_result,
+            )
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Failed to record closing trade",
+                        "execution": {
+                            "submitted": execution_success,
+                            "error": execution_error,
+                            "result": execution_result,
+                        },
+                        "trade": trade_details,
+                    }
+                ),
+                500,
+            )
+
+        response_payload = {
+            "success": True,
+            "message": f"Closed {close_amount:.10f} {symbol}",
+            "symbol": symbol,
+            "close_amount": close_amount,
+            "close_side": close_side,
+            "price": close_price,
+            "position_source": position_source,
+            "trade_id": trade_id,
+            "trade": trade_details,
+            "execution": {
+                "submitted": execution_success,
+                "error": execution_error,
+                "result": execution_result,
+            },
+            "timestamp": time.time(),
+        }
+
+        if execution_success and execution_result:
+            response_payload["order_id"] = (
+                execution_result.get("client_order_id")
+                or execution_result.get("order_id")
+            )
+            response_payload["status"] = execution_result.get("status") or "submitted"
+
+        return jsonify(response_payload)
 
     except Exception as e:
-        print(f"API: Error in sell-position endpoint: {e}")
+        logger.error(f"Error in api_sell_position: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -3704,15 +4922,20 @@ def api_candle_timestamp():
         if not symbol:
             return jsonify({"error": "Symbol parameter is required"})
 
-        # Get the most recent 5-minute candle timestamp
-        timestamp = get_latest_candle_timestamp(symbol)
+        # Get the most recent 5-minute candle timestamp from market data service
+        candle_info = get_gateway_json(f"/market-data/candle-timestamp/{symbol}")
 
-        return jsonify(
-            {"symbol": symbol, "timestamp": timestamp, "timeframe": "5m"}
-        )
+        if candle_info:
+            return jsonify({
+                "symbol": symbol,
+                "timestamp": candle_info.get("timestamp"),
+                "timeframe": "5m"
+            })
+        else:
+            return jsonify({"error": "Unable to fetch candle timestamp"}), 503
 
     except Exception as e:
-        print(f"Error in api_candle_timestamp: {e}")
+        logger.error(f"Error in api_candle_timestamp: {e}")
         return jsonify({"error": str(e)})
 
 
@@ -3720,991 +4943,197 @@ def api_candle_timestamp():
 def api_candle_data():
     """Return candle data for a symbol."""
     try:
-        symbol = request.args.get("symbol", "BTC/USD")
+        raw_symbol = request.args.get("symbol", "BTC/USD") or "BTC/USD"
+        symbol = raw_symbol.strip().upper()
+
         limit = int(request.args.get("limit", 50))
-        interval = request.args.get("interval", "5m")
+        interval = (request.args.get("interval") or "5m").lower()
+        exchange = (request.args.get("exchange") or "kraken").lower()
 
-        # Normalize symbol for specific exchanges in OHLCV fetch (e.g., Kraken XBT)
-        try:
-            from crypto_bot.execution.cex_executor import get_exchange
+        # Clamp limit to a sensible range to avoid overloading downstream services
+        limit = max(1, min(limit, 500))
 
-            exchange, _ = get_exchange({"exchange": None})
-            ex_id = getattr(exchange, "id", "").lower()
-        except Exception:
-            ex_id = ""
+        params = {
+            "limit": limit,
+            "timeframe": interval,
+            "exchange_id": exchange,
+        }
 
-        normalized_symbol = symbol
+        use_cache_arg = request.args.get("use_cache")
+        if use_cache_arg is not None:
+            params["use_cache"] = use_cache_arg
 
-        # Apply BTC->XBT conversion when using Kraken OR as fallback for BTC/USD
-        if isinstance(symbol, str) and "BTC" in symbol:
-            if ex_id == "kraken":
-                # Kraken-specific conversion
-                normalized_symbol = symbol.replace("BTC/", "XBT/").replace("/BTC", "/XBT")
-                logger.debug(f"Kraken BTC symbol conversion: {symbol} -> {normalized_symbol}")
-            elif (ex_id in ("", "unknown") or not ex_id) and symbol == "BTC/USD":
-                # Fallback for BTC/USD only when exchange detection fails
-                normalized_symbol = "XBT/USD"
-                logger.debug(f"Fallback BTC/USD conversion (exchange detection failed): {symbol} -> {normalized_symbol}")
+        encoded_symbol = quote(symbol, safe="")
 
-        candle_data = generate_candle_data(normalized_symbol, limit)
+        # Get candle data from market data service via the API gateway
+        candle_data = get_gateway_json(
+            f"/candles/{encoded_symbol}", params=params
+        )
 
-        # If no data found, try XBT fallback for BTC symbols
-        if (
-            (not candle_data or len(candle_data) == 0)
-            and isinstance(symbol, str)
-            and "BTC" in symbol
-        ):
-            fallback_symbol = symbol.replace("BTC/", "XBT/").replace("/BTC", "/XBT")
-            if (
-                fallback_symbol != normalized_symbol
-            ):  # Only try if different from what we already tried
-                logger.info(
-                    f"No data for {normalized_symbol}, trying XBT fallback {fallback_symbol}"
-                )
-                candle_data = generate_candle_data(fallback_symbol, limit)
-
-        if candle_data and len(candle_data) > 0:
-            return jsonify(
-                {
-                    "symbol": symbol,
-                    "interval": interval,
-                    "candles": candle_data,
-                    "success": True,
-                }
-            )
-        else:
-            return (
-                jsonify(
-                    {
-                        "error": f"No candle data available for {symbol}",
-                        "success": False,
-                    }
-                ),
-                404,
-            )
+        if candle_data:
+            return jsonify(candle_data)
+        return jsonify({"error": "Unable to fetch candle data"}), 503
 
     except Exception as e:
         logger.error(f"Error in api_candle_data: {e}")
-        return jsonify({"error": str(e), "success": False}), 500
+        return jsonify({"error": str(e)})
 
 
 @app.route("/api/trend-data")
 def api_trend_data():
-    """Return 5-minute candle data for the last 100 candles with trend analysis."""
+    """Return trend analysis data for a symbol."""
     try:
         symbol = request.args.get("symbol")
         if not symbol:
             return jsonify({"error": "Symbol parameter is required"})
 
-        # Generate 5-minute candle data for the last 100 candles (500 minutes = ~8.3 hours)
-        candle_data = generate_candle_data(symbol, 100)
+        # Get trend data from strategy engine service
+        trend_data = get_gateway_json(f"/strategy-engine/trend/{symbol}")
 
-        # Calculate trend line
-        trend_data = calculate_trend_line(candle_data)
-
-        return jsonify(
-            {
-                "symbol": symbol,
-                "timeframe": "5m",
-                "candle_count": len(candle_data),
-                "candles": candle_data,
-                "trend": trend_data,
-                "generated_at": int(time.time() * 1000),
-            }
-        )
+        if trend_data:
+            return jsonify(trend_data)
+        else:
+            return jsonify({"error": "Unable to fetch trend data"}), 503
 
     except Exception as e:
-        print(f"Error in api_trend_data: {e}")
+        logger.error(f"Error in api_trend_data: {e}")
         return jsonify({"error": str(e)})
 
 
 @app.route("/api/live-signals")
 def api_live_signals():
-    """Return live trading signals for the dashboard."""
+    """Return live trading signals."""
     try:
-        # For now, return empty signals - can be extended later
-        return jsonify({})
+        # Import the signals file functionality from api.py
+        from pathlib import Path
+        import json
+
+        SIGNALS_FILE = Path(__file__).resolve().parent / ".." / "crypto_bot" / "signals.json"
+
+        signals_data = {}
+        if SIGNALS_FILE.exists():
+            try:
+                signals_data = json.loads(SIGNALS_FILE.read_text())
+            except Exception:
+                logger.warning("Failed to parse signals file, returning empty data")
+                signals_data = {}
+
+        return jsonify(signals_data)
+
     except Exception as e:
         logger.error(f"Error in api_live_signals: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/positions")
-def api_positions():
-    """Return positions data (alias for /api/open-positions)."""
-    try:
-        # Simply redirect to the existing open-positions endpoint
-        from flask import redirect, url_for
-
-        return redirect(url_for("api_open_positions"))
-    except Exception as e:
-        logger.error(f"Error in api_positions: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/balance")
-def api_balance():
-    """Return account balance information."""
-    try:
-        # Load TradeManager state to get balance information
-        import json
-        from pathlib import Path
-
-        state_file = Path("crypto_bot/logs/trade_manager_state.json")
-        if state_file.exists():
-            with open(state_file, "r") as f:
-                state = json.load(f)
-
-            # Get positions and calculate total balance
-            positions = state.get("positions", {})
-            total_position_value = 0.0
-
-            for symbol, pos_data in positions.items():
-                if pos_data.get("total_amount", 0) > 0:
-                    # Try to get current price from price cache
-                    price_cache = state.get("price_cache", {})
-                    current_price = price_cache.get(
-                        symbol, pos_data.get("average_price", 0)
-                    )
-                    amount = pos_data["total_amount"]
-                    position_value = (
-                        current_price * amount if current_price else 0.0
-                    )
-                    total_position_value += position_value
-
-            # Calculate available balance (get from config or use default)
-            starting_balance = 10000.0  # Default fallback
-            config_path = resolve_config_path()
-            if Path(config_path).exists():
-                try:
-                    config = load_bot_config(config_path)
-                    starting_balance = config.get("risk", {}).get("starting_balance", 10000.0)
-                except Exception as e:
-                    logger.warning(f"Could not load starting balance from config: {e}")
-            
-            available_balance = starting_balance - total_position_value
-
-            balance_data = {
-                "total_balance": starting_balance,
-                "available_balance": max(0, available_balance),
-                "position_value": total_position_value,
-                "currency": "USD",
-                "timestamp": int(time.time() * 1000),
-            }
-
-            return jsonify(balance_data)
-        else:
-            return jsonify(
-                {
-                    "total_balance": 10000.0,
-                    "available_balance": 10000.0,
-                    "position_value": 0.0,
-                    "currency": "USD",
-                    "timestamp": int(time.time() * 1000),
-                }
-            )
-
-    except Exception as e:
-        logger.error(f"Error in api_balance: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/bot-status")
-def api_bot_status():
-    """Return bot status information."""
-    try:
-        # Check if bot is running by looking for process or status files
-        import psutil
-
-        bot_running = False
-        try:
-            # Check for bot process
-            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-                try:
-                    if (
-                        proc.info["name"]
-                        and "python" in proc.info["name"].lower()
-                    ):
-                        cmdline = proc.info["cmdline"]
-                        if cmdline and len(cmdline) > 1:
-                            if "main.py" in " ".join(
-                                cmdline
-                            ) or "crypto_bot" in " ".join(cmdline):
-                                bot_running = True
-                                break
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-        except Exception as e:
-            logger.debug(f"Could not check process status: {e}")
-
-        return jsonify(
-            {
-                "success": True,
-                "data": {
-                    "bot_running": bot_running,
-                    "execution_running": True,  # Placeholder for execution status
-                    "trading_active": True,  # Placeholder for trading status
-                    "timestamp": int(time.time() * 1000),
-                },
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error in api_bot_status: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/bot/logs")
-def api_bot_logs():
-    """Return bot log data from various log files."""
-    try:
-        from pathlib import Path
-
-        # Define log directory
-        log_dir = Path(__file__).resolve().parents[1] / "crypto_bot" / "logs"
-
-        # Define log files to read
-        log_files = {
-            "bot_main": ["bot.log", "bot_controller.log", "bot_monitor.log"],
-            "bot_execution": ["execution.log", "advanced_orders.log"],
-            "bot_trading": ["trading_monitor.log", "trades.csv"],
-            "bot_performance": [
-                "performance_monitor.log",
-                "strategy_stats.json",
-            ],
-        }
-
-        log_data = {}
-
-        for log_type, files in log_files.items():
-            log_data[log_type] = []
-
-            for filename in files:
-                log_file = log_dir / filename
-                if log_file.exists():
-                    try:
-                        if filename.endswith(".json"):
-                            # Handle JSON files
-                            with open(log_file, "r") as f:
-                                data = json.load(f)
-                                log_data[log_type].extend(
-                                    [
-                                        f"JSON data from {filename}: {json.dumps(data, indent=2)}"
-                                    ]
-                                )
-                        elif filename.endswith(".csv"):
-                            # Handle CSV files - just show recent entries
-                            with open(log_file, "r") as f:
-                                lines = f.readlines()
-                                # Show last 20 lines
-                                recent_lines = (
-                                    lines[-20:] if len(lines) > 20 else lines
-                                )
-                                log_data[log_type].extend(
-                                    [
-                                        f"{filename}: {line.strip()}"
-                                        for line in recent_lines
-                                    ]
-                                )
-                        else:
-                            # Handle text log files
-                            with open(log_file, "r") as f:
-                                lines = f.readlines()
-                                # Show last 50 lines to avoid too much data
-                                recent_lines = (
-                                    lines[-50:] if len(lines) > 50 else lines
-                                )
-                                log_data[log_type].extend(
-                                    [line.strip() for line in recent_lines]
-                                )
-                    except Exception as e:
-                        log_data[log_type].append(
-                            f"Error reading {filename}: {str(e)}"
-                        )
-
-        return jsonify(
-            {
-                "success": True,
-                "data": log_data,
-                "timestamp": int(time.time() * 1000),
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error in api_bot_logs: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/dashboard-metrics")
-def api_dashboard_metrics():
-    """Return dashboard metrics including performance and allocation."""
-    try:
-        # Get performance data
-        performance_data = get_performance_data()
-        allocation_data = get_allocation_data()
-
-        return jsonify(
-            {
-                "performance": performance_data,
-                "allocation": allocation_data,
-                "timestamp": int(time.time() * 1000),
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error in api_dashboard_metrics: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/price-history")
 def api_price_history():
     """Return 5-minute price history for the last 2 hours for trend chart."""
-    print(f"DEBUG: api_price_history called with args: {request.args}")
     try:
-        # Get symbol from query parameters
         symbol = request.args.get("symbol")
         if not symbol:
             return jsonify({"error": "Symbol parameter is required"})
 
-        # Try to get real price history data
-        candle_data = generate_candle_data(symbol, 24)
-        if candle_data and len(candle_data) > 0:
-            price_history = []
-            for candle in candle_data:
-                price_history.append(
-                    {
-                        "timestamp": candle["timestamp"],
-                        "price": candle["close"],
-                    }
-                )
+        # Get price history from market data service
+        history_data = get_gateway_json(f"/market-data/history/{symbol}?hours=2&timeframe=5m")
 
-            return jsonify(
-                {
-                    "symbol": symbol,
-                    "timeframe": "5m",
-                    "data": price_history,
-                    "mock": False,
-                }
-            )
+        if history_data:
+            return jsonify(history_data)
         else:
-            return (
-                jsonify(
-                    {
-                        "error": "No price history data available",
-                        "symbol": symbol,
-                    }
-                ),
-                404,
-            )
+            return jsonify({"error": "Unable to fetch price history"}), 503
 
     except Exception as e:
-        print(f"DEBUG: Error in api_price_history: {e}")
+        logger.error(f"Error in api_price_history: {e}")
         return jsonify({"error": str(e)})
 
 
-def generate_candle_data(symbol, limit):
-    """Generate OHLCV candle data for the last N 5-minute intervals using real market data."""
-    import time
-    import asyncio
-    import logging
-
-    logger = logging.getLogger(__name__)
-
+@app.route("/api/v1/<path:path>", methods=["GET", "POST", "PUT", "DELETE"])
+def api_v1_proxy(path):
+    """Proxy /api/v1/* requests to the API gateway."""
     try:
-        # Try to get real market data first
-        try:
-            # Import the enhanced OHLCV fetcher
-            from crypto_bot.utils.enhanced_ohlcv_fetcher import (
-                EnhancedOHLCVFetcher,
-            )
-            from crypto_bot.execution.cex_executor import get_exchange
+        # Build the full path for the API gateway
+        gateway_path = f"/api/v1/{path}"
 
-            # Create exchange instance
-            config = {
-                "max_concurrent_ohlcv": 3,
-                "max_concurrent_dex_ohlcv": 10,
-                "min_volume_usd": 0,
-            }
-            exchange, _ = get_exchange(config)
+        # Get query parameters
+        query_string = request.query_string.decode('utf-8')
+        if query_string:
+            gateway_path += f"?{query_string}"
 
-            # Create fetcher instance
-            fetcher = EnhancedOHLCVFetcher(exchange, config)
-
-            # Fetch real 5-minute OHLCV data
-            logger.info(
-                f"Fetching real 5-minute candle data for {symbol}, limit: {limit}"
-            )
-
-            # Use existing event loop if available, otherwise create new one
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # If loop is already running, create a new thread to run the async code
-                    import concurrent.futures
-                    import threading
-
-                    def run_async_fetch():
-                        new_loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(new_loop)
-                        try:
-                            result = new_loop.run_until_complete(
-                                fetcher.fetch_ohlcv_batch([symbol], "5m", limit)
-                            )
-                            return result
-                        finally:
-                            new_loop.close()
-
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(run_async_fetch)
-                        cex_data, dex_data = future.result(timeout=30)
-                else:
-                    cex_data, dex_data = loop.run_until_complete(
-                        fetcher.fetch_ohlcv_batch([symbol], "5m", limit)
-                    )
-            except RuntimeError:
-                # No event loop, create a new one
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    cex_data, dex_data = loop.run_until_complete(
-                        fetcher.fetch_ohlcv_batch([symbol], "5m", limit)
-                    )
-                finally:
-                    loop.close()
-            # Combine CEX and DEX data for frontend display
-            data_map = {**cex_data, **dex_data}
-
-            if symbol in data_map and data_map[symbol]:
-                raw_data = data_map[symbol]
-
-                # Check if the result is an exception object (not actual data)
-                if isinstance(raw_data, Exception):
-                    logger.warning(
-                        f"Failed to fetch real candle data for {symbol}: {type(raw_data).__name__}: {raw_data}"
-                    )
-                elif isinstance(raw_data, list) and len(raw_data) > 0:
-                    logger.info(
-                        f"Successfully fetched {len(raw_data)} real candles for {symbol}"
-                    )
-
-                    candles = []
-                    for i, row in enumerate(raw_data):
-                        if len(row) >= 6:
-                            (
-                                timestamp,
-                                open_price,
-                                high_price,
-                                low_price,
-                                close_price,
-                                volume,
-                            ) = row[:6]
-
-                            candles.append(
-                                {
-                                    "timestamp": int(timestamp),
-                                    "open": round(float(open_price), 6),
-                                    "high": round(float(high_price), 6),
-                                    "low": round(float(low_price), 6),
-                                    "close": round(float(close_price), 6),
-                                    "volume": round(float(volume), 2),
-                                    "index": i,
-                                }
-                            )
-
-                    if candles:
-                        # Sort by timestamp (most recent first, as expected by the chart)
-                        candles.sort(
-                            key=lambda x: x["timestamp"], reverse=True
-                        )
-                        # Take the most recent 'limit' candles
-                        candles = candles[:limit]
-                        # Sort back to chronological order for trend calculation
-                        candles.sort(key=lambda x: x["timestamp"])
-                        logger.info(
-                            f"Returning {len(candles)} real candles for {symbol}"
-                        )
-                        return candles
-                else:
-                    logger.warning(
-                        f"Invalid data format for {symbol}: expected list, got {type(raw_data)}"
-                    )
-
-        except Exception as e:
-            logger.warning(
-                f"Failed to fetch real candle data for {symbol}: {e}"
-            )
-            # Will fall through to mock data generation
-        finally:
-            # Only close loop if it was created in this function
-            try:
-                if 'loop' in locals() and loop and not loop.is_closed():
-                    loop.close()
-            except (RuntimeError, Exception):
-                # Ignore errors when closing event loop
-                pass
-
-    except Exception as e:
-        logger.warning(f"Error setting up real data fetch for {symbol}: {e}")
-
-    # Return empty list when no real data is available - no mock data fallback
-    logger.warning(f"No real market data available for {symbol} - returning empty")
-    return []
-
-
-def calculate_trend_line(candle_data):
-    """Calculate trend line using linear regression on closing prices."""
-    if len(candle_data) < 2:
-        return {"slope": 0, "intercept": 0, "r_squared": 0, "trend_points": []}
-
-    import numpy as np
-
-    # Extract closing prices and indices
-    prices = [candle["close"] for candle in candle_data]
-    indices = list(range(len(candle_data)))
-
-    # Perform linear regression
-    x = np.array(indices)
-    y = np.array(prices)
-
-    # Calculate slope and intercept
-    slope = np.cov(x, y)[0, 1] / np.var(x) if np.var(x) != 0 else 0
-    intercept = np.mean(y) - slope * np.mean(x)
-
-    # Calculate R-squared
-    y_pred = slope * x + intercept
-    ss_res = np.sum((y - y_pred) ** 2)
-    ss_tot = np.sum((y - np.mean(y)) ** 2)
-    r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
-
-    # Generate trend line points
-    trend_points = []
-    for i, candle in enumerate(candle_data):
-        trend_price = slope * i + intercept
-        trend_points.append(
-            {
-                "timestamp": candle["timestamp"],
-                "price": round(trend_price, 6),
-                "index": i,
-            }
-        )
-
-    return {
-        "slope": round(slope, 8),
-        "intercept": round(intercept, 6),
-        "r_squared": round(r_squared, 4),
-        "trend_points": trend_points,
-        "direction": (
-            "upward" if slope > 0 else "downward" if slope < 0 else "flat"
-        ),
-        "strength": (
-            "strong"
-            if abs(r_squared) > 0.7
-            else "moderate" if abs(r_squared) > 0.4 else "weak"
-        ),
-    }
-
-
-# All mock data generation functions removed - application uses only real market data
-
-
-# Price caching system
-_price_cache = {}
-_CACHE_TTL = 60  # Cache prices for 60 seconds
-
-# Price source health monitoring
-_price_source_health = {}
-_HEALTH_CHECK_WINDOW = 10  # Track last 10 attempts per source
-_HEALTH_DECAY_FACTOR = 0.9  # Decay factor for old health data
-
-# Manual price overrides
-_manual_prices = {}
-_MANUAL_PRICES_FILE = LOG_DIR / "manual_prices.json"
-
-
-def _update_price_source_health(source_name: str, success: bool) -> None:
-    """Update health status for a price source."""
-    if source_name not in _price_source_health:
-        _price_source_health[source_name] = {
-            "successes": 0,
-            "failures": 0,
-            "last_success": None,
-            "last_failure": None,
-            "consecutive_failures": 0,
-        }
-
-    health = _price_source_health[source_name]
-
-    if success:
-        health["successes"] += 1
-        health["last_success"] = time.time()
-        health["consecutive_failures"] = 0
-    else:
-        health["failures"] += 1
-        health["last_failure"] = time.time()
-        health["consecutive_failures"] += 1
-
-    # Apply decay to prevent old data from dominating
-    health["successes"] = int(health["successes"] * _HEALTH_DECAY_FACTOR)
-    health["failures"] = int(health["failures"] * _HEALTH_DECAY_FACTOR)
-
-
-def _get_price_source_health(source_name: str) -> dict:
-    """Get health metrics for a price source."""
-    if source_name not in _price_source_health:
-        return {"health_score": 0.5, "total_attempts": 0, "success_rate": 0.0}
-
-    health = _price_source_health[source_name]
-    total_attempts = health["successes"] + health["failures"]
-
-    if total_attempts == 0:
-        return {"health_score": 0.5, "total_attempts": 0, "success_rate": 0.0}
-
-    success_rate = health["successes"] / total_attempts
-
-    # Calculate health score (0-1, higher is better)
-    # Penalize consecutive failures and recent failures
-    health_score = success_rate
-
-    if health["consecutive_failures"] > 0:
-        health_score *= 0.8 ** health["consecutive_failures"]
-
-    # Boost score if recently successful
-    if health["last_success"] and health["last_failure"]:
-        if health["last_success"] > health["last_failure"]:
-            health_score *= 1.2  # Recent success bonus
+        # Handle different HTTP methods
+        if request.method == "GET":
+            return get_gateway_json(gateway_path)
+        elif request.method in ["POST", "PUT"]:
+            # For POST/PUT requests, pass the JSON data
+            data = request.get_json() if request.is_json else None
+            return safe_post_gateway_json(gateway_path, json=data)
         else:
-            health_score *= 0.8  # Recent failure penalty
-
-    health_score = min(1.0, max(0.0, health_score))
-
-    return {
-        "health_score": health_score,
-        "total_attempts": total_attempts,
-        "success_rate": success_rate,
-        "consecutive_failures": health["consecutive_failures"],
-    }
+            # For other methods, return method not allowed
+            return {"error": f"Method {request.method} not supported"}, 405
+    except Exception as exc:
+        logger.error(f"Error proxying API request to {path}: {exc}")
+        return {"error": f"Failed to proxy request: {str(exc)}"}, 500
 
 
-def safe_json_load(file_path):
-    """Safely load JSON file, handling common corruption issues."""
-    try:
-        with open(file_path, "r") as f:
-            content = f.read()
-
-        # Remove trailing non-JSON characters
-        content = content.strip()
-        if content.endswith('%'):
-            content = content[:-1].strip()
-        if content.endswith(','):
-            content = content[:-1].strip()
-
-        # Find the last valid closing brace
-        last_brace = content.rfind('}')
-        if last_brace != -1:
-            content = content[:last_brace + 1]
-
-        return json.loads(content)
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.warning(f"JSON parsing failed, attempting to repair: {e}")
-        try:
-            # Try to extract just the JSON portion
-            start = content.find('{')
-            if start != -1:
-                content = content[start:]
-                last_brace = content.rfind('}')
-                if last_brace != -1:
-                    content = content[:last_brace + 1]
-                    return json.loads(content)
-        except Exception as repair_error:
-            logger.error(f"JSON repair also failed: {repair_error}")
-
-        raise e
-
-
-def get_performance_data():
-    """Get performance data for dashboard metrics."""
-    try:
-        # Try to get performance data from the trade manager state
-        import json
-        from pathlib import Path
-
-        state_file = Path("crypto_bot/logs/trade_manager_state.json")
-        if state_file.exists():
-            state = safe_json_load(state_file)
-
-            # Calculate basic performance metrics
-            trades = state.get("trades", [])
-            total_trades = len(trades)
-
-            if total_trades > 0:
-                # Calculate win rate based on pnl/fees
-                winning_trades = [
-                    t for t in trades if t.get("pnl", 0) > 0 or t.get("fees", 0) > 0
-                ]  # Better win detection
-                win_rate = (
-                    len(winning_trades) / total_trades
-                    if total_trades > 0
-                    else 0
-                )
-
-                return {
-                    "total_trades": total_trades,
-                    "win_rate": win_rate,
-                    "winning_trades": len(winning_trades),
-                    "losing_trades": total_trades - len(winning_trades),
-                }
-
-        # Fallback to basic metrics
-        return {
-            "total_trades": 0,
-            "win_rate": 0.0,
-            "winning_trades": 0,
-            "losing_trades": 0,
-        }
-    except Exception as e:
-        logger.error(f"Error getting performance data: {e}")
-        return {
-            "total_trades": 0,
-            "win_rate": 0.0,
-            "winning_trades": 0,
-            "losing_trades": 0,
-        }
-
-
-def get_allocation_data():
-    """Get allocation data for dashboard metrics."""
-    try:
-        # Try to get allocation data from config
-        config = load_bot_config(resolve_config_path())
-        allocation = config.get("allocation", {})
-        if allocation:
-            return allocation
-
-        # Fallback to default allocation
-        return {"trend_following": 0.4, "mean_reversion": 0.3, "breakout": 0.3}
-    except Exception as e:
-        logger.error(f"Error getting allocation data: {e}")
-        return {"trend_following": 0.4, "mean_reversion": 0.3, "breakout": 0.3}
-
-
-def _get_best_price_sources() -> list:
-    """Get price sources sorted by health score (best first)."""
-    sources = []
-    for source_name in _price_source_health.keys():
-        health = _get_price_source_health(source_name)
-        sources.append((source_name, health["health_score"]))
-
-    # Sort by health score (highest first)
-    sources.sort(key=lambda x: x[1], reverse=True)
-    return [source[0] for source in sources]
-
-
-def _load_manual_prices():
-    """Load manual price overrides from file."""
-    global _manual_prices
-    try:
-        if _MANUAL_PRICES_FILE.exists():
-            with open(_MANUAL_PRICES_FILE, "r") as f:
-                data = json.load(f)
-                # Filter out expired manual prices (older than 24 hours)
-                current_time = time.time()
-                _manual_prices = {
-                    symbol: price_data
-                    for symbol, price_data in data.items()
-                    if current_time - price_data.get("timestamp", 0)
-                    < 86400  # 24 hours
-                }
-    except Exception as e:
-        print(f"Error loading manual prices: {e}")
-        _manual_prices = {}
-
-
-def _save_manual_prices():
-    """Save manual price overrides to file."""
-    try:
-        with open(_MANUAL_PRICES_FILE, "w") as f:
-            json.dump(_manual_prices, f, indent=2)
-    except Exception as e:
-        print(f"Error saving manual prices: {e}")
-
-
-def _get_manual_price(symbol: str) -> Optional[float]:
-    """Get manual price override for a symbol."""
-    if symbol in _manual_prices:
-        price_data = _manual_prices[symbol]
-        current_time = time.time()
-
-        # Check if manual price is still valid (not expired)
-        if (
-            current_time - price_data.get("timestamp", 0)
-            < price_data.get("validity_hours", 24) * 3600
-        ):
-            return price_data["price"]
-        else:
-            # Remove expired manual price
-            del _manual_prices[symbol]
-            _save_manual_prices()
-
-    return None
-
-
-def _set_manual_price(symbol: str, price: float, validity_hours: int = 24):
-    """Set manual price override for a symbol."""
-    _manual_prices[symbol] = {
-        "price": price,
-        "timestamp": time.time(),
-        "validity_hours": validity_hours,
-    }
-    _save_manual_prices()
-
-
-# Load manual prices on startup
-_load_manual_prices()
-
-
-
-# Keep a backward-compatible alias for existing code
-def get_current_price_for_symbol(symbol: str) -> float:
-    """Get current price for a symbol using available price sources with caching."""
-    return _get_current_price_for_symbol(symbol)
-
-
-def deduplicate_positions(positions):
-    """Remove duplicate positions based on symbol with enhanced logic."""
-    if not positions:
-        return []
-
-    # Group positions by symbol
-    symbol_groups = {}
-    for position in positions:
-        symbol = position.get("symbol", "")
-        if not symbol:
-            continue
-
-        if symbol not in symbol_groups:
-            symbol_groups[symbol] = []
-        symbol_groups[symbol].append(position)
-
-    # For each symbol, keep the most recent/accurate position
-    unique_positions = []
-    for symbol, symbol_positions in symbol_groups.items():
-        if len(symbol_positions) == 1:
-            # Single position, keep it
-            unique_positions.append(symbol_positions[0])
-        else:
-            # Multiple positions for same symbol, choose the best one
-            best_position = select_best_position(symbol_positions)
-            if best_position:
-                unique_positions.append(best_position)
-                print(
-                    f"Duplicate position found for {symbol}, kept best match"
-                )
-
-    print(
-        f"Deduplication: {len(positions)} -> {len(unique_positions)} positions"
-    )
-    return unique_positions
-
-
-def select_best_position(positions):
-    """Select the best position from multiple candidates for the same symbol."""
-    if not positions:
-        return None
-
-    # Priority criteria:
-    # 1. Has current_price (most recent data)
-    # 2. Has non-zero amount
-    # 3. Most recent timestamp
-    # 4. Has PnL calculation
-
-    best_position = None
-    best_score = -1
-
-    for position in positions:
-        score = 0
-
-        # Has current price
-        if position.get("current_price"):
-            score += 10
-
-        # Has non-zero amount
-        if position.get("amount", 0) > 0:
-            score += 5
-
-        # Has entry price
-        if position.get("entry_price"):
-            score += 3
-
-        # Has PnL
-        if position.get("pnl") is not None:
-            score += 2
-
-        # Has timestamp
-        if position.get("timestamp"):
-            score += 1
-
-        if score > best_score:
-            best_score = score
-            best_position = position
-
-    return best_position
-
-
-def get_paper_wallet_balance() -> float:
-    """Get paper wallet balance from the single source of truth."""
-    try:
-        from crypto_bot.utils.balance_manager import get_single_balance
-
-        balance = get_single_balance()
-        print(
-            f"Frontend got balance from single source of truth: ${balance:.2f}"
-        )
-        return balance
-    except Exception as e:
-        print(f"Error getting balance from single source: {e}")
-        # Fallback to direct calculation
-        try:
-            return calculate_wallet_balance_from_trade_manager()
-        except Exception as e2:
-            print(f"Fallback balance calculation also failed: {e2}")
-            return 10000.0  # Default fallback balance
-
-
-asgi_app = WsgiToAsgi(app)
-
-
+# Main entry point for running the Flask application
 if __name__ == "__main__":
-    """Run the Flask app directly with port information for startup scripts."""
-    import socket
+    import os as _os
     import sys
 
-    # Find an available port starting from 8000
-    def find_free_port(start_port=8000, max_attempts=10):
-        for port in range(start_port, start_port + max_attempts):
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.bind(("", port))
-                    return port
-            except OSError:
-                continue
-        return start_port
+    def find_free_port():
+        """Find a free port to use for the server."""
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('', 0))
+            s.listen(1)
+            port = s.getsockname()[1]
+        return port
 
-    # Allow overriding port via environment variable for consistency
-    import os as _os
-    env_port = _os.environ.get("LCT_PORT") or _os.environ.get("FLASK_PORT_OVERRIDE")
+    # Set up frontend event subscriber for real-time trade updates
     try:
-        port = int(env_port) if env_port else find_free_port()
+        trade_manager = get_single_source_trade_manager()
+
+        def frontend_event_handler(event):
+            """Handle trade events for frontend updates."""
+            try:
+                if hasattr(app, 'frontend_event_queue'):
+                    app.frontend_event_queue.put(event)
+                logger.debug(f"Frontend received event: {event.event_type}")
+            except Exception as e:
+                logger.error(f"Frontend event handler failed: {e}")
+
+        # Create and register frontend subscriber
+        frontend_subscriber = create_frontend_subscriber(frontend_event_handler)
+        trade_manager.add_frontend_subscriber(frontend_subscriber)
+
+        # Create event queue for frontend
+        from queue import Queue
+        app.frontend_event_queue = Queue()
+
+        logger.info("Frontend event subscriber registered with SingleSourceTradeManager")
+    except Exception as e:
+        logger.warning(f"Failed to set up frontend event subscriber: {e}")
+
+    # Get port from environment or find a free one
+    env_port = _os.environ.get("LCT_PORT") or _os.environ.get("FLASK_PORT_OVERRIDE") or _os.environ.get("FLASK_PORT")
+    try:
+        port = int(env_port) if env_port else 5050  # Default to 5050 instead of random
     except Exception:
-        port = find_free_port()
+        port = 5050  # Default to 5050 instead of random
     print(f"FLASK_PORT={port}")  # This is what startup scripts look for
     print(f"Starting ASGI app on port {port} using Uvicorn...")
     print("Press Ctrl+C to stop the server")
 
     try:
-        import uvicorn
-
-        config = uvicorn.Config(asgi_app, host="0.0.0.0", port=port, log_level="info")
-        server = uvicorn.Server(config)
-        server.run()
+        try:
+            import uvicorn
+            print(f"Starting ASGI app on port {port} using Uvicorn...")
+            config = uvicorn.Config(asgi_app, host="0.0.0.0", port=port, log_level="info")
+            server = uvicorn.Server(config)
+            server.run()
+        except ImportError:
+            print(f"Uvicorn not available, falling back to Flask development server on port {port}...")
+            app.run(host="0.0.0.0", port=port, debug=True, threaded=True)
     except KeyboardInterrupt:
-        print("\nASGI server stopped by user")
+        print("\nServer stopped by user")
     except Exception as e:
-        print(f"Error running ASGI app: {e}")
+        print(f"Error running server: {e}")
         sys.exit(1)

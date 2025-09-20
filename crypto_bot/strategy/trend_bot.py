@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover - fallback when scipy missing
 from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.indicators import calculate_atr, calculate_rsi
 from crypto_bot.utils import stats
-from crypto_bot.utils.logging import setup_strategy_logger
+from crypto_bot.utils.logging_utils import setup_strategy_logger
 
 from crypto_bot.strategy._config_utils import apply_defaults, extract_params
 from crypto_bot.utils.volatility import normalize_score_by_volatility

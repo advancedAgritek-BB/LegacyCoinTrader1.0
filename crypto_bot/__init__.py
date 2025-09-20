@@ -55,6 +55,9 @@ def __getattr__(name: str) -> Any:
     if name == "solana":
         import importlib
         return importlib.import_module("crypto_bot.solana")
+    if name == "ml_signal_model":
+        import importlib
+        return importlib.import_module("crypto_bot.ml_signal_model")
     raise AttributeError(name)
 
 
@@ -65,5 +68,6 @@ __all__ = [
         "backtest",
         "strategy_router",
         "solana",
+        "ml_signal_model",
     ]
 ]

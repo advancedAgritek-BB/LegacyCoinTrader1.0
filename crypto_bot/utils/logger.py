@@ -9,7 +9,9 @@ import weakref
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Optional, Tuple, Union
+<<<<<<< Updated upstream
+from typing import Iterator, Optional, Union, Dict, Any, Tuple
+>>>>>>> Stashed changes
 
 # Default directory for all log files used across the project
 LOG_DIR = Path(__file__).resolve().parents[2] / "crypto_bot" / "logs"
@@ -41,6 +43,38 @@ _DEFAULT_LOG_RECORD_KEYS = frozenset(
         exc_info=None,
     ).__dict__.keys()
 ) | {"message"}
+
+# Pipeline context for tracking trading flow
+_PIPELINE_CONTEXT: contextvars.ContextVar[Optional[Dict[str, Any]]] = contextvars.ContextVar(
+    "pipeline_context", default=None
+)
+
+
+class NoiseFilter(logging.Filter):
+    """Filter out noisy log messages that clutter the output."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Filter out OpenTelemetry connection errors
+        if record.name == "opentelemetry.sdk._shared_internal":
+            if "Connection refused" in record.getMessage():
+                return False
+            if "Failed to establish a new connection" in record.getMessage():
+                return False
+
+        # Filter out urllib3 connection errors
+        if record.name.startswith("urllib3"):
+            if "Connection refused" in record.getMessage():
+                return False
+            if "Failed to establish a new connection" in record.getMessage():
+                return False
+
+        # Filter out requests connection errors
+        if record.name == "requests":
+            if "Connection refused" in record.getMessage():
+                return False
+
+        # Allow all other messages
+        return True
 
 
 def _generate_correlation_id() -> str:
@@ -145,6 +179,28 @@ def observability_context(
         _SERVICE_ROLE.reset(role_token)
 
 
+def get_pipeline_context() -> Optional[Dict[str, Any]]:
+    """Return the current pipeline context."""
+    return _PIPELINE_CONTEXT.get()
+
+
+def set_pipeline_context(context: Dict[str, Any]) -> None:
+    """Set the pipeline context for the current execution."""
+    _PIPELINE_CONTEXT.set(context)
+
+
+def update_pipeline_context(updates: Dict[str, Any]) -> None:
+    """Update the current pipeline context with new values."""
+    current = get_pipeline_context() or {}
+    current.update(updates)
+    set_pipeline_context(current)
+
+
+def clear_pipeline_context() -> None:
+    """Clear the pipeline context from the current context."""
+    _PIPELINE_CONTEXT.set(None)
+
+
 def _serialize(value: object) -> object:
     """Safely serialise values for JSON output."""
 
@@ -153,6 +209,110 @@ def _serialize(value: object) -> object:
         return value
     except TypeError:
         return str(value)
+
+
+class ReadableFormatter(logging.Formatter):
+    """Formatter that creates human-readable logs with structured data."""
+
+    def __init__(self, *, include_json: bool = True, compact: bool = False) -> None:
+        super().__init__()
+        self.include_json = include_json
+        self.compact = compact
+
+    def format(self, record: logging.LogRecord) -> str:
+        # Get timestamp in readable format
+        dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
+        timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Build readable message
+        readable_parts = []
+
+        # Add pipeline context if available
+        pipeline_ctx = get_pipeline_context()
+        if pipeline_ctx:
+            pipeline_info = []
+            if pipeline_ctx.get("cycle_id"):
+                pipeline_info.append(f"Cycle #{pipeline_ctx['cycle_id']}")
+            if pipeline_ctx.get("phase"):
+                pipeline_info.append(f"Phase: {pipeline_ctx['phase']}")
+            if pipeline_ctx.get("symbol"):
+                pipeline_info.append(f"Symbol: {pipeline_ctx['symbol']}")
+            if pipeline_info:
+                readable_parts.append(f"[{', '.join(pipeline_info)}]")
+
+        # Add main message
+        readable_parts.append(record.getMessage())
+
+        # Add structured data in readable format
+        extra_data = {}
+        for key, value in record.__dict__.items():
+            if key in _DEFAULT_LOG_RECORD_KEYS or key.startswith("_"):
+                continue
+            extra_data[key] = _serialize(value)
+
+        # Format extra data readably
+        if extra_data:
+            readable_extra = []
+            for key, value in extra_data.items():
+                if key in ["symbol", "side", "amount", "price", "score", "strategy"]:
+                    readable_extra.append(f"{key}={value}")
+                elif key == "duration":
+                    readable_extra.append(f"took {value:.2f}s")
+                elif key == "confidence":
+                    readable_extra.append(f"confidence {value:.1%}")
+                elif key == "risk_reward_ratio":
+                    readable_extra.append(f"R/R {value:.2f}")
+                elif key == "position_size":
+                    readable_extra.append(f"position ${value:,.2f}")
+                elif key == "volume":
+                    readable_extra.append(f"volume {value:,.0f}")
+                elif key == "cache_hit_rate":
+                    readable_extra.append(f"cache {value:.1f}%")
+                elif key == "total_entries":
+                    readable_extra.append(f"{value} entries")
+                else:
+                    # For other keys, keep them but format nicely
+                    readable_extra.append(f"{key}={value}")
+
+            if readable_extra:
+                readable_parts.append(f"({', '.join(readable_extra)})")
+
+        readable_message = " ".join(readable_parts)
+
+        # Create the final log line
+        if self.compact:
+            log_line = f"{timestamp} {record.levelname} {readable_message}"
+        else:
+            correlation_id = get_correlation_id()
+            if correlation_id:
+                log_line = f"{timestamp} [{record.levelname}] {record.name}: {readable_message} [ID:{correlation_id[:8]}]"
+            else:
+                log_line = f"{timestamp} [{record.levelname}] {record.name}: {readable_message}"
+
+        # Add JSON data if requested
+        if self.include_json:
+            json_data = {
+                "timestamp": dt.isoformat().replace("+00:00", "Z"),
+                "level": record.levelname,
+                "logger": record.name,
+                "message": record.getMessage(),
+                "correlation_id": get_correlation_id(),
+            }
+
+            if pipeline_ctx:
+                json_data["pipeline_context"] = pipeline_ctx
+
+            if record.exc_info:
+                json_data["exception"] = self.formatException(record.exc_info)
+            if record.stack_info:
+                json_data["stack"] = record.stack_info
+
+            if extra_data:
+                json_data.update(extra_data)
+
+            log_line += f" | {json.dumps(json_data, ensure_ascii=False)}"
+
+        return log_line
 
 
 class JsonFormatter(logging.Formatter):
@@ -177,6 +337,11 @@ class JsonFormatter(logging.Formatter):
             "tenant_id": get_tenant_id(),
             "service_role": get_service_role(),
         }
+
+        # Add pipeline context if available
+        pipeline_ctx = get_pipeline_context()
+        if pipeline_ctx:
+            log_record["pipeline_context"] = pipeline_ctx
 
         if record.exc_info:
             log_record["exception"] = self.formatException(record.exc_info)
@@ -203,14 +368,25 @@ def _configure_logging() -> None:
             "version": 1,
             "disable_existing_loggers": False,
             "formatters": {
+                "readable": {
+                    "()": ReadableFormatter,
+                    "include_json": True,
+                    "compact": False,
+                },
                 "json": {
                     "()": JsonFormatter,
+                }
+            },
+            "filters": {
+                "noise_filter": {
+                    "()": NoiseFilter,
                 }
             },
             "handlers": {
                 "stdout": {
                     "class": "logging.StreamHandler",
-                    "formatter": "json",
+                    "formatter": "readable",
+                    "filters": ["noise_filter"],
                     "stream": "ext://sys.stdout",
                 }
             },
@@ -264,8 +440,9 @@ def setup_logger(
     name: str,
     log_file: Optional[Union[str, Path]] = None,
     to_console: bool = True,
+    formatter: str = "readable",
 ) -> logging.Logger:
-    """Return a JSON logger configured for stdout and optional sinks."""
+    """Return a logger configured for stdout and optional sinks."""
 
     _configure_logging()
 
@@ -278,7 +455,12 @@ def setup_logger(
         log_path.parent.mkdir(parents=True, exist_ok=True)
         if not any(_handler_matches_file(h, log_path) for h in logger.handlers):
             file_handler = logging.FileHandler(log_path)
-            file_handler.setFormatter(JsonFormatter())
+            if formatter == "readable":
+                file_handler.setFormatter(ReadableFormatter(include_json=True, compact=False))
+            elif formatter == "json":
+                file_handler.setFormatter(JsonFormatter())
+            else:
+                file_handler.setFormatter(ReadableFormatter(include_json=True, compact=False))
             logger.addHandler(file_handler)
 
     for handler in _ADDITIONAL_HANDLERS:
@@ -292,6 +474,8 @@ def setup_logger(
 
 __all__ = [
     "LOG_DIR",
+    "NoiseFilter",
+    "ReadableFormatter",
     "JsonFormatter",
     "setup_logger",
     "get_correlation_id",
@@ -304,5 +488,9 @@ __all__ = [
     "clear_observability_context",
     "set_default_observability_context",
     "observability_context",
+    "get_pipeline_context",
+    "set_pipeline_context",
+    "update_pipeline_context",
+    "clear_pipeline_context",
     "register_centralized_handler",
 ]

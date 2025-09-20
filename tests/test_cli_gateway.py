@@ -11,7 +11,7 @@ from crypto_bot.main import TradingEngineClient, cli
 def _patch_requests(monkeypatch) -> List[Dict[str, Any]]:
     calls: List[Dict[str, Any]] = []
 
-    def fake_request(self, method: str, path: str, payload: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    def fake_request(self, method: str, path: str, payload: Union[Dict[str, Any], None] = None) -> Dict[str, Any]:
         record = {
             "method": method,
             "path": path,

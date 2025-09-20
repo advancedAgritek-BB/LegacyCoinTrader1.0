@@ -10,7 +10,7 @@ from typing import Any, Callable, Iterable, Mapping, MutableMapping, Optional, P
 # Market data service contracts
 
 
-@dataclass(slots=True)
+@dataclass
 class LoadSymbolsRequest:
     """Parameters used to discover tradable symbols on an exchange."""
 
@@ -19,14 +19,14 @@ class LoadSymbolsRequest:
     config: Optional[Mapping[str, Any]] = None
 
 
-@dataclass(slots=True)
+@dataclass
 class LoadSymbolsResponse:
     """Result of a symbol discovery request."""
 
     symbols: list[str]
 
 
-@dataclass(slots=True)
+@dataclass
 class OHLCVCacheRequest:
     """Parameters for updating a single timeframe OHLCV cache."""
 
@@ -42,7 +42,7 @@ class OHLCVCacheRequest:
     notifier: Optional[object] = None
 
 
-@dataclass(slots=True)
+@dataclass
 class MultiTimeframeOHLCVRequest:
     """Parameters for updating OHLCV caches across multiple timeframes."""
 
@@ -59,7 +59,7 @@ class MultiTimeframeOHLCVRequest:
     additional_timeframes: Optional[Sequence[str]] = None
 
 
-@dataclass(slots=True)
+@dataclass
 class RegimeCacheRequest:
     """Parameters for updating regime timeframe caches."""
 
@@ -75,14 +75,14 @@ class RegimeCacheRequest:
     df_map: Optional[MutableMapping[str, MutableMapping[str, Any]]] = None
 
 
-@dataclass(slots=True)
+@dataclass
 class CacheUpdateResponse:
     """Generic response for cache update operations."""
 
     cache: MutableMapping[str, Any]
 
 
-@dataclass(slots=True)
+@dataclass
 class OrderBookRequest:
     """Parameters for fetching an order book snapshot."""
 
@@ -92,14 +92,14 @@ class OrderBookRequest:
     config: Optional[Mapping[str, Any]] = None
 
 
-@dataclass(slots=True)
+@dataclass
 class OrderBookResponse:
     """Order book snapshot data."""
 
     order_book: Optional[Mapping[str, Any]]
 
 
-@dataclass(slots=True)
+@dataclass
 class TimeframeRequest:
     """Request conversion of timeframe to seconds."""
 
@@ -107,7 +107,7 @@ class TimeframeRequest:
     exchange_id: Optional[str] = None
 
 
-@dataclass(slots=True)
+@dataclass
 class TimeframeResponse:
     """Response providing timeframe length in seconds."""
 
@@ -137,13 +137,17 @@ class MarketDataService(Protocol):
     def timeframe_seconds(self, request: TimeframeRequest) -> TimeframeResponse:
         ...
 
+    async def get_ticker(self, symbol: str) -> Optional[Any]:
+        """Get current ticker data for a symbol."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Strategy evaluation service contracts
 # ---------------------------------------------------------------------------
 
 
-@dataclass(slots=True)
+@dataclass
 class StrategyRequest:
     """Parameters for selecting a trading strategy."""
 
@@ -151,14 +155,14 @@ class StrategyRequest:
     config: Optional[Mapping[str, Any]] = None
 
 
-@dataclass(slots=True)
+@dataclass
 class StrategyResponse:
     """Response containing a callable trading strategy."""
 
     strategy: Callable[..., Any]
 
 
-@dataclass(slots=True)
+@dataclass
 class StrategyNameRequest:
     """Parameters for resolving strategy names."""
 
@@ -166,14 +170,14 @@ class StrategyNameRequest:
     mode: str
 
 
-@dataclass(slots=True)
+@dataclass
 class StrategyNameResponse:
     """Response containing a strategy name."""
 
     name: str
 
 
-@dataclass(slots=True)
+@dataclass
 class RankedSignal:
     """Ranked strategy evaluation outcome."""
 
@@ -182,7 +186,7 @@ class RankedSignal:
     direction: str
 
 
-@dataclass(slots=True)
+@dataclass
 class StrategyEvaluationResult:
     """Strategy evaluation details for a single symbol."""
 
@@ -199,7 +203,7 @@ class StrategyEvaluationResult:
     cached: bool = False
 
 
-@dataclass(slots=True)
+@dataclass
 class StrategyEvaluationPayload:
     """Input payload for evaluating a symbol's strategies."""
 
@@ -211,7 +215,7 @@ class StrategyEvaluationPayload:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
+@dataclass
 class StrategyBatchRequest:
     """Batch of strategy evaluation payloads."""
 
@@ -219,7 +223,7 @@ class StrategyBatchRequest:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
+@dataclass
 class StrategyBatchResponse:
     """Response containing evaluated strategy results."""
 
@@ -247,7 +251,7 @@ class StrategyEvaluationService(Protocol):
 # ---------------------------------------------------------------------------
 
 
-@dataclass(slots=True)
+@dataclass
 class CreateTradeRequest:
     """Parameters for creating a Trade object."""
 
@@ -263,7 +267,7 @@ class CreateTradeRequest:
     metadata: Optional[Mapping[str, Any]] = None
 
 
-@dataclass(slots=True)
+@dataclass
 class CreateTradeResponse:
     """Response containing the created trade instance."""
 
@@ -300,14 +304,14 @@ class PortfolioService(Protocol):
 # ---------------------------------------------------------------------------
 
 
-@dataclass(slots=True)
+@dataclass
 class ExchangeRequest:
     """Parameters for creating an exchange connection."""
 
     config: Mapping[str, Any]
 
 
-@dataclass(slots=True)
+@dataclass
 class ExchangeResponse:
     """Response containing exchange connectivity objects."""
 
@@ -315,7 +319,7 @@ class ExchangeResponse:
     ws_client: Optional[Any]
 
 
-@dataclass(slots=True)
+@dataclass
 class TradeExecutionRequest:
     """Parameters for executing a trade through the exchange adapter."""
 
@@ -331,7 +335,7 @@ class TradeExecutionRequest:
     score: float = 0.0
 
 
-@dataclass(slots=True)
+@dataclass
 class TradeExecutionResponse:
     """Response returned from trade execution."""
 
@@ -353,18 +357,20 @@ class ExecutionService(Protocol):
 # ---------------------------------------------------------------------------
 
 
-@dataclass(slots=True)
+@dataclass
 class TokenDiscoveryRequest:
     """Parameters for discovering new tokens."""
 
     config: Mapping[str, Any]
 
 
-@dataclass(slots=True)
+@dataclass
 class TokenDiscoveryResponse:
     """Response containing discovered token identifiers."""
 
     tokens: list[str]
+    dex_tokens: list[str] | None = None  # Solana/pump.fun tokens
+    cex_tokens: list[str] | None = None  # Kraken/Binance tokens
 
 
 class TokenDiscoveryService(Protocol):
@@ -374,7 +380,7 @@ class TokenDiscoveryService(Protocol):
         ...
 
 
-@dataclass(slots=True)
+@dataclass
 class RecordScannerMetricsRequest:
     """Parameters for recording scanner metrics."""
 
@@ -395,7 +401,7 @@ class MonitoringService(Protocol):
 # ---------------------------------------------------------------------------
 
 
-@dataclass(slots=True)
+@dataclass
 class ServiceContainer:
     """Collection of service adapters used by the trading bot."""
 

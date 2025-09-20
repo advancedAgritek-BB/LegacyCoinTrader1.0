@@ -94,6 +94,10 @@ class SolanaScannerConfig(BaseModel):
     min_volume_usd: float = 0.0
     max_tokens_per_scan: int = 20
     gecko_search: bool = True
+    min_score_threshold: float = 0.1
+    min_liquidity_score: float = 0.2
+    kafka_enabled: bool = False
+    kafka_bootstrap_servers: str = "localhost:9092"
 
     class Config:
         extra = "forbid"

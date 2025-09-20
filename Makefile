@@ -153,8 +153,38 @@ ci-deploy-dev: ## Deploy to development environment
 ci-deploy-prod: ## Deploy to production environment
 	docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
+# Enhanced Startup Commands
+smart-start: ## Intelligent startup with orchestration (development)
+	@echo "🚀 Starting LegacyCoinTrader with intelligent orchestration..."
+	@python3 docker-startup-orchestrator.py --env dev --report
+	@echo "✅ Startup completed! Use 'make status-detailed' to check health"
+
+smart-start-prod: ## Intelligent startup with orchestration (production)
+	@echo "🚀 Starting LegacyCoinTrader in production mode..."
+	@python3 docker-startup-orchestrator.py --env prod --report
+
+validate-env: ## Validate environment before startup
+	@python3 docker-startup-orchestrator.py --validate-only
+
+# Enhanced Health Monitoring
+health-detailed: ## Detailed health check with comprehensive monitoring
+	@python3 docker-health-monitor.py --report
+
+health-watch: ## Watch health status in real-time
+	@python3 docker-health-monitor.py --watch 10
+
+health-wait: ## Wait for all services to be healthy
+	@python3 docker-health-monitor.py --wait --timeout 10
+
+status-detailed: ## Detailed status including container and health info
+	@echo "🐳 Docker Container Status:"
+	@docker-compose ps
+	@echo ""
+	@python3 docker-health-monitor.py
+
 # Quick Commands
-quick-start: ## Quick start for development
+quick-start: ## Quick start for development (legacy)
+	@echo "⚠️  Consider using 'make smart-start' for better startup orchestration"
 	@echo "Starting LegacyCoinTrader in development mode..."
 	@make dev-build
 	@echo "Waiting for services to be healthy..."

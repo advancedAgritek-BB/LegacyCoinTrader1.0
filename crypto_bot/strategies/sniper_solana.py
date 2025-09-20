@@ -8,7 +8,7 @@ import pandas as pd
 import ta
 
 from crypto_bot.fund_manager import auto_convert_funds
-from crypto_bot.utils.logging import setup_strategy_logger
+from crypto_bot.utils.logging_utils import setup_strategy_logger
 from crypto_bot.utils.pyth_utils import get_pyth_price
 
 NAME = "sniper_solana"

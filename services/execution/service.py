@@ -12,12 +12,14 @@ from typing import Any, Dict, Mapping, MutableMapping, Optional
 from libs.execution import execute_trade_async
 from libs.notifications import TelegramNotifier, send_message
 
+from crypto_bot.services.adapters.market_data import MarketDataAdapter
+
 from .config import ExecutionServiceConfig
 from .exchange import ExchangeFactory
 from .message_bus import AsyncTopic, TopicSubscription
 from .models import OrderAck, OrderFill, OrderRequest
 from .nonce import NonceManager
-from .secrets import SecretLoader
+from .secret_loader import SecretLoader
 
 logger = logging.getLogger("services.execution")
 
@@ -35,6 +37,7 @@ class ExecutionService:
         self._secret_loader = secret_loader or SecretLoader()
         self._nonce_manager = NonceManager()
         self._exchange_factory = ExchangeFactory(self._secret_loader)
+        self._market_data = MarketDataAdapter()
         self._session_lock = Lock()
         self._session = None
         self._orders: MutableMapping[str, OrderRequest] = {}
@@ -107,6 +110,63 @@ class ExecutionService:
         return f"{base}-{uuid.uuid4().hex}"
 
     async def submit_order(self, request: OrderRequest) -> str:
+        # For dry-run orders, execute immediately and return - no need for async event system
+        if request.dry_run:
+            session = self.ensure_session()
+            try:
+                # For dry-run trades, create a dummy disabled notifier if none is available
+                notifier = request.notifier or self._telegram_notifier
+                if notifier is None:
+                    from crypto_bot.utils.telegram import TelegramNotifier
+                    notifier = TelegramNotifier(enabled=False)
+
+                order = await execute_trade_async(
+                    session.exchange,
+                    session.ws_client,
+                    request.symbol,
+                    request.side,
+                    request.amount,
+                    notifier=notifier,
+                    dry_run=True,
+                    use_websocket=request.use_websocket or self._config.use_websocket,
+                    config=dict(self._config.exchange),
+                    score=request.score,
+                )
+                fill = OrderFill(
+                    client_order_id=request.client_order_id,
+                    success=True,
+                    order=order,
+                    metadata={
+                        "symbol": request.symbol,
+                        "side": request.side,
+                        "amount": request.amount,
+                        "dry_run": True,
+                    },
+                )
+                # Store the fill for any future queries
+                async with self._order_lock:
+                    self._results[request.client_order_id] = fill
+                    self._cleanup_results()
+                return request.client_order_id
+            except Exception as exc:
+                logger.exception("Dry-run order execution failed: %s", exc)
+                fill = OrderFill(
+                    client_order_id=request.client_order_id,
+                    success=False,
+                    error=str(exc),
+                    metadata={
+                        "symbol": request.symbol,
+                        "side": request.side,
+                        "amount": request.amount,
+                        "dry_run": True,
+                    },
+                )
+                async with self._order_lock:
+                    self._results[request.client_order_id] = fill
+                    self._cleanup_results()
+                return request.client_order_id
+
+        # For live orders, use the async event system
         session = self.ensure_session()
         metadata = {
             "symbol": request.symbol,
@@ -132,7 +192,8 @@ class ExecutionService:
         self._acks[request.client_order_id] = ack
         await self._ack_topic.publish(ack)
         await self._post_ack_callbacks(ack)
-        asyncio.create_task(self._execute_order(session, request))
+        task = asyncio.create_task(self._execute_order(session, request))
+        task.add_done_callback(lambda t: t.exception() and logger.error(f"Order execution task failed: {t.exception()}", exc_info=t.exception()))
         return request.client_order_id
 
     # ------------------------------------------------------------------
@@ -140,18 +201,48 @@ class ExecutionService:
     # ------------------------------------------------------------------
 
     async def _execute_order(self, session, request: OrderRequest) -> None:
+        logger.info(f"Starting order execution for {request.client_order_id} ({'dry-run' if request.dry_run else 'live'})")
         notifier = request.notifier or self._telegram_notifier
+        # For dry-run trades, create a dummy disabled notifier if none is available
+        is_dry_run = request.dry_run if request.dry_run is not None else self._config.dry_run
+        if notifier is None and is_dry_run:
+            from crypto_bot.utils.telegram import TelegramNotifier
+            notifier = TelegramNotifier(enabled=False)
+
         merged_config: Dict[str, Any] = dict(self._config.exchange)
         merged_config.update(dict(request.config))
+
+        # For dry-run trades, get current price from market data service
+        if is_dry_run:
+            try:
+                # Try to get current price from market data service
+                ticker_response = await self._market_data.get_ticker(request.symbol)
+                if ticker_response and hasattr(ticker_response, 'close'):
+                    merged_config['last_price'] = ticker_response.close
+                    merged_config['price'] = ticker_response.close
+                elif ticker_response and isinstance(ticker_response, dict):
+                    # Try different possible price fields
+                    for price_field in ['close', 'last', 'price']:
+                        if price_field in ticker_response:
+                            merged_config['last_price'] = ticker_response[price_field]
+                            merged_config['price'] = ticker_response[price_field]
+                            break
+            except Exception as e:
+                logger.debug(f"Could not fetch price for {request.symbol} from market data service: {e}")
+
+        # For dry-run trades, still use real exchange for price fetching but ensure no orders are placed
+        exchange = session.exchange
+        ws_client = session.ws_client
+
         try:
             order = await execute_trade_async(
-                session.exchange,
-                session.ws_client,
+                exchange,
+                ws_client,
                 request.symbol,
                 request.side,
                 request.amount,
                 notifier=notifier,
-                dry_run=request.dry_run if request.dry_run is not None else self._config.dry_run,
+                dry_run=is_dry_run,
                 use_websocket=request.use_websocket or self._config.use_websocket,
                 config=merged_config,
                 score=request.score,
@@ -184,6 +275,7 @@ class ExecutionService:
             self._orders.pop(request.client_order_id, None)
             self._results[request.client_order_id] = fill
             self._cleanup_results()
+        logger.info(f"Stored fill for {request.client_order_id}: success={fill.success}, order_keys={list(fill.order.keys()) if fill.order else 'None'}")
         await self._fill_topic.publish(fill)
         await self._post_fill_callbacks(fill)
 

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from services.common.secrets import SecretRetrievalError, resolve_secret
+from services.common.secret_manager import SecretRetrievalError, resolve_secret
 
 from .config import CredentialsConfig
 from .models import ExchangeCredentials, SecretRef
@@ -28,7 +28,7 @@ class SecretLoader:
     def __init__(
         self,
         *,
-        kubernetes_base: str | Path | None = None,
+        kubernetes_base: Union[str, Path, None] = None,
         vault_addr: Optional[str] = None,
         vault_token: Optional[str] = None,
     ) -> None:
@@ -127,7 +127,7 @@ class SecretLoader:
         return env
 
     @staticmethod
-    def from_json(path: str | Path) -> "SecretLoader":
+    def from_json(path: Union[str, Path]) -> "SecretLoader":
         """Create loader configured via a JSON manifest (utility for tests)."""
         data = json.loads(Path(path).read_text())
         return SecretLoader(

@@ -6,7 +6,7 @@ import os
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, Union
 
 from crypto_bot.services.interfaces import (
     CreateTradeRequest,
@@ -24,7 +24,7 @@ from services.portfolio.schemas import (
 )
 
 _DEFAULT_TIMEOUT = 10.0
-TimeoutValue = float | Tuple[float, float]
+TimeoutValue = Union[float, Tuple[float, float]]
 
 
 def _ensure_decimal(value: Any) -> Decimal:

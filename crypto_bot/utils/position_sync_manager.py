@@ -1,11 +1,5 @@
-"""
-Production Position Synchronization Manager
+"""Position synchronisation helpers used by the production stack."""
 
-Ensures reliable synchronization between TradeManager and PaperWallet
-to prevent position tracking issues in production.
-"""
-
-import asyncio
 import time
 import threading
 from typing import Dict, Any, List, Optional, Set
@@ -75,8 +69,9 @@ class ProductionPositionSyncManager:
         self.last_consistency_check = 0
         self.consistency_history: List[Dict[str, Any]] = []
 
-        # Background sync task
-        self.background_sync_task: Optional[asyncio.Task] = None
+        # Background sync task (thread based to avoid event loop coupling)
+        self._background_thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
         self.running = False
 
         logger.info("Production position sync manager initialized")
@@ -96,17 +91,47 @@ class ProductionPositionSyncManager:
         """Start background position synchronization."""
         if self.config.get("enable_background_sync", True) and not self.running:
             self.running = True
-            # Note: This would typically be called from an async context
+            if self._background_thread is None or not self._background_thread.is_alive():
+                self._stop_event.clear()
+                self._background_thread = threading.Thread(
+                    target=self._run_background_sync,
+                    name="position-sync-manager",
+                    daemon=True,
+                )
+                self._background_thread.start()
             logger.info("Background position sync started")
 
     def stop_background_sync(self):
         """Stop background position synchronization."""
         self.running = False
-        if self.background_sync_task:
-            self.background_sync_task.cancel()
+        self._stop_event.set()
+        if self._background_thread and self._background_thread.is_alive():
+            self._background_thread.join(timeout=2.0)
+        self._background_thread = None
         logger.info("Background position sync stopped")
 
-    async def sync_context_positions(self, context_positions: Dict[str, Any]) -> Dict[str, Any]:
+    def _run_background_sync(self) -> None:
+        """Periodically reconcile positions in a background thread."""
+
+        while not self._stop_event.wait(self.sync_interval):
+            try:
+                # Using the latest known context (if any) to keep subsystems aligned.
+                if hasattr(self.trade_manager, "context_positions"):
+                    context_positions = getattr(self.trade_manager, "context_positions") or {}
+                else:
+                    context_positions = {}
+                self.sync_context_positions(context_positions)
+
+                if self.paper_wallet is not None and hasattr(self.paper_wallet, "positions"):
+                    paper_positions = dict(getattr(self.paper_wallet, "positions", {}))
+                    self.sync_paper_wallet_positions(paper_positions, self.paper_wallet)
+
+                if context_positions or (self.paper_wallet and getattr(self.paper_wallet, "positions", None)):
+                    self.validate_consistency(context_positions, getattr(self.paper_wallet, "positions", {}) or {})
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception("Background position sync failed: %s", exc)
+
+    def sync_context_positions(self, context_positions: Dict[str, Any]) -> Dict[str, Any]:
         """
         Sync context positions with TradeManager as source of truth.
 
@@ -154,7 +179,7 @@ class ProductionPositionSyncManager:
                 logger.error(f"Failed to sync context positions: {e}")
                 return context_positions
 
-    async def sync_paper_wallet_positions(self, paper_positions: Dict[str, Any], paper_wallet) -> Dict[str, Any]:
+    def sync_paper_wallet_positions(self, paper_positions: Dict[str, Any], paper_wallet) -> Dict[str, Any]:
         """
         Sync paper wallet positions with TradeManager.
 
@@ -249,7 +274,7 @@ class ProductionPositionSyncManager:
             logger.error(f"Failed to convert position to paper wallet format: {e}")
             return {}
 
-    async def validate_consistency(self, context_positions: Dict[str, Any], paper_positions: Dict[str, Any]) -> bool:
+    def validate_consistency(self, context_positions: Dict[str, Any], paper_positions: Dict[str, Any]) -> bool:
         """
         Validate consistency between context and paper wallet positions.
 
@@ -309,7 +334,7 @@ class ProductionPositionSyncManager:
 
                 # Auto-reconcile if enabled
                 if self.config.get("auto_reconcile_inconsistencies", True):
-                    await self._auto_reconcile_inconsistencies(
+                    self._auto_reconcile_inconsistencies(
                         context_positions, paper_positions, tm_positions
                     )
 
@@ -322,7 +347,7 @@ class ProductionPositionSyncManager:
             logger.error(f"Consistency validation failed: {e}")
             return False
 
-    async def _auto_reconcile_inconsistencies(
+    def _auto_reconcile_inconsistencies(
         self,
         context_positions: Dict[str, Any],
         paper_positions: Dict[str, Any],
@@ -333,8 +358,14 @@ class ProductionPositionSyncManager:
             logger.info("Starting automatic position reconciliation...")
 
             # Sync both systems with TradeManager
-            await self.sync_context_positions(context_positions)
-            await self.sync_paper_wallet_positions(paper_positions, self.paper_wallet)
+            updated_context = self.sync_context_positions(context_positions)
+            if self.paper_wallet is not None:
+                self.sync_paper_wallet_positions(paper_positions, self.paper_wallet)
+
+            # Persist reconciled context positions if caller supplied a mutable mapping
+            if isinstance(context_positions, dict):
+                context_positions.clear()
+                context_positions.update(updated_context)
 
             logger.info("Position reconciliation completed")
 

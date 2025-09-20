@@ -45,12 +45,17 @@ class Settings(BaseSettings):
         default=900,
         description="Interval between enhanced scans/opportunity publication in seconds.",
     )
+    basic_scan_timeout_seconds: int = Field(
+        default=15,
+        ge=1,
+        description="Max seconds to wait on a basic scan before falling back.",
+    )
     publish_batch_size: int = Field(
         default=50, description="Maximum number of items to publish per batch."
     )
 
     # Solana scanner configuration
-    solana_scanner_limit: int = Field(default=20)
+    solana_scanner_limit: int = Field(default=100)
     solana_min_volume_usd: float = Field(default=0.0)
     solana_gecko_search: bool = Field(default=True)
     helius_key: str = Field(default="")
@@ -60,7 +65,32 @@ class Settings(BaseSettings):
     # Enhanced scanner configuration
     enable_enhanced_scanner: bool = Field(default=True)
     enhanced_min_score: float = Field(default=0.25)
-    enhanced_limit: int = Field(default=20)
+    enhanced_limit: int = Field(default=100)
+
+    # Centralised exchange (CEX) scanner configuration
+    enable_cex_scanner: bool = Field(
+        default=True,
+        description="Enable background discovery for CEX listings.",
+    )
+    cex_exchange: str = Field(
+        default="kraken",
+        description="Primary exchange to monitor for new listings.",
+    )
+    cex_scanner_limit: int = Field(
+        default=200,
+        ge=1,
+        le=500,
+        description="Maximum number of newly discovered CEX pairs per scan.",
+    )
+    background_cex_interval: int = Field(
+        default=900,
+        ge=0,
+        description="Interval between CEX discovery scans in seconds (0 disables loop).",
+    )
+    cex_state_file: str = Field(
+        default="crypto_bot/logs/cex_scanner_state.json",
+        description="Path used to persist seen CEX listings between runs.",
+    )
 
     model_config = SettingsConfigDict(
         env_prefix="TOKEN_DISCOVERY_",

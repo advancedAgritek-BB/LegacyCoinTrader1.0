@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chart Test</title>
+    <style>
+        .position-card {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px;
+            width: 300px;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            height: 200px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .chart-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #666;
+        }
+        canvas {
+            width: 100%;
+            height: 200px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Chart Test</h1>
+    <div class="position-card" data-symbol="BTC/USD">
+        <h3>BTC/USD Position</h3>
+        <div class="chart-container">
+            <div class="chart-loading">
+                <div>Loading chart...</div>
+            </div>
+            <canvas id="chart-btc-usd" width="300" height="200"></canvas>
+        </div>
+    </div>
+
+    <script src="frontend/static/position_charts.js"></script>
+    <script>
+        // Mock data for testing
+        const mockChartData = {
+            symbol: "BTC/USD",
+            exchange: "kraken",
+            timeframe: "5m",
+            candles: [
+                [1758319500000, 115564.4, 115564.4, 115564.3, 115564.4, 0.15247939]
+            ],
+            count: 1,
+            source: "cache"
+        };
+
+        // Test the chart rendering directly
+        setTimeout(() => {
+            console.log('Testing chart rendering...');
+            const card = document.querySelector('.position-card[data-symbol="BTC/USD"]');
+            const canvas = document.getElementById('chart-btc-usd');
+
+            if (card && canvas) {
+                console.log('Found card and canvas, testing renderChartPayload...');
+                // Simulate the renderChartPayload call
+                renderChartPayload('BTC/USD', card, mockChartData);
+            } else {
+                console.error('Card or canvas not found');
+            }
+        }, 1000);
+    </script>
+</body>
+</html>

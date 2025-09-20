@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Union
 
 import os
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from services.configuration import ManagedConfigService, SecretNotFoundError
+try:
+    from services.configuration import ManagedConfigService, SecretNotFoundError
+except ImportError:
+    # Fallback for when services.configuration is not available
+    class SecretNotFoundError(Exception):
+        pass
+    
+    class ManagedConfigService:
+        @staticmethod
+        def resolve_secrets(config_data):
+            return config_data
 
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
@@ -395,6 +405,8 @@ class RiskSettings(BaseModel):
     dynamic_risk_scaling: bool = True
     win_rate_threshold: float = Field(0.55, ge=0.0)
     risk_scaling_factor: float = Field(1.2, ge=0.0)
+    starting_balance: float = Field(10000.0, ge=0.0)
+    min_confidence_threshold: float = Field(0.3, ge=0.0)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -435,6 +447,8 @@ class SolanaScannerSettings(BaseModel):
     min_volume_usd: float = Field(3000, ge=0.0)
     max_tokens_per_scan: int = Field(75, ge=0)
     gecko_search: bool = True
+    min_score_threshold: float = Field(0.1, ge=0.0)
+    min_liquidity_score: float = Field(0.2, ge=0.0)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -489,7 +503,7 @@ class StrategyRouterSettings(BaseModel):
 
 class SymbolValidationSettings(BaseModel):
     allowed_quotes: List[str] = Field(
-        default_factory=lambda: ["USD", "EUR", "USDC", "USDT"]
+        default_factory=lambda: ["USD"]
     )
     enabled: bool = True
     max_price_deviation: float = Field(0.1, ge=0.0)
@@ -512,6 +526,9 @@ class TelegramSettings(BaseModel):
     enabled: bool = True
     status_updates: bool = False
     trade_updates: bool = True
+    token: str = ""
+    chat_id: str = ""
+    fail_silently: bool = True
 
     model_config = ConfigDict(extra="forbid")
 
@@ -776,6 +793,9 @@ class BotSettings(BaseSettings):
     profitability_optimization: ProfitabilityOptimizationSettings = Field(
         default_factory=ProfitabilityOptimizationSettings
     )
+    default_regime: str = "trending"
+    token_discovery_feed: Dict[str, Any] = Field(default_factory=dict)
+    optimization: Dict[str, Any] = Field(default_factory=dict)
 
     model_config = SettingsConfigDict(
         extra="forbid",
@@ -787,9 +807,9 @@ class BotSettings(BaseSettings):
 
 
 def resolve_config_path(
-    config_path: str | Path | None = None,
+    config_path: Union[str, Path, None] = None,
     *,
-    env: Mapping[str, str] | None = None,
+    env: Union[Mapping[str, str], None] = None,
 ) -> Path:
     """Return the configuration path to use for overrides."""
 
@@ -816,9 +836,9 @@ def _load_yaml_file(path: Path) -> Dict[str, object]:
 
 
 def load_settings(
-    config_path: str | Path | None = None,
+    config_path: Union[str, Path, None] = None,
     *,
-    env: Mapping[str, str] | None = None,
+    env: Union[Mapping[str, str], None] = None,
 ) -> BotSettings:
     """Load bot settings by combining defaults, YAML overrides and environment."""
 
@@ -849,9 +869,9 @@ def load_settings(
 
 
 def load_config(
-    config_path: str | Path | None = None,
+    config_path: Union[str, Path, None] = None,
     *,
-    env: Mapping[str, str] | None = None,
+    env: Union[Mapping[str, str], None] = None,
     by_alias: bool = True,
 ) -> Dict[str, object]:
     """Return the configuration as a plain dictionary."""

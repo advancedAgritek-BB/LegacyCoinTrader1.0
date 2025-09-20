@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import Response as FastAPIResponse
@@ -22,11 +22,23 @@ from crypto_bot.utils.logger import (
     set_observability_context,
 )
 
-from opentelemetry.trace import Tracer
-from opentelemetry.trace.status import Status, StatusCode
+try:  # Optional dependency: OpenTelemetry is not always available in tests
+    from opentelemetry.trace import Tracer
+    from opentelemetry.trace.status import Status, StatusCode
+except Exception:  # pragma: no cover - executed when opentelemetry is absent
+    Tracer = Any  # type: ignore[assignment]
+
+    class StatusCode:  # Minimal stand-in used for status assignment
+        OK = "OK"
+        ERROR = "ERROR"
+
+    class Status:  # type: ignore[override]
+        def __init__(self, status_code: str, description: Optional[str] = None) -> None:
+            self.status_code = status_code
+            self.description = description
 
 from .config import MonitoringSettings, get_monitoring_settings
-from .logging import configure_logging
+from .logging_utils import configure_logging
 from .prometheus import HttpMetrics
 from .tracing import configure_tracing
 
@@ -254,7 +266,7 @@ def instrument_fastapi_app(
     if service_name is not None:
         base_settings = base_settings.for_service(service_name, environment=environment)
     elif environment is not None:
-        base_settings = base_settings.model_copy(update={"environment": environment})
+        base_settings = base_settings.clone(environment=environment)
 
     configure_logging(base_settings)
     tracer = configure_tracing(base_settings)
@@ -394,7 +406,7 @@ def instrument_flask_app(
     if service_name is not None:
         base_settings = base_settings.for_service(service_name, environment=environment)
     elif environment is not None:
-        base_settings = base_settings.model_copy(update={"environment": environment})
+        base_settings = base_settings.clone(environment=environment)
 
     configure_logging(base_settings)
     tracer = configure_tracing(base_settings)

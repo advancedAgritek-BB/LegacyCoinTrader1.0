@@ -44,6 +44,21 @@ integration:
   scan_interval: 30
   max_concurrent_scans: 3
 
+# Execution Configuration
+execution:
+  enabled: true
+  dry_run: false  # Live trading enabled by default
+  execution_mode: live
+  use_websocket: false
+  base_trade_amount: 0.01  # Base trade size
+  min_trade_amount: 0.001
+  max_trade_amount: 0.1
+  max_concurrent_trades: 3
+  min_confidence_threshold: 0.7  # Only execute trades above this confidence
+  risk_per_trade: 0.02  # 2% risk per trade
+  enable_stop_losses: true
+  enable_take_profits: true
+
 # Monitoring Configuration
 monitoring:
   enable_scan_metrics: true

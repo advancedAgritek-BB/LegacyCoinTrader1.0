@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import os
-import json
 import base64
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
 try:
     import aiohttp
@@ -19,6 +18,7 @@ except Exception:  # pragma: no cover - make solana optional
     AsyncClient = Transaction = VersionedTransaction = Signature = Keypair = None
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from crypto_bot.solana.wallet_context import PrivateKeyLike, decode_private_key_bytes
 
 
 logger = setup_logger(__name__, LOG_DIR / "raydium_client.log")
@@ -27,13 +27,19 @@ QUOTE_URL = "https://transaction-v1.raydium.io/compute/swap-base-in"
 TX_URL = "https://transaction-v1.raydium.io/transaction/swap-base-in"
 
 
-def get_wallet() -> Keypair:
-    """Return wallet keypair from ``SOLANA_PRIVATE_KEY``."""
-    key = os.getenv("SOLANA_PRIVATE_KEY")
-    if not key:
-        raise ValueError("SOLANA_PRIVATE_KEY not set")
-    secret = bytes(json.loads(key))
-    return Keypair.from_bytes(secret)
+def get_wallet(private_key_override: Optional[PrivateKeyLike] = None) -> Keypair:
+    """Return wallet keypair from configuration or override."""
+
+    key_source: Optional[PrivateKeyLike] = private_key_override or os.getenv("SOLANA_PRIVATE_KEY")
+    if not key_source:
+        raise ValueError("Solana private key not configured")
+
+    secret = decode_private_key_bytes(key_source)
+    if len(secret) == 64:
+        return Keypair.from_bytes(secret)
+    if len(secret) == 32:
+        return Keypair.from_seed(secret)
+    raise ValueError("Unsupported Solana private key length; expected 32 or 64 bytes")
 
 
 async def get_swap_quote(
@@ -72,12 +78,16 @@ async def execute_swap(
     compute_unit_price: int = 1000,
     tx_version: str = "V0",
     risk_manager: Optional[object] = None,
+    wallet_override: Optional[Mapping[str, Any]] = None,
 ) -> Mapping[str, Any]:
     """Execute a Raydium swap and return the RPC result."""
+    wallet_override = wallet_override or {}
+    resolved_wallet_address = str(wallet_override.get("public_key", wallet_address))
+
     payload = dict(swap_response)
     payload.update(
         {
-            "walletAddress": wallet_address,
+            "walletAddress": resolved_wallet_address,
             "inputAccount": input_account,
             "outputAccount": output_account,
             "wrapAndUnwrapSol": {"wrapSol": wrap_sol, "unwrapSol": unwrap_sol},
@@ -97,7 +107,7 @@ async def execute_swap(
         logger.error("Transaction missing from response")
         return tx_data
     raw = base64.b64decode(tx_b64)
-    kp = get_wallet()
+    kp = get_wallet(wallet_override.get("private_key"))
     if tx_version == "V0":
         vt = VersionedTransaction.from_bytes(raw)
         vt = VersionedTransaction(vt.message, [kp])
@@ -133,6 +143,7 @@ async def sniper_trade(
     amount: int,
     notifier: Optional[Any] = None,
     config: Optional[Mapping[str, Any]] = None,
+    wallet_override: Optional[Mapping[str, Any]] = None,
 ) -> Mapping[str, Any]:
     """Execute a simple snipe trade and convert profits to BTC."""
     from crypto_bot.risk.risk_manager import RiskManager, RiskConfig
@@ -157,6 +168,7 @@ async def sniper_trade(
         quote.get("data", quote),
         tx_version=cfg.get("tx_version", "V0"),
         risk_manager=rm,
+        wallet_override=wallet_override,
     )
 
     await auto_convert_funds(
@@ -166,5 +178,6 @@ async def sniper_trade(
         size,
         dry_run=True,
         notifier=notifier,
+        wallet_override=dict(wallet_override) if wallet_override else None,
     )
     return swap_res

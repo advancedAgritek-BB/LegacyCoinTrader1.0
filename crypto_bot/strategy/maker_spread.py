@@ -5,7 +5,7 @@ import pandas as pd
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any, Literal
 
-from crypto_bot.utils.logging import setup_strategy_logger
+from crypto_bot.utils.logging_utils import setup_strategy_logger
 
 NAME = "maker_spread"
 

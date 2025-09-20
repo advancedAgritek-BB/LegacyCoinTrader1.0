@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from services.common.secrets import SecretRetrievalError, resolve_secret
+from services.common.secret_manager import SecretRetrievalError, resolve_secret
 
 from .config import PortfolioConfig
 from .database import Base, get_engine, get_session
@@ -44,7 +44,7 @@ class ApiKeyRotationRequiredError(ApiKeyValidationError):
     """Raised when an API key has passed its rotation deadline."""
 
 
-@dataclass(slots=True)
+@dataclass
 class UserIdentity:
     """Summary of a user's identity and credential metadata."""
 
@@ -60,7 +60,7 @@ class UserIdentity:
     last_login_at: Optional[datetime]
 
 
-@dataclass(slots=True)
+@dataclass
 class ApiKeyRotationResult:
     """Returned when a new API key is issued for a user."""
 

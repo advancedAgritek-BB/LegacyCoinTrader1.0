@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Mapping, List, Tuple, Dict, Optional
+from typing import Dict, List, Mapping, Optional, Tuple
 
 import aiohttp
+
+from .token_registry import get_jupiter_registry, index_registry_by_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -15,123 +17,137 @@ logger = logging.getLogger(__name__)
 async def get_solana_new_tokens(cfg: Mapping[str, object]) -> List[str]:
     """Return a list of new token mint addresses using multiple API sources."""
 
-    limit = int(cfg.get("limit", 20))
-    key = os.getenv("HELIUS_KEY", "")
-    url = str(cfg.get("url", ""))
+    limit_candidate = (
+        cfg.get("limit")
+        or cfg.get("max_tokens_per_scan")
+        or cfg.get("max_tokens")
+        or cfg.get("solana_scanner_limit")
+        or cfg.get("scanner_limit")
+    )
+    try:
+        limit = max(1, int(limit_candidate)) if limit_candidate is not None else 20
+    except (TypeError, ValueError):
+        limit = 20
 
-    # Replace API key placeholder
+    helius_key = str(cfg.get("helius_key") or os.getenv("HELIUS_KEY", "")).strip()
+    url = str(
+        cfg.get("url")
+        or cfg.get("helius_endpoint")
+        or cfg.get("helius_url")
+        or os.getenv("HELIUS_ENDPOINT", "")
+    ).strip()
+
     if url and "${HELIUS_KEY}" in url:
-        url = url.replace("${HELIUS_KEY}", key)
-    if url and "YOUR_KEY" in url:
-        url = url.replace("YOUR_KEY", key)
+        url = url.replace("${HELIUS_KEY}", helius_key)
+    if url and helius_key and "YOUR_KEY" in url:
+        url = url.replace("YOUR_KEY", helius_key)
 
-    # Method 1: Try Helius dex.getNewPools (premium)
-    if url:
+    discovered: List[str] = []
+
+    if url and helius_key:
+        before = len(discovered)
         try:
             async with aiohttp.ClientSession() as session:
                 payload = {
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": "dex.getNewPools",
-                    "params": {
-                        "protocols": ["raydium"],
-                        "limit": limit
-                    }
+                    "params": {"protocols": ["raydium"], "limit": limit},
                 }
                 async with session.post(url, json=payload, timeout=10) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if "error" not in data:
-                            result = data.get("result", [])
-                            results: List[str] = []
-                            if isinstance(result, list):
-                                for pool in result:
-                                    if isinstance(pool, Mapping):
-                                        token_a = pool.get("tokenA") or pool.get("tokenAMint")
-                                        token_b = pool.get("tokenB") or pool.get("tokenBMint")
-                                        if token_a and isinstance(token_a, str):
-                                            results.append(token_a)
-                                        if token_b and isinstance(token_b, str):
-                                            results.append(token_b)
-                            if results:
-                                logger.info(f"Helius returned {len(results)} tokens")
-                                return list(set(results))[:limit]
+                    resp.raise_for_status()
+                    data = await resp.json()
         except Exception as exc:
-            logger.debug(f"Helius dex.getNewPools failed: {exc}")
+            logger.debug("Helius dex.getNewPools failed: %s", exc)
+        else:
+            result = data.get("result", []) if isinstance(data, Mapping) else []
+            for pool in result:
+                if not isinstance(pool, Mapping):
+                    continue
+                token_a = pool.get("tokenA") or pool.get("tokenAMint")
+                token_b = pool.get("tokenB") or pool.get("tokenBMint")
+                if isinstance(token_a, str) and token_a:
+                    discovered.append(token_a)
+                if isinstance(token_b, str) and token_b:
+                    discovered.append(token_b)
+            added = len(discovered) - before
+            if added:
+                logger.info("Helius returned %s tokens", added)
 
-    # Method 2: Try Raydium API (free alternative)
     logger.info("Trying Raydium API for pool discovery")
     try:
-        raydium_url = "https://api.raydium.io/pairs"
         async with aiohttp.ClientSession() as session:
-            async with session.get(raydium_url, timeout=15) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if isinstance(data, list) and data:
-                        results: List[str] = []
-                        # Sort by liquidity and get recent pools
-                        sorted_pools = sorted(data, key=lambda x: x.get("liquidity", 0), reverse=True)
-
-                        for pool in sorted_pools[:limit * 2]:  # Get more to filter
-                            # Extract token mints from pair_id (format: TOKENA-TOKENB)
-                            pair_id = pool.get("pair_id", "")
-                            if "-" in pair_id and len(pair_id.split("-")) >= 2:
-                                token_a, token_b = pair_id.split("-", 1)
-                                # Filter out WSOL duplicates and common tokens
-                                common_tokens = ["So11111111111111111111111111111111111111112", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"]
-                                if token_a and token_a not in common_tokens:
-                                    results.append(token_a)
-                                if token_b and token_b not in common_tokens:
-                                    results.append(token_b)
-
-                        if results:
-                            logger.info(f"Raydium API returned {len(results)} tokens")
-                            return list(set(results))[:limit]
+            async with session.get("https://api.raydium.io/pairs", timeout=15) as resp:
+                resp.raise_for_status()
+                payload = await resp.json()
     except Exception as exc:
-        logger.debug(f"Raydium API failed: {exc}")
+        logger.debug("Raydium API failed: %s", exc)
+    else:
+        if isinstance(payload, list):
+            before = len(discovered)
+            sorted_pools = sorted(
+                (pool for pool in payload if isinstance(pool, Mapping)),
+                key=lambda pool: float(pool.get("liquidity", 0) or 0.0),
+                reverse=True,
+            )
+            ws_ignored = {
+                "So11111111111111111111111111111111111111112",
+                "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            }
+            for pool in sorted_pools[: limit * 2]:
+                pair_id = str(pool.get("pair_id") or "")
+                if "-" not in pair_id:
+                    continue
+                token_a, token_b = pair_id.split("-", 1)
+                if token_a and token_a not in ws_ignored:
+                    discovered.append(token_a)
+                if token_b and token_b not in ws_ignored:
+                    discovered.append(token_b)
+            added = len(discovered) - before
+            if added:
+                logger.info("Raydium API returned %s tokens", added)
 
-    # Method 3: Try Orca API
     logger.info("Trying Orca API for pool discovery")
     try:
-        orca_url = "https://www.orca.so/api/pools"
         async with aiohttp.ClientSession() as session:
-            async with session.get(orca_url, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    results: List[str] = []
-                    if isinstance(data, list):
-                        for pool in data[:limit * 2]:
-                            if isinstance(pool, Mapping):
-                                token_a = pool.get("tokenA") or pool.get("tokenAMint")
-                                token_b = pool.get("tokenB") or pool.get("tokenBMint")
-                                if token_a and isinstance(token_a, str):
-                                    results.append(token_a)
-                                if token_b and isinstance(token_b, str):
-                                    results.append(token_b)
-                    if results:
-                        logger.info(f"Orca API returned {len(results)} tokens")
-                        return list(set(results))[:limit]
+            async with session.get("https://www.orca.so/api/pools", timeout=10) as resp:
+                resp.raise_for_status()
+                payload = await resp.json()
     except Exception as exc:
-        logger.debug(f"Orca API failed: {exc}")
+        logger.debug("Orca API failed: %s", exc)
+    else:
+        if isinstance(payload, list):
+            before = len(discovered)
+            for pool in payload[: limit * 2]:
+                if not isinstance(pool, Mapping):
+                    continue
+                token_a = pool.get("tokenA") or pool.get("tokenAMint")
+                token_b = pool.get("tokenB") or pool.get("tokenBMint")
+                if isinstance(token_a, str) and token_a:
+                    discovered.append(token_a)
+                if isinstance(token_b, str) and token_b:
+                    discovered.append(token_b)
+            added = len(discovered) - before
+            if added:
+                logger.info("Orca API returned %s tokens", added)
 
-    # Method 4: Try Jupiter API (different endpoint)
     logger.info("Trying Jupiter API for token discovery")
     try:
-        jupiter_url = "https://token.jup.ag/all"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(jupiter_url, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if isinstance(data, list) and data:
-                        # Filter for Solana tokens and sort by recent activity
-                        solana_tokens = [token for token in data if token.get("chainId") == 101]
-                        # Sort by daily volume or other activity metric if available
-                        results = [token.get("address") for token in solana_tokens[:limit] if token.get("address")]
-                        if results:
-                            logger.info(f"Jupiter API returned {len(results)} tokens")
-                            return results
-    except Exception as exc:
-        logger.debug(f"Jupiter API failed: {exc}")
+        registry = await get_jupiter_registry()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Jupiter API failed: %s", exc)
+    else:
+        if registry:
+            before = len(discovered)
+            solana_index = index_registry_by_symbol(registry, chain_id=101)
+            for entries in solana_index.values():
+                for entry in entries:
+                    address = entry.get("address")
+                    if isinstance(address, str) and address:
+                        discovered.append(address)
+            added = len(discovered) - before
+            if added:
+                logger.info("Jupiter registry contributed %s tokens", added)
 
     # Method 5: Try pump.fun API with wallet evaluation (if API key is available)
     pump_key = os.getenv("PUMPFUN_API_KEY") or cfg.get("pump_fun_api_key")
@@ -148,13 +164,34 @@ async def get_solana_new_tokens(cfg: Mapping[str, object]) -> List[str]:
                             evaluated_launches = await evaluate_pump_fun_launches(data, session)
                             # Filter launches based on credibility score
                             credible_launches = [launch for launch in evaluated_launches if launch.get("credibility_score", 0) >= 60]
-                            results = [launch["mint"] for launch in credible_launches[:limit] if launch.get("mint")]
+                            results = [launch["mint"] for launch in credible_launches[: limit * 2] if launch.get("mint")]
 
                             if results:
-                                logger.info(f"pump.fun API returned {len(results)} credible tokens after wallet evaluation")
-                                return results
+                                before = len(discovered)
+                                discovered.extend(results)
+                                added = len(discovered) - before
+                                logger.info(
+                                    "pump.fun API returned %s credible tokens after wallet evaluation",
+                                    added,
+                                )
         except Exception as exc:
             logger.debug(f"pump.fun API failed: {exc}")
+
+    unique_tokens: List[str] = []
+    seen: set[str] = set()
+    for token in discovered:
+        if not isinstance(token, str):
+            continue
+        cleaned = token.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        unique_tokens.append(cleaned)
+        if len(unique_tokens) >= limit:
+            break
+
+    if unique_tokens:
+        return unique_tokens
 
     # Final fallback: Return popular tokens
     logger.warning("All API methods failed, returning popular tokens")
@@ -371,15 +408,17 @@ async def get_sentiment_enhanced_tokens(
         trending_tokens = await client.get_trending_solana_tokens(limit=limit * 2)
         
         enhanced_results = []
-        for symbol, sentiment_data in trending_tokens:
+        seen_mints: set[str] = set()
+        for mint_address, sentiment_data, metadata in trending_tokens:
+            if not isinstance(mint_address, str) or not mint_address:
+                continue
+            if mint_address in seen_mints:
+                continue
             # Filter for strong bullish sentiment
             if (sentiment_data.sentiment_direction == SentimentDirection.BULLISH and
                 sentiment_data.galaxy_score >= min_galaxy_score and
                 sentiment_data.sentiment >= min_sentiment):
-                
-                # Try to get mint address if available (this would need token mapping)
-                mint_address = f"SOL_{symbol}_PLACEHOLDER"  # Placeholder for now
-                
+                symbol = str(metadata.get("symbol") or "")
                 sentiment_dict = {
                     "symbol": symbol,
                     "galaxy_score": sentiment_data.galaxy_score,
@@ -389,10 +428,13 @@ async def get_sentiment_enhanced_tokens(
                     "social_mentions": sentiment_data.social_mentions,
                     "social_volume": sentiment_data.social_volume,
                     "bullish_strength": sentiment_data.bullish_strength,
-                    "last_updated": sentiment_data.last_updated
+                    "last_updated": sentiment_data.last_updated,
+                    "mint": mint_address,
+                    "name": metadata.get("name"),
                 }
                 
                 enhanced_results.append((mint_address, sentiment_dict))
+                seen_mints.add(mint_address)
                 
                 if len(enhanced_results) >= limit:
                     break

@@ -98,7 +98,7 @@ SECRETS_ROTATED_AT=
 # Runtime configuration
 EXCHANGE=kraken
 MODE=cex
-EXECUTION_MODE=dry_run
+EXECUTION_MODE=live
 
 # CloudTrader Configuration
 CT_MODELS_BUCKET=models

@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from crypto_bot.utils.logging import setup_strategy_logger
+from crypto_bot.utils.logging_utils import setup_strategy_logger
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
 
 NAME = "lstm_bot"

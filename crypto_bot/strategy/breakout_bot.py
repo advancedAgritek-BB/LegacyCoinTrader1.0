@@ -29,7 +29,7 @@ from crypto_bot.utils.indicators import (
     calculate_rsi,
 )
 from crypto_bot.utils import stats
-from crypto_bot.utils.logging import setup_strategy_logger
+from crypto_bot.utils.logging_utils import setup_strategy_logger
 
 NAME = "breakout_bot"
 

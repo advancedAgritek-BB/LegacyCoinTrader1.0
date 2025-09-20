@@ -73,6 +73,8 @@ class StatusResponse(BaseModel):
     last_enhanced_scan: Optional[datetime] = None
     tokens_cached: int = Field(default=0)
     opportunities_cached: int = Field(default=0)
+    last_cex_scan: Optional[datetime] = None
+    cex_tokens_cached: int = Field(default=0)
 
 
 __all__ = [

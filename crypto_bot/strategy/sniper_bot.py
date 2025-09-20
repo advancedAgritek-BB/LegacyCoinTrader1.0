@@ -12,7 +12,7 @@ from crypto_bot.utils.indicators import calculate_atr
 from crypto_bot.volatility_filter import calc_atr
 
 DEFAULT_PAIRS = ["BTC/USD", "ETH/USD"]
-ALLOWED_PAIRS = load_liquid_pairs() or DEFAULT_PAIRS
+ALLOWED_PAIRS = set(load_liquid_pairs() or DEFAULT_PAIRS)
 
 
 @dataclass
@@ -121,8 +121,6 @@ def generate_signal(
     config_provided = bool(config)
     cfg = SniperBotConfig.from_dict(config)
     symbol = cfg.symbol
-    if symbol and ALLOWED_PAIRS and symbol not in ALLOWED_PAIRS:
-        return 0.0, "none"
 
     if config_provided:
         breakout_pct = float(cfg.breakout_pct)
@@ -222,8 +220,8 @@ def generate_signal(
 
 
 class regime_filter:
-    """Match volatile regime."""
+    """Match breakout and volatile regimes."""
 
     @staticmethod
     def matches(regime: str) -> bool:
-        return regime == "volatile"
+        return regime in {"breakout", "volatile"}

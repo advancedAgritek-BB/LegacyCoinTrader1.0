@@ -2,22 +2,28 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
-from typing import Dict, Optional, Tuple, List
 from dataclasses import dataclass
 from enum import Enum
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
 from services.configuration import ManagedSecretsClient, load_manifest
+from crypto_bot.solana.token_registry import get_jupiter_registry, index_registry_by_symbol
 
 
 logger = setup_logger(__name__, LOG_DIR / "sentiment.log")
 
 
 FNG_URL = "https://api.alternative.me/fng/?limit=1"
+# Cache Fear & Greed values for reuse when upstream is unavailable
+_FNG_CACHE_TTL = 300  # five minutes
+_FNG_CACHE = {"value": 50, "fetched_at": 0.0}
+_FNG_FAILURE_COUNT = 0
 # LunarCrush is the primary sentiment source - Twitter sentiment has been removed
 LUNARCRUSH_BASE_URL = "https://lunarcrush.com/api4/public"
 _MANAGED_MANIFEST = load_manifest()
@@ -171,31 +177,116 @@ class LunarCrushClient:
                 "Skipping LunarCrush trending tokens fetch because the API key is not configured."
             )
             return []
-        try:
-            url = f"{self.base_url}/trending"
-            response = self._session.get(url, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            
-            if not data or "data" not in data:
+
+        def _fetch() -> List[Dict]:
+            try:
+                url = f"{self.base_url}/trending"
+                response = self._session.get(url, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+
+                if not data or "data" not in data:
+                    return []
+
+                trending: List[Dict] = []
+                for coin in data["data"][:limit]:
+                    trending.append({
+                        "symbol": coin.get("symbol", ""),
+                        "name": coin.get("name", ""),
+                        "galaxy_score": float(coin.get("galaxy_score", 0)),
+                        "alt_rank": int(coin.get("alt_rank", 1000)),
+                        "social_mentions": int(coin.get("social_mentions", 0)),
+                        "social_volume": float(coin.get("social_volume", 0)),
+                        "sentiment": coin.get("sentiment"),
+                        "sentiment_score": coin.get("sentiment_score"),
+                    })
+
+                return trending
+
+            except Exception as exc:
+                logger.error(f"Failed to fetch trending tokens: {exc}")
                 return []
-            
-            trending = []
-            for coin in data["data"][:limit]:
-                trending.append({
-                    "symbol": coin.get("symbol", ""),
-                    "name": coin.get("name", ""),
-                    "galaxy_score": float(coin.get("galaxy_score", 0)),
-                    "alt_rank": int(coin.get("alt_rank", 1000)),
-                    "social_mentions": int(coin.get("social_mentions", 0)),
-                    "social_volume": float(coin.get("social_volume", 0))
-                })
-            
-            return trending
-            
+
+        try:
+            return await asyncio.to_thread(_fetch)
         except Exception as exc:
-            logger.error(f"Failed to fetch trending tokens: {exc}")
+            logger.error(f"Failed to retrieve trending tokens asynchronously: {exc}")
             return []
+
+    async def get_trending_solana_tokens(
+        self, *, limit: int = 20
+    ) -> List[Tuple[str, SentimentData, Dict[str, object]]]:
+        """Return trending Solana tokens with mapped mint addresses."""
+
+        if not self.api_key:
+            logger.debug(
+                "Skipping LunarCrush Solana trend fetch because the API key is not configured."
+            )
+            return []
+
+        raw_trending = await self.get_trending_tokens(limit * 2)
+        if not raw_trending:
+            return []
+
+        registry = await get_jupiter_registry()
+        if not registry:
+            return []
+
+        symbol_index = index_registry_by_symbol(registry, chain_id=101)
+        results: List[Tuple[str, SentimentData, Dict[str, object]]] = []
+
+        for entry in raw_trending:
+            if not isinstance(entry, dict):
+                continue
+            symbol = str(entry.get("symbol") or "").upper()
+            if not symbol:
+                continue
+            candidates = symbol_index.get(symbol)
+            if not candidates:
+                continue
+            mint_address = str(candidates[0].get("address") or "").strip()
+            if not mint_address:
+                continue
+
+            galaxy_score = float(entry.get("galaxy_score", 0.0) or 0.0)
+            alt_rank = int(entry.get("alt_rank", 1000) or 1000)
+            sentiment_raw = entry.get("sentiment") or entry.get("sentiment_score") or 50.0
+            try:
+                sentiment_value = float(sentiment_raw)
+            except (TypeError, ValueError):
+                sentiment_value = 50.0
+            if sentiment_value > 1:
+                sentiment_value /= 100.0
+            sentiment_value = max(0.0, min(1.0, sentiment_value))
+
+            if galaxy_score >= 70 and sentiment_value >= 0.6:
+                direction = SentimentDirection.BULLISH
+            elif galaxy_score <= 30 or sentiment_value <= 0.4:
+                direction = SentimentDirection.BEARISH
+            else:
+                direction = SentimentDirection.NEUTRAL
+
+            sentiment_data = SentimentData(
+                galaxy_score=galaxy_score,
+                alt_rank=alt_rank,
+                sentiment=sentiment_value,
+                sentiment_direction=direction,
+                social_mentions=int(entry.get("social_mentions", 0) or 0),
+                social_volume=float(entry.get("social_volume", 0.0) or 0.0),
+                last_updated=time.time(),
+            )
+
+            metadata: Dict[str, object] = {
+                "symbol": symbol,
+                "name": entry.get("name"),
+                "mint": mint_address,
+            }
+            results.append((mint_address, sentiment_data, metadata))
+
+            if len(results) >= limit:
+                break
+
+        return results
 
 
 # Global client instance
@@ -212,21 +303,52 @@ def get_lunarcrush_client() -> LunarCrushClient:
 
 def fetch_fng_index() -> int:
     """Return the current Fear & Greed index (0-100)."""
+    global _FNG_FAILURE_COUNT, _FNG_CACHE
     mock = os.getenv("MOCK_FNG_VALUE")
     if mock is not None:
         try:
             return int(mock)
         except ValueError:
             return 50
-    try:
-        resp = requests.get(FNG_URL, timeout=5)
-        resp.raise_for_status()
-        data = resp.json()
-        if isinstance(data, dict):
-            return int(data.get("data", [{}])[0].get("value", 50))
-    except Exception as exc:
-        logger.error("Failed to fetch FNG index: %s", exc)
-    return 50
+
+    now = time.time()
+    cached_age = now - _FNG_CACHE.get("fetched_at", 0.0)
+    if cached_age < _FNG_CACHE_TTL:
+        return int(_FNG_CACHE.get("value", 50))
+
+    last_error: Optional[Exception] = None
+    for attempt in range(3):
+        try:
+            resp = requests.get(FNG_URL, timeout=5 + attempt)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, dict):
+                value = int(data.get("data", [{}])[0].get("value", 50))
+            else:
+                value = 50
+
+            _FNG_CACHE.update({"value": value, "fetched_at": time.time()})
+            _FNG_FAILURE_COUNT = 0
+            return value
+        except Exception as exc:  # pragma: no cover - network dependency
+            last_error = exc
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+
+    # All attempts failed - degrade gracefully using cached/default value
+    _FNG_FAILURE_COUNT += 1
+    fallback_value = int(_FNG_CACHE.get("value", 50))
+    log_message = (
+        "Failed to fetch FNG index after retries; using cached value %s"
+        % fallback_value
+    )
+    if last_error is not None:
+        log_message = f"Failed to fetch FNG index after retries: {last_error}; using cached value {fallback_value}"
+    if _FNG_FAILURE_COUNT == 1:
+        logger.warning(log_message)
+    else:
+        logger.debug(log_message)
+    return fallback_value
 
 
 async def get_sentiment_score(symbol: str = "bitcoin") -> float:
@@ -364,4 +486,3 @@ async def check_sentiment_alignment(
     except Exception as exc:
         logger.warning(f"Failed to check sentiment alignment for {symbol}: {exc}")
         return True  # Fail safely by allowing the trade
-

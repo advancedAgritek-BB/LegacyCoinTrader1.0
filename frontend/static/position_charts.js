@@ -1,384 +1,657 @@
-/* Position card mini-charts (CSP-compliant, no inline scripts) */
+/* Position card mini-charts */
 
-(function () {
-  function parseNumberWithCommas(str) {
-    if (!str) return 0;
-    return parseFloat(String(str).replace(/,/g, '')) || 0;
-  }
+const CHART_LOADING_ATTR = 'chartLoading';
+const CHART_LOADED_ATTR = 'chartLoaded';
+const CHART_OBSERVED_ATTR = 'chartObserved';
+const CHART_ERROR_ATTR = 'chartError';
 
-  function getBackendPositionData() {
-    if (window.positionData && Object.keys(window.positionData).length) {
-      return window.positionData;
+let chartObserver = null;
+let gridMutationObserver = null;
+let batchTimer = null;
+let chartsInitialized = false;
+
+const BATCH_SIZE = 6;
+const BATCH_DELAY_MS = 80;
+const pendingSymbolQueue = new Map(); // symbol -> { cards: Set<Element>, force: boolean }
+const inFlightSymbols = new Set();
+let lastBatchIssuedAt = 0;
+
+document.addEventListener('DOMContentLoaded', () => {
+  waitForPositionCards();
+});
+
+function waitForPositionCards() {
+  // Check every 500ms for position cards, up to 10 seconds
+  let attempts = 0;
+  const maxAttempts = 20;
+
+  const checkInterval = setInterval(() => {
+    const positionCards = document.querySelectorAll('.position-card[data-symbol]');
+
+    if (positionCards.length > 0) {
+      clearInterval(checkInterval);
+      loadAllCharts();
+    } else if (attempts >= maxAttempts) {
+      clearInterval(checkInterval);
     }
-    // Fallback: try to build from DOM metrics
-    const map = {};
-    document.querySelectorAll('.position-card').forEach(card => {
-      const symbolEl = card.querySelector('.position-symbol');
-      if (!symbolEl) return;
-      const symbol = symbolEl.textContent.trim();
-      const metricValues = card.querySelectorAll('.metric-value');
-      const entryPrice = parseNumberWithCommas((metricValues[0]?.textContent || '').replace('$', ''));
-      const size = parseNumberWithCommas(metricValues[1]?.textContent || '0');
-      const currentPrice = parseNumberWithCommas((metricValues[2]?.textContent || '').replace('$', ''));
-      const pnlText = (card.querySelector('.pnl-percentage')?.textContent || '0%').replace('%', '');
-      const pnl = parseFloat(pnlText) || 0;
-      map[symbol] = {
-        symbol,
-        entry_price: entryPrice,
-        current_price: currentPrice,
-        size,
-        pnl
-      };
-    });
-    return map;
+
+    attempts++;
+  }, 500);
+}
+
+function setupChartObserver() {
+  if (chartObserver || !('IntersectionObserver' in window)) {
+    return chartObserver;
   }
 
-  function getCachedChartData(symbol) {
-    try {
-      const cached = localStorage.getItem('chart_' + symbol);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        const now = Date.now();
-        // Cache for 5 minutes
-        if (now - parsed.timestamp < 300000) {
-          return parsed.data;
+  chartObserver = new IntersectionObserver(handleCardVisibility, {
+    root: null,
+    rootMargin: '200px 0px',
+    threshold: 0.1
+  });
+
+  return chartObserver;
+}
+
+function setupGridMutationObserver() {
+  if (gridMutationObserver) {
+    return;
+  }
+
+  const grid = document.querySelector('.positions-grid');
+  if (!grid || !('MutationObserver' in window)) {
+    return;
+  }
+
+  gridMutationObserver = new MutationObserver(mutations => {
+    mutations.forEach(mutation => {
+      mutation.addedNodes.forEach(node => {
+        if (!(node instanceof Element)) {
+          return;
+        }
+
+        if (node.matches && node.matches('.position-card[data-symbol]')) {
+          registerPositionCard(node);
         } else {
-          localStorage.removeItem('chart_' + symbol);
+          node.querySelectorAll?.('.position-card[data-symbol]').forEach(registerPositionCard);
         }
-      }
-    } catch (e) {
-      console.warn('Error reading chart cache for', symbol, e);
-    }
-    return null;
+      });
+    });
+  });
+
+  gridMutationObserver.observe(grid, { childList: true });
+}
+
+function registerPositionCard(card) {
+  if (!card || !(card instanceof Element)) {
+    return;
   }
 
-  function setCachedChartData(symbol, data) {
-    try {
-      const cacheData = {
-        data: data,
-        timestamp: Date.now()
-      };
-      localStorage.setItem('chart_' + symbol, JSON.stringify(cacheData));
-    } catch (e) {
-      console.warn('Error caching chart data for', symbol, e);
-    }
+  const symbol = card.getAttribute('data-symbol');
+  if (!symbol) {
+    return;
   }
 
-  async function fetchRealChartData(symbol) {
-    console.log('fetchRealChartData called for symbol:', symbol);
-    
-    // Check cache first
-    const cached = getCachedChartData(symbol);
-    if (cached && cached.length > 0) {
-      console.log('Using cached chart data for', symbol);
-      return cached;
-    }
-
-    const tryFetch = async (sym) => {
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 10000);
-      const res = await fetch('/api/candle-data?symbol=' + encodeURIComponent(sym) + '&limit=50&interval=5m', { signal: controller.signal });
-      clearTimeout(tid);
-      const data = await res.json();
-      return { res, data };
-    };
-
-    try {
-      console.log('Fetching fresh data for symbol:', symbol);
-      let { res, data } = await tryFetch(symbol);
-      console.log('API response for', symbol, ':', data, 'Status:', res.status);
-
-      // If BTC symbol returned no candles, try Kraken XBT alias
-      if ((!res.ok || !data || !Array.isArray(data.candles) || data.candles.length === 0) && typeof symbol === 'string' && symbol.includes('BTC/')) {
-        const alias = symbol.replace('BTC/', 'XBT/');
-        console.log('Retrying with Kraken alias', alias, 'for', symbol);
-        try {
-          const r2 = await tryFetch(alias);
-          res = r2.res;
-          data = r2.data;
-          console.log('Alias API response for', alias, ':', data, 'Status:', res.status);
-        } catch (aliasErr) {
-          console.warn('Alias fetch failed for', alias, aliasErr);
-        }
-      }
-
-      // Check if the API returned an error (either HTTP error or success: false)
-      if (!res.ok || (data && data.success === false)) {
-        const errorMsg = data && data.error ? data.error : 'HTTP ' + res.status;
-        console.warn('API error for', symbol, ':', errorMsg);
-        return [];
-      }
-
-      if (data && Array.isArray(data.candles)) {
-        const prices = data.candles.map(c => parseFloat(c.close));
-        if (prices && prices.length > 0) {
-          setCachedChartData(symbol, prices);
-          return prices;
-        }
-      }
-      return [];
-    } catch (e) {
-      console.warn('fetchRealChartData failed for', symbol, e);
-      return [];
-    }
+  if (card.dataset[CHART_LOADED_ATTR] === 'true' || card.dataset[CHART_LOADING_ATTR] === 'true') {
+    return;
   }
 
-  function drawEnhancedChart(ctx, canvas, prices, entryPrice, isPositive, stopPrice) {
-    const width = canvas.width;
-    const height = canvas.height;
-    const padding = 15;
+  if (!('IntersectionObserver' in window)) {
+    // Fallback for older browsers – load immediately
+    loadChartForSymbol(symbol, card);
+    return;
+  }
 
-    // Include stop price in bounds if provided
-    const hasStop = typeof stopPrice === 'number' && isFinite(stopPrice) && stopPrice > 0;
-    const minPrice = hasStop ? Math.min(...prices, entryPrice, stopPrice) : Math.min(...prices, entryPrice);
-    const maxPrice = hasStop ? Math.max(...prices, entryPrice, stopPrice) : Math.max(...prices, entryPrice);
-    const priceRange = maxPrice - minPrice;
-    if (priceRange <= 0) {
-      ctx.strokeStyle = isPositive ? '#00ff88' : '#ff4444';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(padding, height / 2);
-      ctx.lineTo(width - padding, height / 2);
-      ctx.stroke();
+  setupChartObserver();
+
+  if (card.dataset[CHART_OBSERVED_ATTR] === 'true') {
+    return;
+  }
+
+  card.dataset[CHART_OBSERVED_ATTR] = 'true';
+  chartObserver.observe(card);
+}
+
+function handleCardVisibility(entries) {
+  entries.forEach(entry => {
+    if (!entry.isIntersecting) {
       return;
     }
 
-    ctx.strokeStyle = isPositive ? '#00ff88' : '#ff4444';
+    const card = entry.target;
+    const symbol = card.getAttribute('data-symbol');
+    if (!symbol) {
+      chartObserver.unobserve(card);
+      return;
+    }
+
+    chartObserver.unobserve(card);
+    loadChartForSymbol(symbol, card);
+  });
+}
+
+function registerAllPositionCards() {
+  const positionCards = document.querySelectorAll('.position-card[data-symbol]');
+  if (!positionCards.length) {
+    return;
+  }
+
+  positionCards.forEach(card => registerPositionCard(card));
+}
+
+function loadAllCharts() {
+  if (chartsInitialized) {
+    console.log('Position charts already initialized; skipping duplicate run.');
+    return;
+  }
+  const positionCards = document.querySelectorAll('.position-card[data-symbol]');
+  if (!positionCards.length) {
+    console.warn('loadAllCharts called before position cards were ready; skipping for now.');
+    return;
+  }
+
+  chartsInitialized = true;
+
+  if (!('IntersectionObserver' in window)) {
+    console.warn('IntersectionObserver not supported. Position charts will load immediately.');
+  }
+
+  setupGridMutationObserver();
+  registerAllPositionCards();
+
+  // Load charts immediately for visible cards, lazy load others
+  positionCards.forEach((card, index) => {
+    const symbol = card.getAttribute('data-symbol');
+    if (!symbol) {
+      return;
+    }
+
+    // Check if card is visible in viewport
+    const rect = card.getBoundingClientRect();
+    const isVisible = rect.top < window.innerHeight && rect.bottom > 0;
+
+    if (isVisible || index < 3) { // Load first 3 immediately, plus any visible ones
+      try {
+        loadChartForSymbol(symbol, card, { force: true });
+        if (chartObserver) {
+          chartObserver.unobserve(card);
+        }
+      } catch (err) {
+        console.warn(`Immediate chart load failed for ${symbol}`, err);
+      }
+    }
+  });
+}
+
+function loadChartForSymbol(symbol, cardElement, options = {}) {
+  if (!cardElement) {
+    console.warn(`Missing card element for ${symbol}`);
+    return;
+  }
+
+  const force = Boolean(options.force);
+  if (!force) {
+    if (cardElement.dataset[CHART_LOADED_ATTR] === 'true') {
+      console.log(`Chart already loaded for ${symbol}, skipping.`);
+      return;
+    }
+    if (cardElement.dataset[CHART_LOADING_ATTR] === 'true') {
+      console.log(`Chart already loading for ${symbol}, skipping.`);
+      return;
+    }
+  }
+
+  cardElement.dataset[CHART_LOADING_ATTR] = 'true';
+  delete cardElement.dataset[CHART_ERROR_ATTR];
+  showChartLoadingState(cardElement);
+
+  queueChartFetch(symbol, cardElement, { force });
+}
+
+function queueChartFetch(symbol, cardElement, { force = false } = {}) {
+  let entry = pendingSymbolQueue.get(symbol);
+  if (!entry) {
+    entry = { cards: new Set(), force: false };
+    pendingSymbolQueue.set(symbol, entry);
+  }
+  entry.cards.add(cardElement);
+  entry.force = entry.force || force;
+
+  if (force) {
+    flushSymbolQueue(true);
+    return;
+  }
+
+  if (pendingSymbolQueue.size >= BATCH_SIZE) {
+    flushSymbolQueue();
+    return;
+  }
+
+  if (batchTimer) {
+    return;
+  }
+
+  const elapsed = Date.now() - lastBatchIssuedAt;
+  const delay = Math.max(0, elapsed < BATCH_DELAY_MS ? BATCH_DELAY_MS - elapsed : BATCH_DELAY_MS);
+  batchTimer = setTimeout(() => flushSymbolQueue(), delay);
+}
+
+function flushSymbolQueue(force = false) {
+  if (batchTimer) {
+    clearTimeout(batchTimer);
+    batchTimer = null;
+  }
+
+  if (!pendingSymbolQueue.size) {
+    return;
+  }
+
+  const symbolsToFetch = [];
+  const cardsBySymbol = new Map();
+
+  for (const [symbol, entry] of pendingSymbolQueue) {
+    if (inFlightSymbols.has(symbol)) {
+      continue;
+    }
+    if (!force && symbolsToFetch.length >= BATCH_SIZE && !entry.force) {
+      continue;
+    }
+    pendingSymbolQueue.delete(symbol);
+    inFlightSymbols.add(symbol);
+    symbolsToFetch.push(symbol);
+    cardsBySymbol.set(symbol, Array.from(entry.cards));
+  }
+
+  if (!symbolsToFetch.length) {
+    return;
+  }
+
+  lastBatchIssuedAt = Date.now();
+
+  fetch(`/api/v1/market-data/batch-candles`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      symbols: symbolsToFetch,
+      limit: 100,
+      timeframe: '5m',
+      exchange: 'kraken',
+      force_fresh: true,  // Force fresh data for charts
+    }),
+  })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      handleBatchResponse(data, cardsBySymbol);
+    })
+    .catch(error => {
+      for (const [symbol, cards] of cardsBySymbol.entries()) {
+        cards.forEach(card => handleChartFailure(symbol, card, `API Error: ${error.message}`));
+      }
+    })
+    .finally(() => {
+      symbolsToFetch.forEach(symbol => inFlightSymbols.delete(symbol));
+      if (pendingSymbolQueue.size) {
+        flushSymbolQueue();
+      }
+    });
+}
+
+function handleBatchResponse(data, cardsBySymbol) {
+  const results = data && data.results ? data.results : {};
+
+  for (const [symbol, cards] of cardsBySymbol.entries()) {
+    const payload = results[symbol];
+    if (!payload || payload.error) {
+      const message = payload && payload.error ? payload.error : 'No chart data available';
+      cards.forEach(card => handleChartFailure(symbol, card, message));
+      continue;
+    }
+
+    cards.forEach(card => renderChartPayload(symbol, card, payload));
+  }
+}
+
+function renderChartPayload(symbol, cardElement, chartData) {
+  if (!cardElement || !cardElement.isConnected) {
+    return;
+  }
+
+  const candles = Array.isArray(chartData.candles) ? chartData.candles : [];
+
+  if (!candles.length) {
+    handleChartFailure(symbol, cardElement, 'No chart data available');
+    return;
+  }
+
+  const chartContainer = cardElement.querySelector('.chart-container');
+  const loadingElement = cardElement.querySelector('.chart-loading');
+  const canvasElement = cardElement.querySelector('canvas');
+  if (!chartContainer || !loadingElement || !canvasElement) {
+    handleChartFailure(symbol, cardElement, 'Chart container missing');
+    return;
+  }
+
+  const rect = chartContainer.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvasElement.width = Math.max(1, rect.width * dpr);
+  canvasElement.height = Math.max(1, rect.height * dpr);
+  canvasElement.style.width = `${rect.width}px`;
+  canvasElement.style.height = `${rect.height}px`;
+
+  const ctx = canvasElement.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+
+  loadingElement.style.display = 'none';
+  canvasElement.style.display = 'block';
+
+  const entryAttr = parseFloat(cardElement.dataset.entryPrice || '');
+  const stopAttr = parseFloat(cardElement.dataset.stopLoss || '');
+  const entryLine = Number.isFinite(entryAttr) ? entryAttr : null;
+  const stopLine = Number.isFinite(stopAttr) ? stopAttr : null;
+
+  renderEnhancedChart(canvasElement, candles, '5m', {
+    entryPrice: entryLine,
+    stopLossPrice: stopLine,
+    symbol: symbol,
+  });
+
+  cardElement.dataset[CHART_LOADED_ATTR] = 'true';
+  delete cardElement.dataset[CHART_LOADING_ATTR];
+  delete cardElement.dataset[CHART_ERROR_ATTR];
+
+  if (chartData.source === 'fallback' || chartData.note) {
+    addFallbackIndicator(cardElement, canvasElement);
+  }
+}
+
+function addFallbackIndicator(cardElement, canvasElement) {
+  const parent = canvasElement.parentNode;
+  if (!parent || parent.querySelector('.fallback-indicator')) {
+    return;
+  }
+  parent.style.position = 'relative';
+  const indicator = document.createElement('div');
+  indicator.className = 'fallback-indicator';
+  indicator.textContent = 'DEMO DATA';
+  indicator.style.cssText = `
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: rgba(255, 193, 7, 0.9);
+    color: #000;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: bold;
+    z-index: 10;
+  `;
+  parent.appendChild(indicator);
+}
+
+function handleChartFailure(symbol, cardElement, message) {
+  if (!cardElement || !cardElement.isConnected) {
+    return;
+  }
+
+  delete cardElement.dataset[CHART_LOADING_ATTR];
+  delete cardElement.dataset[CHART_OBSERVED_ATTR];
+  cardElement.dataset[CHART_ERROR_ATTR] = message;
+  showChartError(cardElement, message);
+
+  setTimeout(() => {
+    if (cardElement.isConnected && cardElement.dataset[CHART_LOADED_ATTR] !== 'true') {
+      registerPositionCard(cardElement);
+    }
+  }, 15000);
+}
+
+window.registerPositionCardForLazyCharts = function(cardOrSymbol, options = {}) {
+  let card = cardOrSymbol;
+  if (typeof cardOrSymbol === 'string') {
+    card = document.querySelector(`.position-card[data-symbol="${cardOrSymbol}"]`);
+  }
+
+  if (!card) {
+    return;
+  }
+
+  if (options.force) {
+    delete card.dataset[CHART_LOADED_ATTR];
+    delete card.dataset[CHART_OBSERVED_ATTR];
+    delete card.dataset[CHART_ERROR_ATTR];
+  }
+
+  registerPositionCard(card);
+};
+
+function showChartLoadingState(card) {
+  const loadingElement = card.querySelector('.chart-loading');
+  const canvasElement = card.querySelector('canvas');
+  if (!loadingElement) {
+    return;
+  }
+
+  const spinner = loadingElement.querySelector('.loading-spinner');
+  if (spinner) {
+    spinner.style.display = '';
+  }
+
+  const loadingText = loadingElement.querySelector('span');
+  if (loadingText) {
+    loadingText.textContent = 'Loading chart...';
+  }
+
+  const errorMessage = loadingElement.querySelector('.chart-error-message');
+  if (errorMessage) {
+    errorMessage.remove();
+  }
+
+  loadingElement.style.display = 'flex';
+  if (canvasElement) {
+    canvasElement.style.display = 'none';
+  }
+}
+
+function showChartError(card, message) {
+  const loadingElement = card.querySelector('.chart-loading');
+  const canvasElement = card.querySelector('canvas');
+  if (!loadingElement) {
+    return;
+  }
+
+  const spinner = loadingElement.querySelector('.loading-spinner');
+  if (spinner) {
+    spinner.style.display = 'none';
+  }
+
+  const loadingText = loadingElement.querySelector('span');
+  if (loadingText) {
+    loadingText.textContent = 'Chart unavailable';
+  }
+
+  let errorMessage = loadingElement.querySelector('.chart-error-message');
+  if (!errorMessage) {
+    errorMessage = document.createElement('div');
+    errorMessage.className = 'chart-error-message';
+    errorMessage.style.marginTop = '6px';
+    errorMessage.style.fontSize = '11px';
+    errorMessage.style.color = '#f97316';
+    errorMessage.style.textAlign = 'center';
+    loadingElement.appendChild(errorMessage);
+  }
+
+  errorMessage.textContent = message || 'Unable to load chart data';
+  loadingElement.style.display = 'flex';
+  if (canvasElement) {
+    canvasElement.style.display = 'none';
+  }
+}
+
+function renderEnhancedChart(canvas, candles, timeframe = '5m', options = {}) {
+  try {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    const width = canvas.width / dpr;
+    const height = canvas.height / dpr;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, width, height);
+
+    if (!Array.isArray(candles) || candles.length === 0) {
+      return;
+    }
+
+    const closePrices = candles
+      .map(candle => {
+        if (Array.isArray(candle)) {
+          return parseFloat(candle[4]);
+        }
+        if (candle && typeof candle === 'object') {
+          return parseFloat(candle.close ?? candle[4]);
+        }
+        return NaN;
+      })
+      .filter(price => Number.isFinite(price));
+
+    if (!closePrices.length) {
+      return;
+    }
+
+    const entryPrice = Number.isFinite(options.entryPrice) ? Number(options.entryPrice) : null;
+    const stopLossPrice = Number.isFinite(options.stopLossPrice) ? Number(options.stopLossPrice) : null;
+
+    let minPrice = Math.min(...closePrices);
+    let maxPrice = Math.max(...closePrices);
+
+    if (Number.isFinite(entryPrice)) {
+      minPrice = Math.min(minPrice, entryPrice);
+      maxPrice = Math.max(maxPrice, entryPrice);
+    }
+
+    if (Number.isFinite(stopLossPrice)) {
+      minPrice = Math.min(minPrice, stopLossPrice);
+      maxPrice = Math.max(maxPrice, stopLossPrice);
+    }
+
+    if (!Number.isFinite(minPrice) || !Number.isFinite(maxPrice)) {
+      return;
+    }
+
+    if (maxPrice === minPrice) {
+      const pad = maxPrice === 0 ? 0.5 : Math.abs(maxPrice) * 0.005;
+      minPrice -= pad;
+      maxPrice += pad;
+    }
+
+    const priceRange = maxPrice - minPrice;
+    const paddingX = Math.max(8, width * 0.04);
+    const paddingTop = 10;
+    const paddingBottom = 16;
+    const drawableWidth = Math.max(1, width - paddingX * 2);
+    const drawableHeight = Math.max(1, height - (paddingTop + paddingBottom));
+
+    const priceToY = (price) => {
+      if (!Number.isFinite(price)) {
+        return null;
+      }
+      const clamped = Math.min(Math.max(price, minPrice), maxPrice);
+      const relative = (clamped - minPrice) / priceRange;
+      return paddingTop + (1 - relative) * drawableHeight;
+    };
+
+    const firstPrice = closePrices[0];
+    const lastPrice = closePrices[closePrices.length - 1];
+    const isUptrend = lastPrice >= firstPrice;
+    const trendColor = isUptrend ? '#22c55e' : '#ef4444';
+
     ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = trendColor;
     ctx.beginPath();
-    for (let i = 0; i < prices.length; i++) {
-      const x = padding + (i / (prices.length - 1)) * (width - 2 * padding);
-      const y = height - padding - ((prices[i] - minPrice) / priceRange) * (height - 2 * padding);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
+
+    closePrices.forEach((price, index) => {
+      const x = paddingX + (index / Math.max(closePrices.length - 1, 1)) * drawableWidth;
+      const y = priceToY(price);
+      if (y === null) {
+        return;
+      }
+      if (index === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
     ctx.stroke();
 
-    // entry line
-    const entryY = height - padding - ((entryPrice - minPrice) / priceRange) * (height - 2 * padding);
-    ctx.strokeStyle = '#9966ff';
-    ctx.setLineDash([5, 5]);
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(padding, entryY);
-    ctx.lineTo(width - padding, entryY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // entry price label
-    ctx.fillStyle = '#9966ff';
-    ctx.font = 'bold 11px Arial';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'bottom';
-    const labelText = '$' + entryPrice.toFixed(2);
-    const labelX = width - padding - 5;
-    const labelY = entryY - 3;
-    ctx.fillText(labelText, labelX, labelY);
-
-    // stop line (stop loss or trailing stop)
-    if (hasStop) {
-      const stopY = height - padding - ((stopPrice - minPrice) / priceRange) * (height - 2 * padding);
-      ctx.strokeStyle = '#ffcc00';
-      ctx.setLineDash([4, 4]);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(padding, stopY);
-      ctx.lineTo(width - padding, stopY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // stop price label
-      ctx.fillStyle = '#ffcc00';
-      ctx.font = 'bold 11px Arial';
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'top';
-      const stopLabel = 'SL $' + Number(stopPrice).toFixed(2);
-      const stopLabelX = width - padding - 5;
-      const stopLabelY = stopY + 3;
-      ctx.fillText(stopLabel, stopLabelX, stopLabelY);
-    }
-  }
-
-  function drawErrorChart(ctx, canvas, message, symbol = null) {
-    const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
-    ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = '#ef4444';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(1, 1, w - 2, h - 2);
-    ctx.fillStyle = '#ef4444';
-    ctx.font = '11px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(message, w / 2, h / 2 - 5);
-    // Add a small hint for BTC symbols
-    if (message === 'No data' && symbol && symbol.includes('BTC/')) {
-      ctx.font = '9px Arial';
-      ctx.fillStyle = '#888';
-      ctx.fillText('(Check Kraken API)', w / 2, h / 2 + 8);
-    }
-  }
-
-  async function createPositionChart(canvasId, position) {
-    try {
-      const canvas = document.getElementById(canvasId);
-      const loadingDiv = document.getElementById('loading-' + canvasId.replace('chart-', ''));
-
-      if (!canvas) {
-        console.warn('Canvas not found:', canvasId);
+    const drawReferenceLine = (price, color, label, position = 'above') => {
+      if (!Number.isFinite(price)) {
+        return;
+      }
+      const y = priceToY(price);
+      if (y === null) {
         return;
       }
 
-    // Show loading state
-    if (loadingDiv) {
-      loadingDiv.style.display = 'flex';
-    }
-    canvas.style.display = 'none';
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(paddingX, y);
+      ctx.lineTo(width - paddingX, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      // Hide loading and show error
-      if (loadingDiv) loadingDiv.style.display = 'none';
-      canvas.style.display = 'block';
-      return;
-    }
+      const labelText = `${label} $${price.toFixed(2)}`;
+      ctx.fillStyle = color;
+      ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      ctx.textAlign = 'right';
 
-    canvas.width = 300;
-    canvas.height = 80;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    console.log('Creating chart for', position.symbol);
-
-    // Add timeout to prevent hanging
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Chart fetch timeout')), 15000)
-    );
-
-    let prices;
-    try {
-      prices = await Promise.race([fetchRealChartData(position.symbol), timeoutPromise]);
-    } catch (error) {
-      console.warn('Chart fetch failed or timed out for', position.symbol, ':', error.message);
-      prices = [];
-    }
-
-    console.log('Fetched prices for', position.symbol, ':', prices ? prices.length : 0, 'items');
-
-    if (prices && prices.length) {
-      console.log('Drawing chart with real data for', position.symbol);
-      drawEnhancedChart(ctx, canvas, prices, Number(position.entry_price) || 0, (position.pnl || 0) >= 0, Number(position.stop_price) || undefined);
-    } else {
-      console.log('Drawing error chart for', position.symbol);
-      drawErrorChart(ctx, canvas, 'No data', position.symbol);
-    }
-
-    // Hide loading and show canvas
-    console.log('Chart creation complete for', position.symbol, '- hiding loading, showing canvas');
-    if (loadingDiv) {
-      loadingDiv.style.display = 'none';
-      console.log('Loading div hidden for', position.symbol);
-    }
-      canvas.style.display = 'block';
-      console.log('Canvas displayed for', position.symbol);
-    } catch (error) {
-      console.error('Error creating chart for', position.symbol, ':', error);
-      // Ensure loading is hidden and show error state
-      const canvas = document.getElementById(canvasId);
-      const loadingDiv = document.getElementById('loading-' + canvasId.replace('chart-', ''));
-
-      if (loadingDiv) loadingDiv.style.display = 'none';
-      if (canvas) {
-        canvas.style.display = 'block';
-        try {
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            drawErrorChart(ctx, canvas, 'Error', position.symbol);
-          }
-        } catch (drawError) {
-          console.error('Failed to draw error chart:', drawError);
-        }
+      if (position === 'below') {
+        ctx.textBaseline = 'top';
+        const labelY = Math.min(height - paddingBottom, y + 4);
+        ctx.fillText(labelText, width - paddingX - 4, labelY);
+      } else {
+        ctx.textBaseline = 'bottom';
+        const labelY = Math.max(paddingTop + 6, y - 4);
+        ctx.fillText(labelText, width - paddingX - 4, labelY);
       }
+      ctx.restore();
+    };
+
+    if (Number.isFinite(entryPrice)) {
+      drawReferenceLine(entryPrice, '#60a5fa', 'Entry', 'above');
     }
+
+    if (Number.isFinite(stopLossPrice)) {
+      drawReferenceLine(stopLossPrice, '#f97316', 'Stop', 'below');
+    }
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.font = '9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(timeframe.toUpperCase(), paddingX, height - 4);
+
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    const priceLabel = `$${lastPrice.toFixed(2)}`;
+    ctx.fillText(priceLabel, width - paddingX, paddingTop - 2);
+  } catch (error) {
+    console.error('Error rendering chart:', error);
   }
-
-  let chartQueue = [];
-  let isProcessing = false;
-  function queueChart(canvas, position) {
-    chartQueue.push({ canvas, position });
-    processQueue();
-  }
-  function processQueue() {
-    if (isProcessing || chartQueue.length === 0) return;
-    isProcessing = true;
-    const { canvas, position } = chartQueue.shift();
-    console.log('Processing chart for', position.symbol);
-
-    createPositionChart(canvas.id, position).then(() => {
-      console.log('Chart processed successfully for', position.symbol);
-    }).catch((error) => {
-      console.error('Chart processing failed for', position.symbol, ':', error);
-    }).finally(() => {
-      isProcessing = false;
-      console.log('Chart processing complete, moving to next in queue');
-      setTimeout(processQueue, 100);
-    });
-  }
-
-  // Intersection Observer for lazy loading
-  let observer = null;
-
-  function initLazyLoading() {
-    const canvases = document.querySelectorAll('canvas[id^="chart-"]');
-    if (!canvases.length) return;
-
-    const posMap = getBackendPositionData();
-
-    // Create intersection observer
-    observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          const canvas = entry.target;
-          const symbol = canvas.id.replace('chart-', '').replace(/-/g, '/');
-          const position = posMap[symbol];
-
-          if (position && !canvas.hasAttribute('data-loaded')) {
-            canvas.setAttribute('data-loaded', 'true');
-            queueChart(canvas, position);
-            observer.unobserve(canvas); // Stop observing once loaded
-          } else if (!position) {
-            // DOM fallback already handled in getBackendPositionData
-            const fallback = getBackendPositionData()[symbol];
-            if (fallback && !canvas.hasAttribute('data-loaded')) {
-              canvas.setAttribute('data-loaded', 'true');
-              queueChart(canvas, fallback);
-              observer.unobserve(canvas);
-            }
-          }
-        }
-      });
-    }, {
-      rootMargin: '50px' // Start loading 50px before chart comes into view
-    });
-
-    // Observe all canvases
-    canvases.forEach(canvas => {
-      observer.observe(canvas);
-    });
-
-    // Load first 3 charts immediately for better perceived performance
-    const immediateLoad = Array.from(canvases).slice(0, 3);
-    immediateLoad.forEach(canvas => {
-      const symbol = canvas.id.replace('chart-', '').replace(/-/g, '/');
-      const position = posMap[symbol];
-      if (position && !canvas.hasAttribute('data-loaded')) {
-        canvas.setAttribute('data-loaded', 'true');
-        queueChart(canvas, position);
-        observer.unobserve(canvas);
-      }
-    });
-  }
-
-  document.addEventListener('DOMContentLoaded', function () {
-    initLazyLoading();
-  });
-})();
-
+}

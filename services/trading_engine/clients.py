@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import uuid
+from collections import defaultdict
 from typing import Any, Dict, Mapping, MutableMapping, Optional
 
 import httpx
@@ -25,6 +26,8 @@ from crypto_bot.services.adapters.strategy import StrategyAdapter
 from crypto_bot.services.adapters.token_discovery import TokenDiscoveryAdapter
 
 from crypto_bot.services.adapters.execution import ExecutionApiClient, ExecutionTimeoutError
+from libs.models.open_position_guard import OpenPositionGuard
+from libs.risk.risk_manager import RiskManager
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +251,174 @@ class RiskServiceClient:
         return {}
 
 
+class LocalRiskClient:
+    """Lightweight in-process risk manager used when the remote service is unavailable."""
+
+    def __init__(self, config: Mapping[str, Any]) -> None:
+        self._config = dict(config or {})
+        self._risk_manager = RiskManager.from_config(self._prepare_risk_params(self._config))
+        allocation_cfg = self._config.get("strategy_allocation") or {}
+        self._strategy_limits: dict[str, float] = {
+            str(k): float(v) for k, v in allocation_cfg.items() if isinstance(v, (int, float))
+        }
+        self._allocations: defaultdict[str, float] = defaultdict(float)
+
+    @staticmethod
+    def _prepare_risk_params(config: Mapping[str, Any]) -> Mapping[str, Any]:
+        params = dict(config)
+        params.setdefault("trade_size_pct", config.get("trade_size_pct", 0.1))
+        params.setdefault("risk_pct", config.get("risk_pct", 0.01))
+        params.setdefault("max_drawdown", config.get("max_drawdown", 0.25))
+        params.setdefault("volume_threshold_ratio", config.get("volume_threshold_ratio", 0.1))
+        return params
+
+    async def allow_trade(self, df: pd.DataFrame, strategy: Optional[str]) -> tuple[bool, str]:
+        if df is None or df.empty:
+            return False, "insufficient_market_data"
+        try:
+            price = float(df["close"].iloc[-1])
+        except Exception:
+            price = 0.0
+        if price <= 0:
+            return False, "invalid_price"
+        return True, ""
+
+    async def position_size(
+        self,
+        confidence: float,
+        balance: float,
+        *,
+        df: Optional[pd.DataFrame] = None,
+        atr: Optional[float] = None,
+        price: Optional[float] = None,
+    ) -> float:
+        return float(
+            self._risk_manager.position_size(
+                confidence,
+                balance,
+                df=df,
+                atr=atr,
+                price=price,
+            )
+        )
+
+    async def can_allocate(self, strategy: str, amount: float, balance: float) -> bool:
+        if not strategy:
+            return True
+        limit_pct = self._strategy_limits.get(strategy)
+        if limit_pct is None:
+            return True
+        limit_amount = balance * limit_pct
+        current = self._allocations[strategy]
+        return current + amount <= limit_amount + 1e-9
+
+    async def allocate_capital(self, strategy: str, amount: float) -> None:
+        if strategy:
+            self._allocations[strategy] += amount
+
+    async def snapshot(self) -> Mapping[str, Any]:
+        return {
+            "strategy_allocation": dict(self._strategy_limits),
+            "allocations": dict(self._allocations),
+        }
+
+    async def aclose(self) -> None:  # pragma: no cover - interface parity
+        return None
+
+
+class CompositeRiskClient:
+    """Wrapper that prefers the remote risk service but falls back to a local manager."""
+
+    def __init__(
+        self,
+        remote: Optional[RiskServiceClient],
+        local: Optional[LocalRiskClient],
+    ) -> None:
+        self._remote = remote
+        self._local = local
+
+    async def allow_trade(self, df: pd.DataFrame, strategy: Optional[str]) -> tuple[bool, str]:
+        if self._remote is not None:
+            try:
+                return await self._remote.allow_trade(df, strategy)
+            except Exception:
+                logger.warning("Remote risk service unavailable, using local risk checks", exc_info=True)
+                self._remote = None
+        if self._local is not None:
+            return await self._local.allow_trade(df, strategy)
+        return True, ""
+
+    async def position_size(
+        self,
+        confidence: float,
+        balance: float,
+        *,
+        df: Optional[pd.DataFrame] = None,
+        atr: Optional[float] = None,
+        price: Optional[float] = None,
+    ) -> float:
+        if self._remote is not None:
+            try:
+                return await self._remote.position_size(
+                    confidence,
+                    balance,
+                    df=df,
+                    atr=atr,
+                    price=price,
+                )
+            except Exception:
+                logger.warning("Falling back to local risk sizing", exc_info=True)
+                self._remote = None
+        if self._local is not None:
+            return await self._local.position_size(
+                confidence,
+                balance,
+                df=df,
+                atr=atr,
+                price=price,
+            )
+        return balance * 0.05
+
+    async def can_allocate(self, strategy: str, amount: float, balance: float) -> bool:
+        if self._remote is not None:
+            try:
+                return await self._remote.can_allocate(strategy, amount, balance)
+            except Exception:
+                logger.warning("Remote risk allocation check failed, using local limits", exc_info=True)
+                self._remote = None
+        if self._local is not None:
+            return await self._local.can_allocate(strategy, amount, balance)
+        return True
+
+    async def allocate_capital(self, strategy: str, amount: float) -> None:
+        if self._remote is not None:
+            try:
+                await self._remote.allocate_capital(strategy, amount)
+                return
+            except Exception:
+                logger.warning("Remote risk allocation update failed", exc_info=True)
+                self._remote = None
+        if self._local is not None:
+            await self._local.allocate_capital(strategy, amount)
+
+    async def snapshot(self) -> Mapping[str, Any]:  # pragma: no cover - advisory helper
+        if self._remote is not None:
+            try:
+                return await self._remote.snapshot()
+            except Exception:
+                logger.debug("Remote risk snapshot failed", exc_info=True)
+                self._remote = None
+        if self._local is not None:
+            return await self._local.snapshot()
+        return {}
+
+    async def aclose(self) -> None:
+        if self._remote is not None:
+            await self._remote.aclose()
+        if self._local is not None:
+            await self._local.aclose()
+
+
 class PaperWalletServiceClient:
     """HTTP client for the paper wallet orchestration service."""
 
@@ -259,14 +430,15 @@ class PaperWalletServiceClient:
         config: Optional[Mapping[str, Any]] = None,
         client: Optional[httpx.AsyncClient] = None,
     ) -> None:
-        resolved_base = base_url or os.getenv("PAPER_WALLET_SERVICE_URL", "http://paper-wallet:8011/api/v1")
+        resolved_base = base_url or os.getenv("PAPER_WALLET_SERVICE_URL", "http://portfolio:8003")
         resolved_timeout = (
             timeout if timeout is not None else float(os.getenv("PAPER_WALLET_SERVICE_TIMEOUT", "10"))
         )
         self._client = client or httpx.AsyncClient(base_url=resolved_base, timeout=resolved_timeout)
         self._owns_client = client is None
         self._config = dict(config or {})
-        self.balance: float = 0.0
+        self._initial_balance = float(self._config.get("initial_balance", 10000.0))
+        self.balance: float = self._initial_balance
         self.positions: Mapping[str, Any] = {}
 
     async def aclose(self) -> None:
@@ -288,33 +460,80 @@ class PaperWalletServiceClient:
         return body if isinstance(body, Mapping) else {}
 
     async def refresh_state(self) -> None:
-        payload = await self._request("GET", "/wallet/state")
-        balance = payload.get("balance")
-        positions = payload.get("positions")
-        try:
-            self.balance = float(balance)
-        except (TypeError, ValueError):  # pragma: no cover - defensive
-            self.balance = 0.0
-        if isinstance(positions, Mapping):
-            self.positions = dict(positions)
+        # Get positions from portfolio service
+        positions_data = await self._request("GET", "/positions")
+        if isinstance(positions_data, list):
+            self.positions = {pos.get("symbol", f"pos_{i}"): pos for i, pos in enumerate(positions_data)}
         else:
             self.positions = {}
 
+        # Get portfolio statistics for balance info
+        try:
+            pnl_response = await self._request("GET", "/pnl")
+            total_pnl_raw = pnl_response.get("total", 0) if isinstance(pnl_response, Mapping) else 0
+            try:
+                total_pnl = float(total_pnl_raw)
+            except (TypeError, ValueError):
+                total_pnl = 0.0
+            self.balance = self._initial_balance + total_pnl
+        except Exception:
+            self.balance = self._initial_balance
+
     async def buy(self, symbol: str, amount: float, price: float) -> bool:
-        payload = {"symbol": symbol, "amount": amount, "price": price, "side": "buy"}
-        data = await self._request("POST", "/wallet/buy", payload)
-        success = bool(data.get("success", data.get("purchased", False)))
-        if success:
-            await self.refresh_state()
-        return success
+        import uuid
+        from datetime import datetime, timezone
+        payload = {
+            "id": str(uuid.uuid4()),
+            "symbol": symbol,
+            "amount": str(amount),
+            "price": str(price),
+            "side": "buy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "strategy": "dry_run",
+            "exchange": "paper",
+            "status": "filled"
+        }
+        logger.info(f"Paper wallet BUY: {symbol} {amount}@{price} -> {self._client.base_url}/trades")
+        try:
+            data = await self._request("POST", "/trades", payload)
+            logger.info(f"Paper wallet BUY response: {data}")
+            success = bool(data.get("symbol") == symbol)  # Portfolio service returns position data
+            logger.info(f"Paper wallet BUY success: {success}")
+            if success:
+                self.balance -= float(amount) * float(price)
+                await self.refresh_state()
+            return success
+        except Exception as e:
+            logger.error(f"Paper wallet BUY failed: {e}")
+            return False
 
     async def sell(self, symbol: str, amount: float, price: float) -> bool:
-        payload = {"symbol": symbol, "amount": amount, "price": price, "side": "sell"}
-        data = await self._request("POST", "/wallet/sell", payload)
-        success = bool(data.get("success", data.get("sold", False)))
-        if success:
-            await self.refresh_state()
-        return success
+        import uuid
+        from datetime import datetime, timezone
+        payload = {
+            "id": str(uuid.uuid4()),
+            "symbol": symbol,
+            "amount": str(amount),
+            "price": str(price),
+            "side": "sell",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "strategy": "dry_run",
+            "exchange": "paper",
+            "status": "filled"
+        }
+        logger.info(f"Paper wallet SELL: {symbol} {amount}@{price} -> {self._client.base_url}/trades")
+        try:
+            data = await self._request("POST", "/trades", payload)
+            logger.info(f"Paper wallet SELL response: {data}")
+            success = bool(data.get("symbol") == symbol)  # Portfolio service returns position data
+            logger.info(f"Paper wallet SELL success: {success}")
+            if success:
+                self.balance += float(amount) * float(price)
+                await self.refresh_state()
+            return success
+        except Exception as e:
+            logger.error(f"Paper wallet SELL failed: {e}")
+            return False
 
 
 class PositionGuardServiceClient:
@@ -363,35 +582,103 @@ class PositionGuardServiceClient:
         return bool(data.get("allowed", data.get("can_open", True)))
 
 
+class LocalPositionGuardClient:
+    """Simple in-process position guard enforcing ``max_open_trades``."""
+
+    def __init__(self, max_open_trades: Optional[int] = None) -> None:
+        limit = max_open_trades if max_open_trades is not None else 5
+        self._guard = OpenPositionGuard(limit)
+
+    async def can_open(self, positions: Mapping[str, Any]) -> bool:
+        if isinstance(positions, Mapping):
+            current_positions = [value for value in positions.values() if value]
+        else:  # pragma: no cover - defensive fallback
+            current_positions = list(positions)
+        return self._guard.can_open(current_positions)
+
+    async def aclose(self) -> None:  # pragma: no cover - interface parity
+        return None
+
+
+class CompositePositionGuardClient:
+    """Wrapper that attempts the remote guard first and falls back to a local guard."""
+
+    def __init__(
+        self,
+        remote: Optional[PositionGuardServiceClient],
+        local: Optional[LocalPositionGuardClient],
+    ) -> None:
+        self._remote = remote
+        self._local = local
+
+    async def can_open(self, positions: Mapping[str, Any]) -> bool:
+        if self._remote is not None:
+            try:
+                return await self._remote.can_open(positions)
+            except Exception:
+                logger.warning("Remote position guard unavailable, using local guard", exc_info=True)
+                self._remote = None
+        if self._local is not None:
+            return await self._local.can_open(positions)
+        return True
+
+    async def aclose(self) -> None:
+        if self._remote is not None:
+            await self._remote.aclose()
+        if self._local is not None:
+            await self._local.aclose()
+
+
 def build_service_container() -> ServiceContainer:
     return ServiceContainer(
         market_data=MarketDataAdapter(),
         strategy=StrategyAdapter(),
         portfolio=PortfolioAdapter(),
-        execution=ExecutionGatewayClient(),
+        execution=ExecutionGatewayClient(
+            service_token="insecure-local-token-execution",
+            signing_key="local-dev-signing-key"
+        ),
         token_discovery=TokenDiscoveryAdapter(),
         monitoring=MonitoringAdapter(),
     )
 
 
-def build_risk_client(config: Mapping[str, Any]) -> Optional[RiskServiceClient]:
+def build_risk_client(config: Mapping[str, Any]) -> Optional[Any]:
     if not config:
         return None
+
+    remote_client: Optional[RiskServiceClient]
+    local_client: Optional[LocalRiskClient]
+
     try:
-        return RiskServiceClient(config=config)
-    except Exception:  # pragma: no cover - optional dependency
-        logger.warning("Risk manager client initialisation failed", exc_info=True)
+        remote_client = RiskServiceClient(config=config)
+    except Exception:
+        logger.warning("Risk manager remote client initialisation failed", exc_info=True)
+        remote_client = None
+
+    try:
+        local_client = LocalRiskClient(config)
+    except Exception:
+        logger.warning("Local risk manager setup failed", exc_info=True)
+        local_client = None
+
+    if remote_client is None and local_client is None:
         return None
+
+    return CompositeRiskClient(remote_client, local_client)
 
 
 def build_paper_wallet_client(config: Mapping[str, Any]) -> Optional[PaperWalletServiceClient]:
     mode = str(config.get("execution_mode", "dry_run")).lower()
-    if mode != "dry_run":
+    logger.info(f"Building paper wallet client: mode={mode}")
+    if mode not in ("dry_run", "paper"):
+        logger.info("Paper wallet client not created: mode not in (dry_run, paper)")
         return None
     wallet_cfg = dict(config.get("paper_wallet", {}))
     initial_balance = wallet_cfg.get("initial_balance")
     if initial_balance is None:
         initial_balance = config.get("risk", {}).get("starting_balance", 0.0)
+    logger.info(f"Paper wallet config: initial_balance={initial_balance}, wallet_cfg={wallet_cfg}")
     try:
         wallet_cfg.setdefault("initial_balance", initial_balance)
         wallet_cfg.setdefault("allow_short", bool(wallet_cfg.get("allow_short", True)))
@@ -399,22 +686,35 @@ def build_paper_wallet_client(config: Mapping[str, Any]) -> Optional[PaperWallet
             "max_open_trades",
             int(config.get("max_open_trades") or wallet_cfg.get("max_open_trades", 5)),
         )
-        return PaperWalletServiceClient(config=wallet_cfg)
+        client = PaperWalletServiceClient(config=wallet_cfg)
+        logger.info(f"Paper wallet client created: {client}")
+        return client
     except Exception:  # pragma: no cover - optional dependency
         logger.warning("Paper wallet client initialisation failed", exc_info=True)
         return None
 
 
-def build_position_guard_client(config: Mapping[str, Any]) -> Optional[PositionGuardServiceClient]:
+def build_position_guard_client(config: Mapping[str, Any]) -> Optional[Any]:
     max_trades = config.get("max_open_trades") or config.get("paper_wallet", {}).get(
         "max_open_trades", 5
     )
+    remote_client: Optional[PositionGuardServiceClient]
+    guard_config = config.get("position_guard", {})
+
     try:
-        guard_config = config.get("position_guard", {})
-        return PositionGuardServiceClient(
+        remote_client = PositionGuardServiceClient(
             config=guard_config,
             max_open_trades=int(max_trades) if max_trades is not None else None,
         )
-    except Exception:  # pragma: no cover - optional dependency
-        logger.warning("Position guard client initialisation failed", exc_info=True)
+    except Exception:
+        logger.warning("Position guard remote client initialisation failed", exc_info=True)
+        remote_client = None
+
+    local_client = LocalPositionGuardClient(
+        int(max_trades) if max_trades is not None else None
+    )
+
+    if remote_client is None and local_client is None:
         return None
+
+    return CompositePositionGuardClient(remote_client, local_client)

@@ -7,7 +7,7 @@ from functools import lru_cache
 import os
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Any, Mapping, MutableMapping, Optional
+from typing import Any, Mapping, MutableMapping, Optional, Union
 
 try:  # pragma: no cover - optional dependency for richer settings support
     from pydantic import Field
@@ -20,7 +20,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for minimal environme
 from .models import SecretRef
 
 
-@dataclass(slots=True)
+@dataclass
 class TelegramConfig:
     """Settings controlling Telegram notifications."""
 
@@ -30,7 +30,7 @@ class TelegramConfig:
     parse_mode: Optional[str] = None
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | "TelegramConfig" | None) -> "TelegramConfig":
+    def from_mapping(cls, data: Union[Mapping[str, Any], "TelegramConfig", None]) -> "TelegramConfig":
         if isinstance(data, cls):
             return data
         data = data or {}
@@ -42,7 +42,7 @@ class TelegramConfig:
         )
 
 
-@dataclass(slots=True)
+@dataclass
 class MonitoringConfig:
     """Settings controlling monitoring callbacks for order lifecycle events."""
 
@@ -67,7 +67,7 @@ class MonitoringConfig:
         )
 
 
-@dataclass(slots=True)
+@dataclass
 class CredentialsConfig:
     """References describing where to load exchange credentials."""
 
@@ -79,7 +79,7 @@ class CredentialsConfig:
 
     @classmethod
     def from_mapping(
-        cls, data: Mapping[str, Any] | "CredentialsConfig" | None
+        cls, data: Union[Mapping[str, Any], "CredentialsConfig", None]
     ) -> Optional["CredentialsConfig"]:
         if isinstance(data, cls):
             return data
@@ -100,7 +100,7 @@ class CredentialsConfig:
         )
 
 
-@dataclass(slots=True)
+@dataclass
 class ExecutionServiceConfig:
     """Runtime configuration for :class:`services.execution.service.ExecutionService`."""
 
@@ -117,7 +117,7 @@ class ExecutionServiceConfig:
     @classmethod
     def from_mapping(
         cls,
-        base: Mapping[str, Any] | MutableMapping[str, Any] | "ExecutionServiceConfig" | None,
+        base: Union[Mapping[str, Any], MutableMapping[str, Any], "ExecutionServiceConfig", None],
     ) -> "ExecutionServiceConfig":
         if isinstance(base, cls):
             return base
@@ -167,7 +167,7 @@ if BaseSettings is not None:  # pragma: no cover - exercised when dependency ava
 
 else:  # pragma: no cover - minimal fallback without pydantic
 
-    @dataclass(slots=True)
+    @dataclass
     class ExecutionApiSettings:  # type: ignore[no-redef]
         host: str = field(default_factory=lambda: os.getenv("EXECUTION_SERVICE_HOST", "0.0.0.0"))
         port: int = field(default_factory=lambda: int(os.getenv("EXECUTION_SERVICE_PORT", "8006")))

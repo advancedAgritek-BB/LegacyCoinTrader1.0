@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
+from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -42,24 +43,16 @@ class TracingSettings(BaseModel):
     service_namespace: str = Field(default="legacycoin")
 
 
-class SLOSettings(BaseModel):
-    """Targets and window definitions for tenant SLO calculations."""
-
-    window_seconds: int = Field(default=300, ge=60)
-    latency_target_ms: float = Field(default=500.0, ge=0.0)
-    error_rate_target: float = Field(default=0.01, ge=0.0)
-    throughput_target_rps: float = Field(default=1.0, ge=0.0)
-    rto_target_seconds: float = Field(default=900.0, ge=0.0)
-    rpo_target_seconds: float = Field(default=300.0, ge=0.0)
-
-
-class ComplianceSettings(BaseModel):
-    """Controls for audit/compliance metric exports."""
-
-    enabled: bool = Field(default=True)
-    secrets_rotated_env: str = Field(default="SECRETS_ROTATED_AT")
-    fallback_timestamp: Optional[str] = Field(default=None)
-    max_secret_age_days: float = Field(default=90.0, ge=0.0)
+def _coerce_setting(value, model_cls):  # pragma: no cover - simple helper
+    if isinstance(value, model_cls):
+        return value
+    if isinstance(value, FieldInfo):
+        return model_cls()
+    if isinstance(value, dict):
+        return model_cls(**value)
+    if hasattr(value, "model_dump"):
+        return model_cls(**value.model_dump())
+    return model_cls()
 
 
 class MonitoringSettings(BaseSettings):
@@ -75,49 +68,51 @@ class MonitoringSettings(BaseSettings):
     environment: str = Field(default="development")
     log_level: str = Field(default="INFO")
     correlation_header: str = Field(default="X-Correlation-ID")
-    service_role: str = Field(default="unspecified")
-    default_tenant: str = Field(default="global")
-    tenant_header: str = Field(default="X-Tenant-ID")
-    service_role_header: str = Field(default="X-Service-Role")
     metrics: MetricsSettings = Field(default_factory=MetricsSettings)
     opensearch: OpenSearchSettings = Field(default_factory=OpenSearchSettings)
     tracing: TracingSettings = Field(default_factory=TracingSettings)
-    slo: SLOSettings = Field(default_factory=SLOSettings)
-    compliance: ComplianceSettings = Field(default_factory=ComplianceSettings)
 
-    def for_service(
-        self,
-        service_name: str,
-        *,
-        environment: Optional[str] = None,
-        service_role: Optional[str] = None,
-        default_tenant: Optional[str] = None,
-    ) -> "MonitoringSettings":
+    def clone(self, **update: Any) -> "MonitoringSettings":
+        payload = self.model_dump()
+        payload.update(update)
+        return _normalise_monitoring_settings(MonitoringSettings(**payload))
+
+    def for_service(self, service_name: str, *, environment: Optional[str] = None) -> "MonitoringSettings":
         """Return a copy of the settings with a service-specific name."""
 
         update: Dict[str, str] = {"service_name": service_name}
         if environment is not None:
             update["environment"] = environment
-        if service_role is not None:
-            update["service_role"] = service_role
-        if default_tenant is not None:
-            update["default_tenant"] = default_tenant
-        return self.model_copy(update=update)
+        return self.clone(**update)
+
+
+def _normalise_monitoring_settings(settings: MonitoringSettings) -> MonitoringSettings:
+    settings.metrics = _coerce_setting(settings.metrics, MetricsSettings)
+    settings.opensearch = _coerce_setting(settings.opensearch, OpenSearchSettings)
+    settings.tracing = _coerce_setting(settings.tracing, TracingSettings)
+    if not isinstance(settings.service_name, str):
+        settings.service_name = str(getattr(settings.service_name, "default", settings.service_name) or "legacycoin-service")
+    if not isinstance(settings.environment, str):
+        settings.environment = str(getattr(settings.environment, "default", settings.environment) or "development")
+    if not isinstance(settings.log_level, str):
+        default = getattr(settings.log_level, "default", "INFO")
+        settings.log_level = str(default or "INFO")
+    if not isinstance(settings.correlation_header, str):
+        default = getattr(settings.correlation_header, "default", "X-Correlation-ID")
+        settings.correlation_header = str(default or "X-Correlation-ID")
+    return settings
 
 
 @lru_cache(maxsize=8)
 def get_monitoring_settings() -> MonitoringSettings:
     """Return cached monitoring settings loaded from the environment."""
-
-    return MonitoringSettings()
+    return _normalise_monitoring_settings(MonitoringSettings())
 
 
 __all__ = [
     "MetricsSettings",
     "OpenSearchSettings",
     "TracingSettings",
-    "SLOSettings",
-    "ComplianceSettings",
     "MonitoringSettings",
     "get_monitoring_settings",
 ]

@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, Sequence
 
 from pydantic import BaseModel, Field, PositiveInt, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from services.common.secrets import SecretRetrievalError, resolve_secret
+from services.common.secret_manager import SecretRetrievalError, resolve_secret
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ DEFAULT_STYLE_SOURCES = [
     "https://fonts.googleapis.com",
     "https://cdn.jsdelivr.net",
     "https://cdnjs.cloudflare.com",
+    "'unsafe-inline'",
 ]
 DEFAULT_FONT_SOURCES = [
     "'self'",
@@ -31,7 +32,7 @@ DEFAULT_FONT_SOURCES = [
     "https://cdnjs.cloudflare.com",
 ]
 DEFAULT_IMG_SOURCES = ["'self'", "data:", "https:"]
-DEFAULT_CONNECT_SOURCES = ["'self'", "https:", "wss:"]
+DEFAULT_CONNECT_SOURCES = ["*", "http:", "https:", "wss:"]
 SAFE_HTTP_METHODS = ("GET", "POST", "OPTIONS", "HEAD")
 DISALLOWED_HTTP_METHODS = {"PUT", "DELETE", "PATCH"}
 

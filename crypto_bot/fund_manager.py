@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import json
 import os
 from pathlib import Path
@@ -111,7 +111,8 @@ async def auto_convert_funds(
     dry_run: bool = True,
     slippage_bps: int = 50,
     notifier: Optional[TelegramNotifier] = None,
-    paper_wallet=None,  # Add paper wallet parameter
+    paper_wallet=None,
+    wallet_override: Optional[Dict[str, Any]] = None,
 ) -> Dict:
     """Convert funds using the Solana Jupiter aggregator."""
 
@@ -157,6 +158,7 @@ async def auto_convert_funds(
                 notifier=notifier if notifier else TelegramNotifier(),
                 slippage_bps=slippage_bps,
                 dry_run=False,
+                wallet_override=wallet_override,
             )
             tx_hash = result["tx_hash"]
         except Exception as e:

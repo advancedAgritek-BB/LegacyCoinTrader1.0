@@ -19,6 +19,8 @@ import threading
 from pathlib import Path
 from typing import List, Dict, Optional
 
+import yaml
+
 # Add project root to path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
@@ -101,6 +103,51 @@ class ServiceManager:
             str(monitor_script)
         ]
         return self.start_service("WebSocket Monitor", command)
+
+    def _pump_sniper_enabled(self) -> bool:
+        """Return True if the pump sniper orchestrator is enabled in configuration."""
+
+        config_path = self.project_root / "config" / "pump_sniper_config.yaml"
+        if not config_path.exists():
+            return False
+
+        try:
+            with config_path.open("r", encoding="utf-8") as handle:
+                data = yaml.safe_load(handle) or {}
+        except Exception as exc:
+            print(f"⚠️ Unable to read pump sniper config: {exc}")
+            return False
+
+        orchestrator_cfg = data.get("pump_sniper_orchestrator", {})
+        return bool(orchestrator_cfg.get("enabled", False))
+
+    def _pump_live_requested(self) -> bool:
+        value = os.environ.get("PUMP_SNIPER_LIVE", "0").strip().lower()
+        return value in {"1", "true", "yes", "on"}
+
+    def start_pump_sniper(self) -> bool:
+        """Start the pump sniper runtime if enabled."""
+
+        if not self._pump_sniper_enabled():
+            print("ℹ️ Pump Sniper runtime disabled or not configured; skipping startup")
+            return False
+
+        script_path = self.project_root / "start_pump_sniper.py"
+        if not script_path.exists():
+            print(f"⚠️ Pump Sniper script missing: {script_path} (skipping)")
+            return False
+
+        command = [
+            str(self.venv_python),
+            str(script_path),
+            "--config",
+            str(self.project_root / "config.yaml"),
+        ]
+
+        if self._pump_live_requested():
+            command.append("--live")
+
+        return self.start_service("Pump Sniper Runtime", command)
 
     def start_main_bot(self) -> bool:
         """Start the main trading bot."""
@@ -366,12 +413,18 @@ if __name__ == "__main__":
             services_started.append("WebSocket Monitor")
             self.wait_for_service("WebSocket Monitor")
 
-        # 4. Main Trading Bot
+        # 4. Pump Sniper Runtime
+        pump_started = self.start_pump_sniper()
+        if pump_started:
+            services_started.append("Pump Sniper Runtime")
+            self.wait_for_service("Pump Sniper Runtime")
+
+        # 5. Main Trading Bot
         if self.start_main_bot():
             services_started.append("Main Trading Bot")
             self.wait_for_service("Main Trading Bot")
 
-        # 5. Flask Web Server
+        # 6. Flask Web Server
         if self.start_flask_server():
             services_started.append("Flask Web Server")
 

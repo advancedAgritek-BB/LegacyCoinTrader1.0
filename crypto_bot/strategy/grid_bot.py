@@ -18,7 +18,17 @@ from crypto_bot.utils.volatility import normalize_score_by_volatility, atr_perce
 from crypto_bot.volatility_filter import calc_atr
 
 DYNAMIC_THRESHOLD = 1.5
-# from . import breakout_bot, micro_scalp_bot  # Removed circular import
+# Import micro_scalp_bot to avoid circular import issues
+try:
+    from . import micro_scalp_bot
+except ImportError:
+    # Fallback for circular import
+    from crypto_bot.strategy.micro_scalp_bot import generate_signal as micro_scalp_generate_signal
+    # Create a module-like object for compatibility
+    import types
+    micro_scalp_bot = types.SimpleNamespace()
+    micro_scalp_bot.generate_signal = micro_scalp_generate_signal
+
 from crypto_bot.utils.regime_pnl_tracker import get_recent_win_rate
 
 

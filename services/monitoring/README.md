@@ -96,7 +96,7 @@ staff can follow a consistent SOC2-compliant response.
 ```python
 from services.monitoring.config import get_monitoring_settings
 from services.monitoring.instrumentation import instrument_fastapi_app
-from services.monitoring.logging import configure_logging
+from services.monitoring.logging_compat import configure_logging
 
 settings = get_monitoring_settings().for_service("orders", environment="prod")
 configure_logging(settings)

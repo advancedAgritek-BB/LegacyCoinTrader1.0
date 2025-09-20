@@ -8,6 +8,16 @@ import httpx
 from fastapi import Request
 from starlette.responses import Response
 
+from libs.resilience import (
+    call_market_data_service,
+    call_strategy_engine_service,
+    call_execution_service,
+    call_token_discovery_service,
+    call_with_resilience,
+    ResilienceConfig,
+    CircuitBreakerConfig,
+    RetryConfig,
+)
 from .auth import TokenPayload
 from .config import GatewaySettings, ServiceRouteConfig
 
@@ -37,16 +47,125 @@ class ProxyGateway:
         headers = self._prepare_headers(request, route, token)
         body = await request.body()
 
-        upstream_response = await self.http_client.request(
-            request.method,
-            target_url,
-            content=body or None,
-            params=request.query_params,
-            headers=headers,
-            timeout=self.settings.http_client_timeout,
-        )
+        # Use resilience patterns based on service type
+        if route.name == "market-data":
+            upstream_response = await self._proxy_with_market_data_resilience(
+                request, target_url, headers, body
+            )
+        elif route.name == "strategy-engine":
+            upstream_response = await self._proxy_with_strategy_resilience(
+                request, target_url, headers, body
+            )
+        elif route.name == "execution":
+            upstream_response = await self._proxy_with_execution_resilience(
+                request, target_url, headers, body
+            )
+        elif route.name == "token-discovery":
+            upstream_response = await self._proxy_with_token_discovery_resilience(
+                request, target_url, headers, body
+            )
+        else:
+            # Generic resilience for other services
+            upstream_response = await self._proxy_with_generic_resilience(
+                route.name, request, target_url, headers, body
+            )
 
         return self._build_response(upstream_response)
+
+    async def _proxy_with_market_data_resilience(
+        self, request: Request, target_url: str, headers: Dict[str, str], body: bytes
+    ) -> httpx.Response:
+        """Proxy with market data specific resilience settings."""
+        async def market_data_call():
+            return await self.http_client.request(
+                request.method,
+                target_url,
+                content=body or None,
+                params=request.query_params,
+                headers=headers,
+                timeout=10.0,  # Shorter timeout for market data
+            )
+
+        return await call_market_data_service(market_data_call)
+
+    async def _proxy_with_strategy_resilience(
+        self, request: Request, target_url: str, headers: Dict[str, str], body: bytes
+    ) -> httpx.Response:
+        """Proxy with strategy engine specific resilience settings."""
+        async def strategy_call():
+            return await self.http_client.request(
+                request.method,
+                target_url,
+                content=body or None,
+                params=request.query_params,
+                headers=headers,
+                timeout=30.0,  # Longer timeout for strategy evaluation
+            )
+
+        return await call_strategy_engine_service(strategy_call)
+
+    async def _proxy_with_execution_resilience(
+        self, request: Request, target_url: str, headers: Dict[str, str], body: bytes
+    ) -> httpx.Response:
+        """Proxy with execution service specific resilience settings."""
+        async def execution_call():
+            return await self.http_client.request(
+                request.method,
+                target_url,
+                content=body or None,
+                params=request.query_params,
+                headers=headers,
+                timeout=15.0,  # Medium timeout for execution
+            )
+
+        return await call_execution_service(execution_call)
+
+    async def _proxy_with_token_discovery_resilience(
+        self, request: Request, target_url: str, headers: Dict[str, str], body: bytes
+    ) -> httpx.Response:
+        """Proxy with token discovery specific resilience settings."""
+
+        async def token_discovery_call():
+            return await self.http_client.request(
+                request.method,
+                target_url,
+                content=body or None,
+                params=request.query_params,
+                headers=headers,
+                timeout=20.0,
+            )
+
+        return await call_token_discovery_service(token_discovery_call)
+
+    async def _proxy_with_generic_resilience(
+        self, service_name: str, request: Request, target_url: str, headers: Dict[str, str], body: bytes
+    ) -> httpx.Response:
+        """Proxy with generic resilience settings."""
+        config = ResilienceConfig(
+            service_name=service_name,
+            circuit_breaker=CircuitBreakerConfig(
+                failure_threshold=5,
+                recovery_timeout=60.0,
+                timeout=self.settings.http_client_timeout
+            ),
+            retry_policy=RetryConfig(
+                max_attempts=3,
+                initial_delay=1.0,
+                max_delay=10.0
+            )
+        )
+
+        async def generic_call():
+            return await self.http_client.request(
+                request.method,
+                target_url,
+                content=body or None,
+                params=request.query_params,
+                headers=headers,
+                timeout=self.settings.http_client_timeout,
+            )
+
+        return await call_with_resilience(service_name, generic_call, resilience_config=config)
 
     async def check_service_health(self, route: ServiceRouteConfig) -> Dict[str, object]:
         url = route.build_target_url(route.health_endpoint.lstrip("/"))
@@ -139,4 +258,3 @@ class ProxyGateway:
             headers=headers,
             media_type=upstream_response.headers.get("content-type"),
         )
-

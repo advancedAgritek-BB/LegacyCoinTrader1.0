@@ -111,7 +111,8 @@ async def sniper_trade(
     slippage_bps: int = 50,
     notifier: Optional[object] = None,
     profit_threshold: float = 0.2,
-    paper_wallet=None,  # Add paper wallet parameter
+    paper_wallet=None,
+    wallet_override: Optional[Dict[str, object]] = None,
 ) -> Dict:
     """Buy ``target_token`` then convert profits when threshold reached."""
 
@@ -122,6 +123,7 @@ async def sniper_trade(
         notifier=notifier,
         slippage_bps=slippage_bps,
         dry_run=dry_run,
+        wallet_override=wallet_override,
     )
     tx_sig = trade.get("tx_hash")
     if not tx_sig or tx_sig == "DRYRUN":
@@ -146,6 +148,7 @@ async def sniper_trade(
             dry_run=dry_run,
             slippage_bps=slippage_bps,
             notifier=notifier,
+            wallet_override=wallet_override,
         )
         
         # Update paper wallet for profit conversion in dry run mode

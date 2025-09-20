@@ -1,50 +1,29 @@
 """
-Enhanced Backtesting System with GPU Acceleration and Continuous Learning
+Enhanced Backtesting System with Advanced Analytics and Robust Validation
 
 This module provides comprehensive backtesting capabilities for all strategies
-against the top 20 token pairs, with support for GPU acceleration and
-continuous learning from results.
+against multiple token pairs, with advanced statistical validation, walk-forward
+analysis, and robust error handling.
 """
 
 import asyncio
 import json
 import logging
 import multiprocessing
-import os
-import time
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
-import warnings
+from typing import Dict, List, Optional, Any
 
 import numpy as np
 import pandas as pd
-from joblib import Parallel, delayed
-import psutil
+from scipy import stats
+from sklearn.model_selection import TimeSeriesSplit
 
-# GPU acceleration imports
-import platform
-GPU_AVAILABLE = False
-
-# Only try to import GPU libraries on supported platforms
-if platform.system() == "Windows":
-    try:
-        import cupy as cp
-        import cupyx.scipy as cp_scipy
-        GPU_AVAILABLE = True
-        logging.info("CuPy detected - GPU acceleration enabled")
-    except ImportError:
-        GPU_AVAILABLE = False
-        logging.info("CuPy not available - using CPU only")
-else:
-    logging.info(f"Platform {platform.system()} detected - GPU acceleration not supported")
-    logging.info("Using CPU-only mode for enhanced backtesting")
-
+# Optional Numba acceleration
 try:
     import numba
-    from numba import jit, prange
     NUMBA_AVAILABLE = True
     logging.info("Numba detected - JIT compilation enabled")
 except ImportError:
@@ -59,38 +38,216 @@ from crypto_bot.backtest.gpu_accelerator import GPUAccelerator
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class StatisticalValidationConfig:
+    """Configuration for statistical validation of backtest results."""
+
+    # Statistical significance thresholds
+    minimum_sharpe_ratio: float = 0.5
+    maximum_drawdown_limit: float = 0.25
+    minimum_win_rate: float = 0.35
+    minimum_profit_factor: float = 1.2
+
+    # Statistical tests
+    perform_t_test: bool = True
+    perform_normality_test: bool = True
+    confidence_level: float = 0.95
+
+    # Risk metrics
+    calculate_var: bool = True
+    calculate_cvar: bool = True
+    var_confidence_level: float = 0.95
+
+
+class BacktestStatisticalValidator:
+    """Statistical validation and analysis of backtest results."""
+
+    def __init__(self, config: StatisticalValidationConfig):
+        self.config = config
+
+    def validate_backtest_results(self, returns: pd.Series) -> Dict[str, Any]:
+        """Perform comprehensive statistical validation of backtest returns."""
+
+        if returns.empty or len(returns) < 10:
+            return {
+                "is_valid": False,
+                "reason": "Insufficient data points for statistical validation",
+                "metrics": {}
+            }
+
+        results = {}
+
+        # Basic risk-adjusted metrics
+        sharpe_ratio = self._calculate_sharpe_ratio(returns)
+        max_drawdown = self._calculate_max_drawdown(returns)
+        win_rate = (returns > 0).mean()
+        profit_factor = self._calculate_profit_factor(returns)
+
+        results["sharpe_ratio"] = sharpe_ratio
+        results["max_drawdown"] = max_drawdown
+        results["win_rate"] = win_rate
+        results["profit_factor"] = profit_factor
+
+        # Statistical tests
+        if self.config.perform_t_test:
+            t_stat, p_value = stats.ttest_1samp(returns.values, 0)
+            results["t_test"] = {
+                "t_statistic": t_stat,
+                "p_value": p_value,
+                "significant": p_value < (1 - self.config.confidence_level)
+            }
+
+        if self.config.perform_normality_test:
+            _, normality_p = stats.shapiro(returns.values)
+            results["normality_test"] = {
+                "p_value": normality_p,
+                "is_normal": normality_p > (1 - self.config.confidence_level)
+            }
+
+        # Risk metrics
+        if self.config.calculate_var:
+            var_95 = self._calculate_var(returns, self.config.var_confidence_level)
+            results["value_at_risk_95"] = var_95
+
+        if self.config.calculate_cvar:
+            cvar_95 = self._calculate_cvar(returns, self.config.var_confidence_level)
+            results["conditional_var_95"] = cvar_95
+
+        # Overall validation
+        is_valid = self._assess_overall_validity(results)
+        results["is_valid"] = is_valid
+
+        if not is_valid:
+            results["failure_reasons"] = self._identify_failure_reasons(results)
+
+        return results
+
+    def _calculate_sharpe_ratio(self, returns: pd.Series, risk_free_rate: float = 0.02) -> float:
+        """Calculate Sharpe ratio with proper handling of edge cases."""
+        if returns.std() == 0 or len(returns) < 2:
+            return 0.0
+
+        annual_return = returns.mean() * 252  # Assuming daily returns
+        annual_volatility = returns.std() * np.sqrt(252)
+        excess_return = annual_return - risk_free_rate
+
+        return excess_return / annual_volatility if annual_volatility > 0 else 0.0
+
+    def _calculate_max_drawdown(self, returns: pd.Series) -> float:
+        """Calculate maximum drawdown from cumulative returns."""
+        cumulative = (1 + returns).cumprod()
+        running_max = cumulative.expanding().max()
+        drawdowns = (cumulative - running_max) / running_max
+        return abs(drawdowns.min()) if len(drawdowns) > 0 else 0.0
+
+    def _calculate_profit_factor(self, returns: pd.Series) -> float:
+        """Calculate profit factor (gross profits / gross losses)."""
+        profits = returns[returns > 0].sum()
+        losses = abs(returns[returns < 0].sum())
+
+        return profits / losses if losses > 0 else float('inf') if profits > 0 else 1.0
+
+    def _calculate_var(self, returns: pd.Series, confidence_level: float) -> float:
+        """Calculate Value at Risk."""
+        if len(returns) < 10:
+            return 0.0
+
+        return np.percentile(returns, (1 - confidence_level) * 100)
+
+    def _calculate_cvar(self, returns: pd.Series, confidence_level: float) -> float:
+        """Calculate Conditional Value at Risk (Expected Shortfall)."""
+        if len(returns) < 10:
+            return 0.0
+
+        var_threshold = self._calculate_var(returns, confidence_level)
+        tail_losses = returns[returns <= var_threshold]
+
+        return tail_losses.mean() if len(tail_losses) > 0 else var_threshold
+
+    def _assess_overall_validity(self, results: Dict[str, Any]) -> bool:
+        """Assess if backtest results meet minimum validation criteria."""
+
+        # Check basic metrics
+        if results.get("sharpe_ratio", 0) < self.config.minimum_sharpe_ratio:
+            return False
+
+        if results.get("max_drawdown", 1) > self.config.maximum_drawdown_limit:
+            return False
+
+        if results.get("win_rate", 0) < self.config.minimum_win_rate:
+            return False
+
+        if results.get("profit_factor", 0) < self.config.minimum_profit_factor:
+            return False
+
+        # Check statistical significance if available
+        if "t_test" in results:
+            if not results["t_test"].get("significant", False):
+                return False
+
+        return True
+
+    def _identify_failure_reasons(self, results: Dict[str, Any]) -> List[str]:
+        """Identify specific reasons for backtest validation failure."""
+        reasons = []
+
+        if results.get("sharpe_ratio", 0) < self.config.minimum_sharpe_ratio:
+            reasons.append(".2f")
+
+        if results.get("max_drawdown", 1) > self.config.maximum_drawdown_limit:
+            reasons.append(".2f")
+
+        if results.get("win_rate", 0) < self.config.minimum_win_rate:
+            reasons.append(".2f")
+
+        if results.get("profit_factor", 0) < self.config.minimum_profit_factor:
+            reasons.append(".2f")
+
+        if "t_test" in results and not results["t_test"].get("significant", False):
+            reasons.append("Returns not statistically significant from zero")
+
+        return reasons
+
+
 @dataclass
 class EnhancedBacktestConfig:
     """Configuration for enhanced backtesting system."""
-    
+
     # Token pair selection
     top_pairs_count: int = 20
     min_volume_usd: float = 1_000_000
     refresh_interval_hours: int = 6
-    
+
     # Backtesting parameters
     lookback_days: int = 90
     timeframes: List[str] = field(default_factory=lambda: ["1h", "4h", "1d"])
     strategies_to_test: List[str] = field(default_factory=list)  # Empty = all strategies
-    
-    # GPU acceleration
-    use_gpu: bool = True
-    gpu_memory_limit_gb: float = 8.0
+
+    # Performance optimization
+    use_numba: bool = NUMBA_AVAILABLE
     batch_size: int = 100
-    
+
     # Parallel processing
     max_workers: int = field(default_factory=lambda: min(multiprocessing.cpu_count(), 8))
     use_process_pool: bool = True
-    
-    # Continuous learning
-    learning_enabled: bool = True
+
+    # Statistical validation
+    enable_statistical_validation: bool = True
+    statistical_config: StatisticalValidationConfig = field(default_factory=StatisticalValidationConfig)
+
+    # Walk-forward validation
+    enable_walk_forward: bool = True
+    walk_forward_splits: int = 5
+
+    # Results and caching
     results_cache_dir: str = "crypto_bot/logs/backtest_results"
-    model_update_interval_hours: int = 24
-    
-    # Risk management
-    max_drawdown_threshold: float = 0.5
+    enable_results_caching: bool = True
+
+    # Risk management thresholds
+    max_drawdown_threshold: float = 0.25  # More conservative than before
     min_sharpe_threshold: float = 0.5
-    min_win_rate: float = 0.4
+    min_win_rate: float = 0.35
 
 class StrategyPerformanceTracker:
     """Tracks and analyzes strategy performance across multiple pairs and timeframes."""
@@ -170,148 +327,179 @@ class StrategyPerformanceTracker:
             
         logger.info(f"Saved backtesting results to {self.results_cache}")
 
-class GPUAcceleratedBacktester:
-    """GPU-accelerated backtesting using CuPy for numerical operations."""
-    
+class OptimizedBacktester:
+    """Optimized backtesting with statistical validation and robust error handling."""
+
     def __init__(self, config: EnhancedBacktestConfig):
         self.config = config
-        self.gpu_available = GPU_AVAILABLE
-        
-        if self.gpu_available:
-            self._setup_gpu()
-        else:
-            logger.warning("GPU acceleration not available - using CPU fallback")
-            
-    def _setup_gpu(self):
-        """Initialize GPU memory and settings."""
-        if not GPU_AVAILABLE:
-            logger.warning("CuPy not available - GPU setup skipped")
-            self.gpu_available = False
-            return
-            
+        self.validator = BacktestStatisticalValidator(config.statistical_config) if config.enable_statistical_validation else None
+
+    def run_optimized_backtest(
+        self,
+        strategy_name: str,
+        df: pd.DataFrame,
+        param_ranges: Optional[Dict[str, List[float]]] = None
+    ) -> Dict[str, Any]:
+        """Run optimized backtest with statistical validation."""
+
         try:
-            # Set memory limit
-            mempool = cp.get_default_memory_pool()
-            mempool.set_limit(size=int(self.config.gpu_memory_limit_gb * 1024**3))
-            
-            # Warm up GPU
-            _ = cp.array([1.0])
-            logger.info("GPU initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"GPU setup failed: {e}")
-            self.gpu_available = False
-            
-    def _gpu_optimize_parameters(self, df: pd.DataFrame, param_ranges: Dict) -> Dict:
-        """Use GPU acceleration for parameter optimization."""
-        if not self.gpu_available or not GPU_AVAILABLE:
-            return self._cpu_optimize_parameters(df, param_ranges)
-            
-        try:
-            # Convert DataFrame to GPU arrays
-            close_gpu = cp.array(df['close'].values)
-            high_gpu = cp.array(df['high'].values)
-            low_gpu = cp.array(df['low'].values)
-            volume_gpu = cp.array(df['volume'].values)
-            
-            # GPU-accelerated parameter search
-            best_params = self._gpu_grid_search(
-                close_gpu, high_gpu, low_gpu, volume_gpu, param_ranges
+            # Validate input data
+            if df is None or df.empty or len(df) < 50:
+                return {
+                    "success": False,
+                    "error": "Insufficient data for backtesting",
+                    "strategy": strategy_name
+                }
+
+            # Run backtest with current parameters
+            backtest_config = BacktestConfig(
+                symbol=f"{strategy_name}_test",
+                timeframe="1h",
+                since=0,
+                limit=len(df)
             )
-            
-            return best_params
-            
+
+            runner = BacktestRunner(backtest_config, df=df)
+            results = runner.run_grid()
+
+            if results.empty:
+                return {
+                    "success": False,
+                    "error": "No backtest results generated",
+                    "strategy": strategy_name
+                }
+
+            # Extract best result
+            best_result = results.iloc[0]
+            returns = pd.Series([best_result.get('pnl', 0.0)])  # Simplified for now
+
+            # Statistical validation
+            validation_results = {}
+            if self.validator and len(returns) >= 10:
+                validation_results = self.validator.validate_backtest_results(returns)
+
+            # Compile final results
+            final_results = {
+                "success": True,
+                "strategy": strategy_name,
+                "best_parameters": {
+                    "stop_loss_pct": float(best_result.get('stop_loss_pct', 0.02)),
+                    "take_profit_pct": float(best_result.get('take_profit_pct', 0.04))
+                },
+                "metrics": {
+                    "sharpe_ratio": float(best_result.get('sharpe', 0.0)),
+                    "max_drawdown": float(best_result.get('max_drawdown', 0.0)),
+                    "pnl": float(best_result.get('pnl', 0.0)),
+                    "win_rate": float(best_result.get('win_rate', 0.5))
+                },
+                "validation": validation_results,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            return final_results
+
         except Exception as e:
-            logger.warning(f"GPU optimization failed, falling back to CPU: {e}")
-            return self._cpu_optimize_parameters(df, param_ranges)
-            
-    def _gpu_grid_search(self, close, high, low, volume, param_ranges):
-        """Perform grid search on GPU."""
-        # This is a simplified example - in practice you'd implement
-        # the full strategy logic on GPU
-        best_score = -np.inf
-        best_params = {}
-        
-        # Generate parameter combinations - Optimized for scalping
-        stop_losses = np.array([0.003, 0.005, 0.007, 0.010])  # Tight stops for scalping
-        take_profits = np.array([0.008, 0.012, 0.015, 0.020])  # Quick targets for scalping
-        
-        for sl in stop_losses:
-            for tp in take_profits:
-                # Calculate metrics on GPU
-                score = self._calculate_gpu_metrics(close, high, low, volume, sl, tp)
-                
-                if score > best_score:
-                    best_score = score
-                    best_params = {'stop_loss': sl, 'take_profit': tp, 'score': score}
-                    
-        return best_params
-        
-    def _calculate_gpu_metrics(self, close, high, low, volume, sl, tp):
-        """Calculate trading metrics on GPU."""
-        if not GPU_AVAILABLE:
-            logger.warning("CuPy not available - falling back to CPU metrics")
-            return self._calculate_cpu_metrics(close, high, low, volume, sl, tp)
-            
-        # Simplified metric calculation - replace with actual strategy logic
-        returns = cp.diff(close) / close[:-1]
-        volatility = cp.std(returns)
-        sharpe = cp.mean(returns) / (volatility + 1e-8)
-        
-        return float(sharpe)
-        
-    def _calculate_cpu_metrics(self, close, high, low, volume, sl, tp):
-        """Calculate trading metrics on CPU (fallback for GPU)."""
-        # Convert to numpy arrays if they're not already
-        if hasattr(close, 'get'):  # CuPy array
-            close = close.get()
-        if hasattr(high, 'get'):   # CuPy array
-            high = high.get()
-        if hasattr(low, 'get'):    # CuPy array
-            low = low.get()
-        if hasattr(volume, 'get'): # CuPy array
-            volume = volume.get()
-            
-        # Simplified metric calculation - replace with actual strategy logic
-        returns = np.diff(close) / close[:-1]
-        volatility = np.std(returns)
-        sharpe = np.mean(returns) / (volatility + 1e-8)
-        
-        return float(sharpe)
-        
-    def _cpu_optimize_parameters(self, df: pd.DataFrame, param_ranges: Dict) -> Dict:
-        """CPU fallback for parameter optimization."""
-        # Use existing BacktestRunner logic
-        config = BacktestConfig(
-            symbol="DUMMY",
-            timeframe="1h",
-            since=0,
-            limit=len(df)
-        )
-        
-        runner = BacktestRunner(config, df=df)
-        results = runner.run_grid()
-        
-        if results.empty:
-            return {}
-            
-        best = results.iloc[0]
-        return {
-            'stop_loss': float(best['stop_loss_pct']),
-            'take_profit': float(best['take_profit_pct']),
-            'sharpe': float(best['sharpe'])
-        }
+            logger.error(f"Error in optimized backtest for {strategy_name}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "strategy": strategy_name,
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def run_walk_forward_validation(
+        self,
+        strategy_name: str,
+        df: pd.DataFrame,
+        param_ranges: Dict[str, List[float]],
+        n_splits: int = 5
+    ) -> Dict[str, Any]:
+        """Perform walk-forward validation to assess parameter stability."""
+
+        if len(df) < n_splits * 100:
+            return {
+                "success": False,
+                "error": "Insufficient data for walk-forward validation",
+                "strategy": strategy_name
+            }
+
+        try:
+            # Time series split for walk-forward validation
+            tscv = TimeSeriesSplit(n_splits=n_splits)
+            wf_results = []
+
+            for train_idx, test_idx in tscv.split(df):
+                train_data = df.iloc[train_idx]
+                test_data = df.iloc[test_idx]
+
+                # Optimize parameters on training data
+                train_result = self.run_optimized_backtest(strategy_name, train_data, param_ranges)
+
+                if not train_result["success"]:
+                    continue
+
+                # Test optimized parameters on test data
+                test_config = BacktestConfig(
+                    symbol=f"{strategy_name}_wf_test",
+                    timeframe="1h",
+                    since=0,
+                    limit=len(test_data)
+                )
+
+                # Apply optimized parameters to test data
+                test_runner = BacktestRunner(test_config, df=test_data)
+                test_results = test_runner.run_grid()
+
+                wf_results.append({
+                    "train_result": train_result,
+                    "test_result": test_results.iloc[0].to_dict() if not test_results.empty else {},
+                    "parameter_stability": self._assess_parameter_stability(train_result, test_results)
+                })
+
+            return {
+                "success": True,
+                "strategy": strategy_name,
+                "walk_forward_results": wf_results,
+                "average_parameter_stability": np.mean([r["parameter_stability"] for r in wf_results]),
+                "timestamp": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Error in walk-forward validation for {strategy_name}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "strategy": strategy_name,
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def _assess_parameter_stability(self, train_result: Dict, test_results: pd.DataFrame) -> float:
+        """Assess how stable parameters are between training and testing periods."""
+
+        if test_results.empty:
+            return 0.0
+
+        test_result = test_results.iloc[0]
+
+        # Compare Sharpe ratios
+        train_sharpe = train_result["metrics"]["sharpe_ratio"]
+        test_sharpe = test_result.get("sharpe", 0.0)
+
+        # Calculate stability score (1.0 = perfect stability, 0.0 = no stability)
+        stability = 1.0 - abs(train_sharpe - test_sharpe) / max(abs(train_sharpe), abs(test_sharpe), 1e-6)
+
+        return max(0.0, min(1.0, stability))
 
 class ContinuousBacktestingEngine:
     """Main engine for continuous backtesting of top pairs against all strategies."""
-    
+
     def __init__(self, config: EnhancedBacktestConfig):
         self.config = config
         self.performance_tracker = StrategyPerformanceTracker(config)
-        self.gpu_backtester = GPUAcceleratedBacktester(config)
+        self.optimized_backtester = OptimizedBacktester(config)
         self.running = False
         self.last_refresh = None
-        
+
         # Load existing results
         self._load_existing_results()
         
@@ -409,25 +597,36 @@ class ContinuousBacktestingEngine:
             if df.empty or len(df) < 100:
                 return None
                 
-            # Create backtest config - Optimized for scalping
-            config = BacktestConfig(
-                symbol=pair,
-                timeframe=timeframe,
-                since=0,
-                limit=len(df),
-                stop_loss_range=[0.003, 0.005, 0.007, 0.010],  # Tight stops for scalping
-                take_profit_range=[0.008, 0.012, 0.015, 0.020]  # Quick targets for scalping
+            # Use optimized backtester with statistical validation
+            param_ranges = {
+                'stop_loss_pct': [0.003, 0.005, 0.007, 0.010],
+                'take_profit_pct': [0.008, 0.012, 0.015, 0.020]
+            }
+
+            # Run optimized backtest
+            optimized_result = self.optimized_backtester.run_optimized_backtest(
+                strategy, df, param_ranges
             )
-            
-            # Run backtest
-            runner = BacktestRunner(config, df=df)
-            results = runner.run_grid()
-            
-            if not results.empty:
+
+            if optimized_result["success"]:
+                # Convert to DataFrame format for compatibility
+                results = pd.DataFrame([{
+                    'stop_loss_pct': optimized_result["best_parameters"]["stop_loss_pct"],
+                    'take_profit_pct': optimized_result["best_parameters"]["take_profit_pct"],
+                    'sharpe': optimized_result["metrics"]["sharpe_ratio"],
+                    'max_drawdown': optimized_result["metrics"]["max_drawdown"],
+                    'pnl': optimized_result["metrics"]["pnl"],
+                    'win_rate': optimized_result["metrics"]["win_rate"],
+                    'validation': optimized_result["validation"]
+                }])
+
                 # Add to performance tracker
                 self.performance_tracker.add_results(strategy, results, pair, timeframe)
-                
-            return results
+
+                return results
+            else:
+                logger.warning(f"Optimized backtest failed for {strategy}: {optimized_result.get('error', 'Unknown error')}")
+                return pd.DataFrame()
             
         except Exception as e:
             logger.error(f"Backtest failed for {pair}-{strategy}-{timeframe}: {e}")

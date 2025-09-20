@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Dict, Mapping, MutableMapping
+from typing import Any, Mapping, MutableMapping, Optional
 
 import aiohttp
 import pandas as pd
@@ -35,12 +35,33 @@ def _candles_to_dataframe(candles: list[list[float]]) -> pd.DataFrame:
     return df
 
 
+def _resolve_base_url(base_url: str | None) -> str:
+    """Return the service endpoint using env fallbacks when ``base_url`` is missing."""
+
+    if base_url:
+        return base_url.rstrip("/")
+
+    env_url = os.getenv("MARKET_DATA_SERVICE_URL")
+    if env_url:
+        return env_url.rstrip("/")
+
+    host = os.getenv("MARKET_DATA_SERVICE_HOST")
+    if host:
+        scheme = os.getenv("MARKET_DATA_SERVICE_SCHEME", "http")
+        port = os.getenv("MARKET_DATA_SERVICE_PORT", "8002")
+        if port:
+            return f"{scheme}://{host}:{port}".rstrip("/")
+        return f"{scheme}://{host}".rstrip("/")
+
+    return "http://localhost:8002"
+
+
 class MarketDataAdapter(MarketDataService):
     """Adapter that communicates with the market data service via HTTP."""
 
     def __init__(self, base_url: str | None = None, *, session: aiohttp.ClientSession | None = None):
-        self._base_url = base_url or os.getenv("MARKET_DATA_SERVICE_URL", "http://localhost:8002")
-        timeout = float(os.getenv("MARKET_DATA_HTTP_TIMEOUT", "60"))
+        self._base_url = _resolve_base_url(base_url)
+        timeout = float(os.getenv("MARKET_DATA_HTTP_TIMEOUT", "120"))
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._session: aiohttp.ClientSession | None = session
         self._logger = logging.getLogger(__name__)
@@ -180,3 +201,31 @@ class MarketDataAdapter(MarketDataService):
         if seconds is None:
             raise ValueError(f"Unknown timeframe {timeframe}")
         return TimeframeResponse(seconds=value * seconds)
+
+    async def get_ticker(self, symbol: str) -> Optional[Any]:
+        """Get current ticker data for a symbol."""
+        try:
+            # Use the existing price fetching utility
+            from crypto_bot.utils.price_fetcher import (
+                get_current_price_for_symbol
+            )
+            price = get_current_price_for_symbol(symbol)
+
+            if price and price > 0:
+                # Return ticker-like object with price fields that
+                # execution service expects
+                return {
+                    "symbol": symbol,
+                    "last": price,
+                    "close": price,
+                    "price": price
+                }
+            else:
+                self._logger.warning(
+                    f"Could not fetch price for symbol {symbol}"
+                )
+                return None
+
+        except Exception as exc:
+            self._logger.error(f"Failed to get ticker for {symbol}: {exc}")
+            return None

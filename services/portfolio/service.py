@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
+
+from libs.bootstrap import load_config as load_bot_config
 
 from .config import PortfolioConfig
 from .database import get_session
@@ -32,6 +34,86 @@ class PortfolioService:
     def __init__(self, config: Optional[PortfolioConfig] = None):
         self.config = config or PortfolioConfig.from_env()
         self.repository = PortfolioRepository(self.config)
+        try:
+            self._bot_config = load_bot_config()
+        except Exception as exc:  # pragma: no cover - config load failure should not break trades
+            logger.warning("Failed to load trading configuration for risk settings: %s", exc)
+            self._bot_config = {}
+
+    # ------------------------------------------------------------------
+    # Internal helpers - risk configuration
+    # ------------------------------------------------------------------
+    def _exit_settings(self) -> tuple[Decimal, Decimal, Optional[Decimal]]:
+        """Return (stop_loss_pct, take_profit_pct, trailing_stop_pct)."""
+
+        risk_cfg = self._bot_config.get("risk", {}) if isinstance(self._bot_config, dict) else {}
+        exit_cfg = self._bot_config.get("exit_strategy", {}) if isinstance(self._bot_config, dict) else {}
+
+        stop_loss_pct = exit_cfg.get("stop_loss_pct", risk_cfg.get("stop_loss_pct", 0.01))
+        take_profit_pct = exit_cfg.get("take_profit_pct", risk_cfg.get("take_profit_pct", 0.04))
+        trailing_stop_pct = exit_cfg.get("trailing_stop_pct", risk_cfg.get("trailing_stop_pct", 0.0))
+
+        try:
+            stop_loss_dec = Decimal(str(stop_loss_pct))
+        except Exception:  # pragma: no cover - defensive default
+            stop_loss_dec = Decimal("0.01")
+        try:
+            take_profit_dec = Decimal(str(take_profit_pct))
+        except Exception:  # pragma: no cover - defensive default
+            take_profit_dec = Decimal("0.04")
+
+        trailing_dec: Optional[Decimal]
+        try:
+            trailing_value = Decimal(str(trailing_stop_pct))
+            trailing_dec = trailing_value if trailing_value > 0 else None
+        except Exception:  # pragma: no cover - optional config
+            trailing_dec = None
+
+        return stop_loss_dec, take_profit_dec, trailing_dec
+
+    def _set_protective_levels(self, position: PositionModel) -> None:
+        """Apply stop loss, take profit, and trailing configuration to *position*."""
+
+        stop_loss_pct, take_profit_pct, trailing_pct = self._exit_settings()
+        average_price = position.average_price or Decimal("0")
+        if average_price <= 0:
+            return
+
+        if position.side == "long":
+            base_stop = average_price * (Decimal("1") - stop_loss_pct)
+            base_tp = average_price * (Decimal("1") + take_profit_pct)
+            if position.stop_loss_price is None:
+                position.stop_loss_price = base_stop
+            else:
+                position.stop_loss_price = max(position.stop_loss_price, base_stop)
+            position.take_profit_price = base_tp
+        else:
+            base_stop = average_price * (Decimal("1") + stop_loss_pct)
+            base_tp = average_price * (Decimal("1") - take_profit_pct)
+            if position.stop_loss_price is None:
+                position.stop_loss_price = base_stop
+            else:
+                position.stop_loss_price = min(position.stop_loss_price, base_stop)
+            position.take_profit_price = base_tp
+
+        position.trailing_stop_pct = trailing_pct
+        self._update_trailing_stop(position)
+
+    def _update_trailing_stop(self, position: PositionModel) -> None:
+        """Adjust the trailing stop based on recorded highs/lows."""
+
+        trailing_pct = position.trailing_stop_pct
+        if trailing_pct is None or trailing_pct <= 0:
+            return
+
+        if position.side == "long" and position.highest_price:
+            new_stop = position.highest_price * (Decimal("1") - trailing_pct)
+            if position.stop_loss_price is None or new_stop > position.stop_loss_price:
+                position.stop_loss_price = new_stop
+        elif position.side == "short" and position.lowest_price:
+            new_stop = position.lowest_price * (Decimal("1") + trailing_pct)
+            if position.stop_loss_price is None or new_stop < position.stop_loss_price:
+                position.stop_loss_price = new_stop
 
     # ------------------------------------------------------------------
     # State management
@@ -61,6 +143,7 @@ class PortfolioService:
             stats.total_trades += 1
             stats.total_volume += trade_value
             stats.total_fees += trade.fees
+            stats.last_updated = trade.timestamp or datetime.utcnow()
 
             if position is None or not position.is_open:
                 position = self._open_new_position(session, trade)
@@ -99,6 +182,8 @@ class PortfolioService:
             position.last_update = datetime.utcnow()
             position.highest_price = max(position.highest_price or price, price)
             position.lowest_price = min(position.lowest_price or price, price)
+            if position.is_open:
+                self._update_trailing_stop(position)
 
             # Persist price cache entry
             self.repository.upsert_price(
@@ -186,6 +271,128 @@ class PortfolioService:
 
         return results
 
+    def get_statistics_summary(self) -> dict:
+        """Return enriched statistics used by UI dashboards."""
+
+        now = datetime.utcnow()
+        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        last_24h = now - timedelta(hours=24)
+
+        with get_session(self.config) as session:
+            stats_model = self.repository.load_statistics(session=session)
+
+            open_positions = (
+                session.query(PositionModel)
+                .filter(PositionModel.is_open.is_(True))
+                .all()
+            )
+            closed_positions = (
+                session.query(PositionModel)
+                .filter(PositionModel.is_open.is_(False))
+                .all()
+            )
+
+            winning_positions = sum(
+                1 for position in closed_positions if position.realized_pnl > 0
+            )
+            losing_positions = sum(
+                1 for position in closed_positions if position.realized_pnl < 0
+            )
+            competitive_positions = winning_positions + losing_positions
+            win_rate = (
+                winning_positions / competitive_positions
+                if competitive_positions
+                else 0.0
+            )
+
+            trades_today = (
+                session.query(TradeModel)
+                .filter(TradeModel.timestamp >= start_of_day)
+                .count()
+            )
+            trades_last_24h = (
+                session.query(TradeModel)
+                .filter(TradeModel.timestamp >= last_24h)
+                .count()
+            )
+
+            latest_trade = (
+                session.query(TradeModel)
+                .order_by(TradeModel.timestamp.desc())
+                .first()
+            )
+
+        pnl_breakdown = self.compute_pnl()
+
+        return {
+            "total_trades": stats_model.total_trades,
+            "total_volume": float(stats_model.total_volume or Decimal("0")),
+            "total_fees": float(stats_model.total_fees or Decimal("0")),
+            "total_realized_pnl": float(stats_model.total_realized_pnl or Decimal("0")),
+            "last_updated": stats_model.last_updated.isoformat()
+            if stats_model.last_updated
+            else None,
+            "open_positions": len(open_positions),
+            "closed_positions": len(closed_positions),
+            "winning_positions": winning_positions,
+            "losing_positions": losing_positions,
+            "win_rate": win_rate,
+            "trades_today": trades_today,
+            "trades_last_24h": trades_last_24h,
+            "last_trade_at": latest_trade.timestamp.isoformat()
+            if latest_trade
+            else None,
+            "unrealized_pnl": float(pnl_breakdown.unrealized),
+            "realized_pnl": float(pnl_breakdown.realized),
+            "total_pnl": float(pnl_breakdown.total),
+        }
+
+    def close_stale_positions(
+        self, max_age_hours: int = 24, symbols: Optional[List[str]] = None
+    ) -> dict:
+        """Force close positions either older than ``max_age_hours`` or by symbol."""
+
+        effective_age = max(0, max_age_hours or 0)
+        cutoff = datetime.utcnow() - timedelta(hours=effective_age)
+
+        symbol_filter: Optional[List[str]] = None
+        if symbols:
+            symbol_filter = [str(symbol).strip().upper() for symbol in symbols if symbol]
+            symbol_filter = [symbol for symbol in symbol_filter if symbol]
+            if not symbol_filter:
+                return {
+                    "closed": 0,
+                    "symbols": [],
+                    "cutoff": cutoff.isoformat(),
+                    "mode": "symbols",
+                }
+
+        with get_session(self.config) as session:
+            query = session.query(PositionModel).filter(PositionModel.is_open.is_(True))
+            if symbol_filter is not None:
+                query = query.filter(PositionModel.symbol.in_(symbol_filter))
+            else:
+                query = query.filter(PositionModel.last_update < cutoff)
+
+            candidates = query.all()
+            closed_symbols: List[str] = []
+            timestamp = datetime.utcnow()
+
+            for position in candidates:
+                closed_symbols.append(position.symbol)
+                position.is_open = False
+                position.total_amount = Decimal("0")
+                position.last_update = timestamp
+
+            session.flush()
+
+        return {
+            "closed": len(closed_symbols),
+            "symbols": closed_symbols,
+            "cutoff": cutoff.isoformat(),
+            "mode": "symbols" if symbol_filter is not None else "age",
+        }
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -201,6 +408,14 @@ class PortfolioService:
         position.lowest_price = trade.price
         position.realized_pnl = Decimal("0")
         position.is_open = True
+        self._set_protective_levels(position)
+        logger.info(
+            "Initialized protective stops for %s: stop=%.8f take_profit=%.8f trailing=%s",
+            position.symbol,
+            float(position.stop_loss_price) if position.stop_loss_price else 0.0,
+            float(position.take_profit_price) if position.take_profit_price else 0.0,
+            (float(position.trailing_stop_pct) if position.trailing_stop_pct is not None else None),
+        )
         session.add(position)
         session.flush()
         return position
@@ -250,14 +465,16 @@ class PortfolioService:
                 position.highest_price = trade.price
                 position.lowest_price = trade.price
                 position.is_open = True
-                session.add(position)
             else:
                 position.total_amount = remaining
                 position.fees_paid += trade.fees
                 position.last_update = trade.timestamp
                 if position.total_amount <= Decimal("0.00000001"):
                     position.total_amount = Decimal("0")
-                    position.is_open = False
+                position.is_open = False
+
+        if position.is_open:
+            self._set_protective_levels(position)
 
         session.add(position)
         return position

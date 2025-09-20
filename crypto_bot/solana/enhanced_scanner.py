@@ -201,7 +201,11 @@ class EnhancedSolanaScanner:
                         min_sentiment=0.6,
                         limit=50
                     )
-                    sentiment_symbols = [t[0] for t in sentiment_tokens]
+                    # Filter for Solana tokens only
+                    sentiment_symbols = []
+                    for token_data in sentiment_tokens:
+                        if len(token_data[0]) > 32:  # Likely a Solana mint address
+                            sentiment_symbols.append(token_data[0])
                     tokens.update(sentiment_symbols)
                 except Exception as exc:
                     logger.warning(f"Sentiment token discovery skipped: {exc}")
@@ -697,14 +701,17 @@ class EnhancedSolanaScanner:
             # Try to get sentiment from LunarCrush or similar services
             try:
                 from crypto_bot.sentiment_filter import get_lunarcrush_client
-                client = get_lunarcrush_client()
+                from crypto_bot.solana.token_registry import get_symbol_for_mint
 
-                # Convert token to symbol format for sentiment analysis
+                # Try to map mint address to tradable symbol before hitting sentiment API
                 symbol = token
-                if len(token) > 10:  # Mint address
-                    # Try to map mint to symbol (this would need a mapping service)
-                    symbol = "UNKNOWN"
+                if len(token) > 32:
+                    symbol = await get_symbol_for_mint(token) or ""
 
+                if not symbol:
+                    raise ValueError("sentiment_symbol_unavailable")
+
+                client = get_lunarcrush_client()
                 sentiment_data = await client.get_sentiment(symbol)
                 if sentiment_data:
                     return {
@@ -713,7 +720,8 @@ class EnhancedSolanaScanner:
                         "social_mentions": sentiment_data.social_mentions
                     }
             except Exception as exc:
-                logger.debug(f"Sentiment analysis failed for {token}: {exc}")
+                # Only log at debug level to avoid noisy logs when API limits are hit
+                logger.debug(f"Sentiment analysis fallback for {token}: {exc}")
 
             # Fallback: Generate neutral sentiment for new tokens
             return {

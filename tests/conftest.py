@@ -1,5 +1,6 @@
 """Global test configuration and fixtures."""
 import asyncio
+import importlib.util
 import os
 import sqlite3
 import sys
@@ -430,7 +431,7 @@ def sample_market_data():
 def fix_imports():
     """Fix common import path issues."""
     # Mock problematic modules that may not exist
-    with patch.dict('sys.modules', {
+    module_fallbacks = {
         'crypto_bot.volatility_filter': Mock(),
         'crypto_bot.volatility_filter.requests': Mock(),
         'crypto_bot.fund_manager': Mock(),
@@ -444,7 +445,25 @@ def fix_imports():
         'crypto_bot.execution.cex_executor': Mock(),
         'crypto_bot.execution.solana_mempool': Mock(),
         'crypto_bot.execution.solana_executor': Mock(),
-    }):
+    }
+
+    def should_patch(module_name: str) -> bool:
+        """Return True when a module cannot be imported normally."""
+
+        if module_name in sys.modules:
+            return False
+        try:
+            return importlib.util.find_spec(module_name) is None
+        except ModuleNotFoundError:
+            return True
+
+    modules_to_patch = {
+        name: mock
+        for name, mock in module_fallbacks.items()
+        if should_patch(name)
+    }
+
+    with patch.dict('sys.modules', modules_to_patch):
         # Mock specific functions that tests expect, but only if the module exists
         try:
             with patch('crypto_bot.utils.telegram.send_message', Mock()) as mock_send:

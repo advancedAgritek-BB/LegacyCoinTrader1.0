@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from .pump_sniper_orchestrator import PumpSniperOrchestrator, SniperDecision
+from .wallet_context import load_wallet_context, WalletContext
 from ..utils.telemetry import telemetry
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,10 @@ class PumpSniperIntegration:
         self.dry_run = dry_run
         self.paper_wallet = paper_wallet
         self.pump_sniper_config = self._load_pump_sniper_config()
+        self.wallet_context: WalletContext = load_wallet_context(
+            self.pump_sniper_config.get("pump_wallet", {})
+        )
+        self.pump_sniper_config.setdefault("wallet_context", self.wallet_context)
         self.orchestrator: Optional[PumpSniperOrchestrator] = None
         self.integration_enabled = False
         
@@ -67,12 +72,24 @@ class PumpSniperIntegration:
             if not orchestrator_config.get("enabled", False):
                 logger.info("Pump sniper system disabled in configuration")
                 return False
-                
+
+            if not self.wallet_context.is_configured:
+                if self.dry_run:
+                    logger.warning(
+                        "Pump sniper wallet not fully configured; continuing in paper trading mode"
+                    )
+                else:
+                    logger.error(
+                        "Pump sniper wallet configuration is incomplete; running live mode is not permitted"
+                    )
+                    return False
+
             # Initialize orchestrator with paper trading parameters
             self.orchestrator = PumpSniperOrchestrator(
                 self.pump_sniper_config,
                 dry_run=self.dry_run,
-                paper_wallet=self.paper_wallet
+                paper_wallet=self.paper_wallet,
+                wallet_context=self.wallet_context,
             )
             
             # Set up notifications

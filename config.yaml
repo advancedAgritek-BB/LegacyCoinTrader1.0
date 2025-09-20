@@ -15,10 +15,8 @@ data_validation:
   allow_empty_volume: true
   max_data_age_minutes: 60
   min_data_points: 50
-  min_data_percentage: 0.6  # Require at least 60% of requested data points
   require_volume: false
   validate_ohlcv: true
-  filter_incomplete_symbols: true  # Enable filtering of symbols with insufficient historical data
 enhanced_backtesting:
   enabled: false
 enhanced_scanning:
@@ -37,7 +35,7 @@ enhanced_scanning:
   enable_sentiment: false
   enabled: true
   max_spread_pct: 1.5
-  max_tokens_per_scan: 20
+  max_tokens_per_scan: 200
   min_confidence: 0.5
   min_liquidity_score: 0.6
   min_score_threshold: 0.4
@@ -56,7 +54,7 @@ error_handling:
   scan_error_cooldown: 300
   scan_error_threshold: 5
 exchange: kraken
-execution_mode: dry_run
+execution_mode: live
 exit_strategy:
   min_gain_to_trail: 0.01
   momentum_aware_exits: true
@@ -89,7 +87,7 @@ pipeline_stability:
   disable_complex_filters: false
   enable_rate_limiting: true
   fallback_to_simple_mode: true
-  max_concurrent_requests: 10  # Increased for comprehensive symbol processing
+  max_concurrent_requests: 5  # Reduced to match rate limits and avoid overload
   max_failures_per_cycle: 5
   rate_limit_delay: 1.0
   request_timeout: 20
@@ -99,7 +97,7 @@ rate_limiting:
   burst_window: 5.0
   enabled: true
   max_retries: 3
-  requests_per_minute: 30
+  requests_per_minute: 60
   retry_delay: 2.0
 regime_timeframes:
 - 4h
@@ -118,7 +116,6 @@ risk:
   take_profit_pct: 0.04
   trailing_stop_pct: 0.01
   min_position_size_usd: 50  # Increased minimum to allow for better position sizing
-  # Account balance configuration
   starting_balance: 10000.0  # Set your actual account balance here
   min_confidence_threshold: 0.3  # Only trade signals above 30% confidence
 scan_cache:
@@ -145,8 +142,8 @@ solana_scanner:
   interval_minutes: 30
   max_tokens_per_scan: 100
   min_volume_usd: 1000
-  min_score_threshold: 0.1
-  min_liquidity_score: 0.2
+  kafka_enabled: false
+  kafka_bootstrap_servers: localhost:9092
 token_discovery_feed:
   enabled: true
   redis_host: localhost
@@ -154,15 +151,21 @@ token_discovery_feed:
   redis_db: 0
   redis_channel_tokens: trading_engine.token_candidates
   redis_channel_opportunities: trading_engine.token_opportunities
-  kafka_enabled: false
-  kafka_bootstrap_servers: localhost:9092
-symbol_batch_size: 100  # Increased for comprehensive symbol processing
+symbol_batch_size: 200  # Increased for comprehensive symbol processing
+symbol_batching_strategy: rotating_priority  # Options: alphabetical, random, smart_scoring, rotating_priority
+# alphabetical: Simple A-Z sorting (deterministic but may miss opportunities)
+# random: Complete randomization (maximum diversity, less optimization)
+# smart_scoring: Market-aware scoring (volume + volatility + market cap)
+# rotating_priority: Smart scoring + forced diversity (recommended)
+
+batching_score_weights:
+  volume_weight: 0.4      # Weight for volume in scoring (0-1)
+  volatility_weight: 0.4  # Weight for volatility in scoring (0-1)
+  market_size_weight: 0.1 # Weight for market size in scoring (0-1)
+  random_weight: 0.1      # Weight for randomization in scoring (0-1)
 symbol_validation:
   allowed_quotes:
   - USD
-  - EUR
-  - USDC
-  - USDT
   enabled: true
   max_price_deviation: 0.1
   max_symbol_length: 25
@@ -199,7 +202,7 @@ telegram:
 # Symbol Processing Mode
 # Set to true (default) to process ALL available symbols on the exchange
 # Set to false to use filtered evaluation pipeline
-process_all_symbols: true
+process_all_symbols: false
 
 # Performance Tuning for Comprehensive Symbol Processing
 comprehensive_mode_optimization:
@@ -209,11 +212,88 @@ comprehensive_mode_optimization:
   adaptive_rate_limiting: true
   memory_cleanup_interval: 50  # Clean memory every 50 symbols processed
 
-testing_mode: true
+testing_mode: false
 timeframe: 15m
 cycle_delay_seconds: 30  # Reduced to 30 seconds for faster trading frequency
 use_enhanced_ohlcv_fetcher: true
 use_websocket: true
+optimization:
+  enabled: true
+  interval_days: 0.5
+  max_evaluations: 50
+  method: bayesian
+  advanced_config:
+    method: bayesian
+  parameter_ranges:
+    dip_hunter:
+      rsi_window:
+      - 10
+      - 14
+      - 18
+      - 22
+      rsi_oversold:
+      - 25.0
+      - 30.0
+      - 35.0
+      - 40.0
+      dip_pct:
+      - 0.02
+      - 0.03
+      - 0.04
+      - 0.05
+      dip_bars:
+      - 2
+      - 3
+      - 4
+      - 5
+      vol_window:
+      - 15
+      - 20
+      - 25
+      - 30
+      vol_mult:
+      - 1.2
+      - 1.5
+      - 1.8
+      - 2.0
+      adx_window:
+      - 10
+      - 14
+      - 18
+      - 22
+      adx_threshold:
+      - 20.0
+      - 25.0
+      - 30.0
+      - 35.0
+      bb_window:
+      - 15
+      - 20
+      - 25
+      - 30
+      ema_trend:
+      - 150
+      - 200
+      - 250
+      ml_weight:
+      - 0.3
+      - 0.5
+      - 0.7
+      ema_slow:
+      - 15
+      - 20
+      - 25
+      - 30
+      take_profit_pct:
+      - 0.02
+      - 0.04
+      - 0.06
+      - 0.08
+      stop_loss_pct:
+      - 0.01
+      - 0.02
+      - 0.03
+      - 0.05
 websocket:
   enabled: true
   max_connections: 10
@@ -244,6 +324,7 @@ websocket:
     message_validation: true
     health_checks: true
 use_trade_manager_as_source: true
+default_regime: trending  # Use trending regime with working momentum/trend strategies
 position_sync_enabled: true
 strategy_evaluation_mode: mapped
 strategy_router:

@@ -17,6 +17,7 @@ import numpy as np
 from .pump_detector import PoolAnalysis, PumpSignal
 from .pool_analyzer import PoolMetrics
 from .watcher import NewPoolEvent
+from .wallet_context import WalletContext
 from ..utils.telemetry import telemetry
 
 logger = logging.getLogger(__name__)
@@ -106,11 +107,18 @@ class RapidExecutor:
     - Advanced risk controls
     """
     
-    def __init__(self, config: Dict, dry_run: bool = True, paper_wallet=None):
+    def __init__(
+        self,
+        config: Dict,
+        dry_run: bool = True,
+        paper_wallet=None,
+        wallet_context: Optional[WalletContext] = None,
+    ):
         self.config = config
         self.executor_config = config.get("rapid_executor", {})
         self.dry_run = dry_run
         self.paper_wallet = paper_wallet
+        self.wallet_context = wallet_context
 
         # Execution settings
         self.default_slippage = self.executor_config.get("default_slippage_pct", 0.03)
@@ -148,6 +156,11 @@ class RapidExecutor:
             "avg_slippage": 0.0,
             "mev_protection_saves": 0
         }
+
+        if not self.dry_run and (not self.wallet_context or not self.wallet_context.is_configured):
+            logger.warning(
+                "Rapid executor running live without a fully configured wallet context"
+            )
         
     async def start(self):
         """Start the rapid execution engine."""
@@ -472,6 +485,10 @@ class RapidExecutor:
                 # Paper trading mode - simulate execution
                 return await self._execute_paper_trade(params, route)
             else:
+                if not self.wallet_context or not self.wallet_context.is_configured:
+                    raise RuntimeError(
+                        "Pump sniper wallet is not configured for live execution"
+                    )
                 # Live trading mode
                 # Prepare transaction
                 tx_data = await self._prepare_transaction(params, route, priority_fee)

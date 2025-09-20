@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 import pandas as pd
@@ -19,10 +20,43 @@ from libs.services.interfaces import (
 )
 from libs.strategy.evaluator import evaluate_payload
 
-from .config import Settings
-from .storage import ModelRegistry
+from config import Settings
+from storage import ModelRegistry
+
+try:
+    from crypto_bot.utils.logger import LOG_DIR, setup_logger
+except Exception:  # pragma: no cover - fallback for decoupled deployments
+    LOG_DIR = Path(__file__).resolve().parents[2] / "crypto_bot" / "logs"
+
+    def setup_logger(name: str, log_file: Optional[Path] = None, to_console: bool = True) -> logging.Logger:
+        """Minimal logger setup when the shared helper is unavailable."""
+
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.INFO)
+        logger.propagate = to_console
+
+        if log_file is not None:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            exists = any(
+                isinstance(handler, logging.FileHandler)
+                and getattr(handler, "baseFilename", "") == str(log_file)
+                for handler in logger.handlers
+            )
+            if not exists:
+                handler = logging.FileHandler(log_file)
+                formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+                handler.setFormatter(formatter)
+                logger.addHandler(handler)
+
+        return logger
+
 
 logger = logging.getLogger(__name__)
+evaluation_logger = setup_logger(
+    "strategy_engine.evaluations",
+    LOG_DIR / "strategy_engine.log",
+    to_console=False,
+)
 
 
 class StrategyEngine:
@@ -71,13 +105,53 @@ class StrategyEngine:
         if cached:
             result = self._deserialize_result(cached)
             result.cached = True
+            self._log_evaluation(payload, result, source="cache")
             return result
 
         result = await evaluate_payload(payload)
         await self._redis.set(cache_key, self._serialize_result(result), ex=self._settings.evaluation_cache_ttl)
         if result.strategy:
             await self._model_store.touch(result.strategy, {"symbol": payload.symbol})
+        self._log_evaluation(payload, result, source="fresh")
         return result
+
+    def _log_evaluation(
+        self,
+        payload: StrategyEvaluationPayload,
+        result: StrategyEvaluationResult,
+        *,
+        source: str,
+    ) -> None:
+        """Emit a structured log entry for the evaluation result."""
+
+        try:
+            top_ranked = [
+                {
+                    "strategy": ranked.strategy,
+                    "score": ranked.score,
+                    "direction": ranked.direction,
+                }
+                for ranked in result.ranked_signals[:3]
+            ]
+            evaluation_logger.info(
+                "strategy_evaluation_completed",
+                extra={
+                    "symbol": result.symbol,
+                    "regime": result.regime,
+                    "mode": payload.mode,
+                    "direction": result.direction,
+                    "score": result.score,
+                    "atr": result.atr,
+                    "fused_score": result.fused_score,
+                    "fused_direction": result.fused_direction,
+                    "top_ranked_signals": top_ranked,
+                    "metadata": dict(result.metadata),
+                    "cached": result.cached,
+                    "source": source,
+                },
+            )
+        except Exception:  # pragma: no cover - logging must never break evaluation
+            logger.debug("Failed to log evaluation for %s", payload.symbol, exc_info=True)
 
     def _serialize_result(self, result: StrategyEvaluationResult) -> str:
         return json.dumps(

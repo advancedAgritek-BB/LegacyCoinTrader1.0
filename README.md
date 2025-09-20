@@ -190,7 +190,7 @@ SECRETS_ROTATED_AT=2024-01-01T00:00:00Z
 
 # Runtime overrides
 EXCHANGE=kraken
-EXECUTION_MODE=dry_run
+EXECUTION_MODE=live
 ```
 
 Update `SECRETS_ROTATED_AT` whenever your secrets are rotated. The production
@@ -381,4 +381,3 @@ This project is provided for educational purposes only. Use at your own risk. No
 ---
 
 For detailed API documentation, performance optimization, and advanced strategy configuration, see the respective documentation files in the repository.
-

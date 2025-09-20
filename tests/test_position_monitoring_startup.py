@@ -7,13 +7,15 @@ import asyncio
 import sys
 import os
 from pathlib import Path
+import pytest
 
 # Add the project root to the Python path
 project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-async def test_position_monitoring_startup():
+@pytest.mark.asyncio
+async def test_position_monitoring_startup() -> bool:
     """Test that position monitoring starts correctly"""
     print("🧪 Testing position monitoring startup...")
 
@@ -90,7 +92,8 @@ async def test_position_monitoring_startup():
         traceback.print_exc()
         return False
 
-async def test_bot_startup_integration():
+@pytest.mark.asyncio
+async def test_bot_startup_integration() -> bool:
     """Test that the bot startup process includes position monitoring"""
     print("🔧 Testing bot startup integration...")
 
@@ -111,7 +114,7 @@ async def test_bot_startup_integration():
         return False
 
 if __name__ == "__main__":
-    async def main():
+    async def main() -> int:
         print("🚀 Position Monitoring Startup Test Suite")
         print("=" * 50)
 

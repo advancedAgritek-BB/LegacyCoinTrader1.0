@@ -22,6 +22,7 @@ from crypto_bot.services.interfaces import (
     TradeExecutionRequest,
     TradeExecutionResponse,
 )
+from crypto_bot.utils.status_tracker import update_status
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class ExecutionTimeoutError(ExecutionApiError):
     """Raised when the API reports a timeout while waiting for an event."""
 
 
-@dataclass(slots=True)
+@dataclass
 class _RequestOptions:
     method: str
     path: str
@@ -357,36 +358,76 @@ class ExecutionAdapter(ExecutionService):
 
     async def execute_trade(self, request: TradeExecutionRequest) -> TradeExecutionResponse:
         config: MutableMapping[str, Any] = dict(request.config or {})
-        client_order_id = self._generate_client_order_id(config)
-        order_payload: Dict[str, Any] = {
+        status_snapshot: Dict[str, Any] = {
             "symbol": request.symbol,
             "side": request.side,
             "amount": request.amount,
-            "client_order_id": client_order_id,
-            "dry_run": request.dry_run,
-            "use_websocket": request.use_websocket,
-            "score": request.score,
-            "config": config,
-            "metadata": {"source": "crypto_bot"},
+            "dry_run": bool(request.dry_run),
+            "requested_at": time.time(),
+            "service_url": str(self._client.base_url),
         }
-        submission = await self._client.submit_order(order_payload)
-        client_order_id = submission.get("client_order_id", client_order_id)
-        ack_timeout = self._resolve_timeout(config, "ack_timeout", self._client.ack_timeout)
+
+        def publish(state: str, **extra: Any) -> None:
+            payload = dict(status_snapshot)
+            payload.update(extra)
+            payload["state"] = state
+            try:
+                update_status("execution_adapter", payload)
+            except Exception:
+                logger.debug("Failed to publish execution adapter status", exc_info=True)
+
         try:
-            ack = await self._client.wait_for_ack(client_order_id, ack_timeout)
-        except ExecutionTimeoutError:
-            logger.warning("Timed out waiting for acknowledgement of %s", client_order_id)
-            return TradeExecutionResponse(order={})
-        if not ack.get("accepted", False):
-            logger.warning("Order %s rejected: %s", client_order_id, ack.get("reason"))
-            return TradeExecutionResponse(order={})
-        fill_timeout = self._resolve_timeout(config, "fill_timeout", self._client.fill_timeout)
-        try:
-            fill = await self._client.wait_for_fill(client_order_id, fill_timeout)
-        except ExecutionTimeoutError:
-            logger.warning("Timed out waiting for fill of %s", client_order_id)
-            return TradeExecutionResponse(order={})
-        if not fill.get("success", False):
-            logger.warning("Order %s failed: %s", client_order_id, fill.get("error"))
+            client_order_id = self._generate_client_order_id(config)
+            order_payload: Dict[str, Any] = {
+                "symbol": request.symbol,
+                "side": request.side,
+                "amount": request.amount,
+                "client_order_id": client_order_id,
+                "dry_run": request.dry_run,
+                "use_websocket": request.use_websocket,
+                "score": request.score,
+                "config": config,
+                "metadata": {"source": "crypto_bot"},
+            }
+            publish("submitting")
+            submission = await self._client.submit_order(order_payload)
+            client_order_id = submission.get("client_order_id", client_order_id)
+            status_snapshot["client_order_id"] = client_order_id
+            publish("awaiting_ack")
+            ack_timeout = self._resolve_timeout(config, "ack_timeout", self._client.ack_timeout)
+            try:
+                ack = await self._client.wait_for_ack(client_order_id, ack_timeout)
+            except ExecutionTimeoutError:
+                logger.warning("Timed out waiting for acknowledgement of %s", client_order_id)
+                publish("ack_timeout")
+                return TradeExecutionResponse(order={})
+            if not ack.get("accepted", False):
+                logger.warning("Order %s rejected: %s", client_order_id, ack.get("reason"))
+                publish("rejected", reason=ack.get("reason"))
+                return TradeExecutionResponse(order={})
+            publish("awaiting_fill", ack_time=time.time())
+            fill_timeout = self._resolve_timeout(config, "fill_timeout", self._client.fill_timeout)
+            try:
+                fill = await self._client.wait_for_fill(client_order_id, fill_timeout)
+            except ExecutionTimeoutError:
+                logger.warning("Timed out waiting for fill of %s", client_order_id)
+                publish("fill_timeout")
+                return TradeExecutionResponse(order={})
+            if not fill.get("success", False):
+                logger.warning("Order %s failed: %s", client_order_id, fill.get("error"))
+                publish(
+                    "failed",
+                    fill_time=time.time(),
+                    reason=fill.get("error"),
+                    order_id=(fill.get("order") or {}).get("id"),
+                )
+                return TradeExecutionResponse(order=fill.get("order", {}))
+            publish(
+                "filled",
+                fill_time=time.time(),
+                order_id=(fill.get("order") or {}).get("id"),
+            )
             return TradeExecutionResponse(order=fill.get("order", {}))
-        return TradeExecutionResponse(order=fill.get("order", {}))
+        except Exception as exc:
+            publish("error", error=str(exc))
+            raise

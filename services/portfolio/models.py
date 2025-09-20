@@ -41,7 +41,7 @@ class TradeModel(Base):
     status: Mapped[str] = mapped_column(String(16), default="filled")
     order_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     client_order_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
 
     position_symbol: Mapped[Optional[str]] = mapped_column(
         String(32), ForeignKey("positions.symbol"), nullable=True
@@ -70,7 +70,7 @@ class PositionModel(Base):
     stop_loss_price: Mapped[Optional[Decimal]] = mapped_column(DECIMAL_TYPE, nullable=True)
     take_profit_price: Mapped[Optional[Decimal]] = mapped_column(DECIMAL_TYPE, nullable=True)
     trailing_stop_pct: Mapped[Optional[Decimal]] = mapped_column(DECIMAL_TYPE, nullable=True)
-    metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
     mark_price: Mapped[Optional[Decimal]] = mapped_column(DECIMAL_TYPE, nullable=True)
     is_open: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
@@ -104,7 +104,7 @@ class RiskLimitModel(Base):
     max_drawdown: Mapped[Optional[Decimal]] = mapped_column(DECIMAL_TYPE, nullable=True)
     max_daily_loss: Mapped[Optional[Decimal]] = mapped_column(DECIMAL_TYPE, nullable=True)
     value_at_risk: Mapped[Optional[Decimal]] = mapped_column(DECIMAL_TYPE, nullable=True)
-    metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class PriceCacheModel(Base):

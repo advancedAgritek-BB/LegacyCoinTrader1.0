@@ -1,6 +1,8 @@
 import json
 import threading
 import os
+import socket
+from urllib.parse import urlparse
 from typing import Optional, Callable, Union, List, Any, Dict
 from datetime import datetime, timedelta, timezone
 
@@ -20,6 +22,19 @@ logger = setup_logger(__name__, LOG_DIR / "execution.log")
 
 PUBLIC_URL = "wss://ws.kraken.com/v2"
 PRIVATE_URL = "wss://ws-auth.kraken.com/v2"
+
+
+class NoOpWebSocket:
+    """Placeholder WebSocket used when connectivity is unavailable."""
+
+    def __init__(self, conn_type: str) -> None:
+        self.conn_type = conn_type
+
+    def send(self, *_args, **_kwargs) -> None:  # pragma: no cover - simple placeholder
+        logger.debug("Ignoring send on disabled %s WebSocket", self.conn_type)
+
+    def close(self, *_args, **_kwargs) -> None:  # pragma: no cover - placeholder
+        logger.debug("Ignoring close on disabled %s WebSocket", self.conn_type)
 
 
 def parse_ohlc_message(message: str) -> Optional[List[float]]:
@@ -464,51 +479,8 @@ class KrakenWSClient:
                 # Silently ignore .env loading errors
                 pass
 
+        # Don't create exchange instance here - it will be passed from get_exchange()
         self.exchange = None
-        if self.api_key and self.api_secret:
-            # Use get_exchange to get nonce improvements
-            from .cex_executor import get_exchange
-            config = {
-                "exchange": "kraken",
-                "enable_nonce_improvements": True,
-                "api_retry_attempts": 3
-            }
-            # Temporarily set environment variables for get_exchange to use
-            old_api_key = os.environ.get('API_KEY')
-            old_api_secret = os.environ.get('API_SECRET')
-            old_ws_token = os.environ.get('KRAKEN_WS_TOKEN')
-            old_api_token = os.environ.get('KRAKEN_API_TOKEN')
-
-            try:
-                os.environ['API_KEY'] = self.api_key
-                os.environ['API_SECRET'] = self.api_secret
-                if self.ws_token:
-                    os.environ['KRAKEN_WS_TOKEN'] = self.ws_token
-                if self.api_token:
-                    os.environ['KRAKEN_API_TOKEN'] = self.api_token
-
-                self.exchange, _ = get_exchange(config)
-            finally:
-                # Restore original environment variables
-                if old_api_key is not None:
-                    os.environ['API_KEY'] = old_api_key
-                elif 'API_KEY' in os.environ:
-                    del os.environ['API_KEY']
-
-                if old_api_secret is not None:
-                    os.environ['API_SECRET'] = old_api_secret
-                elif 'API_SECRET' in os.environ:
-                    del os.environ['API_SECRET']
-
-                if old_ws_token is not None:
-                    os.environ['KRAKEN_WS_TOKEN'] = old_ws_token
-                elif 'KRAKEN_WS_TOKEN' in os.environ:
-                    del os.environ['KRAKEN_WS_TOKEN']
-
-                if old_api_token is not None:
-                    os.environ['KRAKEN_API_TOKEN'] = old_api_token
-                elif 'KRAKEN_API_TOKEN' in os.environ:
-                    del os.environ['KRAKEN_API_TOKEN']
 
         self.token: Optional[str] = self.ws_token
         self.token_created: Optional[datetime] = None
@@ -534,6 +506,7 @@ class KrakenWSClient:
             "public": {"last_heartbeat": None, "is_alive": False, "errors": 0},
             "private": {"last_heartbeat": None, "is_alive": False, "errors": 0}
         }
+        self._ws_disabled = {"public": False, "private": False}
         self.message_stats = {
             "total_received": 0,
             "total_sent": 0,
@@ -681,20 +654,39 @@ class KrakenWSClient:
 
     def get_token(self) -> str:
         """Retrieve WebSocket authentication token via Kraken REST API."""
-        if self.token:
+        if self.token and not self.token_expired():
             return self.token
 
         if not self.exchange:
-            raise ValueError("API keys required for private websocket")
+            raise ValueError("Exchange instance required for private websocket authentication")
 
         params = {}
         if self.api_token:
             params["otp"] = self.api_token
 
-        resp = self.exchange.privatePostGetWebSocketsToken(params)
-        self.token = resp["token"]
-        self.token_created = datetime.now(timezone.utc)
-        return self.token
+        try:
+            resp = self.exchange.privatePostGetWebSocketsToken(params)
+            self.token = resp["token"]
+            self.token_created = datetime.now(timezone.utc)
+            logger.info("Successfully obtained WebSocket authentication token")
+            return self.token
+        except Exception as e:
+            error_msg = str(e)
+            if "Invalid nonce" in error_msg:
+                logger.error("Nonce error during WebSocket token generation - this should not happen with nonce improvements")
+                # Reset nonce and try once more
+                try:
+                    resp = self.exchange.privatePostGetWebSocketsToken(params)
+                    self.token = resp["token"]
+                    self.token_created = datetime.now(timezone.utc)
+                    logger.info("Successfully obtained WebSocket token after nonce reset")
+                    return self.token
+                except Exception as retry_error:
+                    logger.error(f"Failed to get WebSocket token after retry: {retry_error}")
+                    raise retry_error
+            else:
+                logger.error(f"Failed to get WebSocket token: {e}")
+                raise e
 
     def _start_ws(
         self,
@@ -707,7 +699,7 @@ class KrakenWSClient:
         ping_interval: int = 20,
         ping_timeout: int = 10,
         **kwargs,
-    ) -> WebSocketApp:
+    ) -> Union[WebSocketApp, NoOpWebSocket]:
         """Start a ``WebSocketApp`` and begin the reader thread."""
 
         def default_on_message(ws, message):
@@ -729,6 +721,26 @@ class KrakenWSClient:
                 default_on_close(ws, close_status_code, close_msg)
             if conn_type:
                 self.on_close(conn_type)
+
+        # Attempt to resolve hostname before creating the socket to catch DNS issues early
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname
+            port = parsed.port or (443 if parsed.scheme == "wss" else 80)
+            if host:
+                socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except socket.gaierror as exc:
+            logger.warning(
+                "Unable to resolve %s WebSocket host %s: %s. Falling back to REST execution.",
+                conn_type or "unknown",
+                url,
+                exc,
+            )
+            if conn_type:
+                self.connection_health[conn_type]["is_alive"] = False
+                self.connection_health[conn_type]["errors"] += 1
+                self._ws_disabled[conn_type] = True
+            return NoOpWebSocket(conn_type or "unknown")
 
         ws = WebSocketApp(
             url,
@@ -864,10 +876,16 @@ class KrakenWSClient:
 
 
     def connect_public(self) -> None:
+        if self._ws_disabled.get("public"):
+            logger.debug("Public WebSocket disabled; skipping connect")
+            return
         if not self.public_ws:
             self.public_ws = self._start_ws(PUBLIC_URL, conn_type="public")
 
     def connect_private(self) -> None:
+        if self._ws_disabled.get("private"):
+            logger.debug("Private WebSocket disabled; skipping connect")
+            return
         prev_token = self.token
         if self.token_expired():
             self.token = None

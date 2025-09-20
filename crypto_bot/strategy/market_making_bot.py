@@ -24,7 +24,7 @@ import ta
 
 
 from crypto_bot.utils.indicators import calculate_atr
-from crypto_bot.utils.logging import setup_strategy_logger
+from crypto_bot.utils.logging_utils import setup_strategy_logger
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 
 NAME = "market_making_bot"

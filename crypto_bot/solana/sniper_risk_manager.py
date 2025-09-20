@@ -19,7 +19,9 @@ import numpy as np
 from .pump_detector import PoolAnalysis
 from .pool_analyzer import PoolMetrics
 from .rapid_executor import ExecutionResult
+from .wallet_context import WalletContext
 from ..utils.telemetry import telemetry
+from crypto_bot.fund_manager import TOKEN_MINTS, check_wallet_balances
 
 logger = logging.getLogger(__name__)
 
@@ -82,11 +84,18 @@ class SniperRiskManager:
     - Emergency position liquidation
     """
     
-    def __init__(self, config: Dict, dry_run: bool = True, paper_wallet=None):
+    def __init__(
+        self,
+        config: Dict,
+        dry_run: bool = True,
+        paper_wallet=None,
+        wallet_context: Optional[WalletContext] = None,
+    ):
         self.config = config
         self.risk_config = config.get("sniper_risk_manager", {})
         self.dry_run = dry_run
         self.paper_wallet = paper_wallet
+        self.wallet_context = wallet_context
         
         # Risk profiles for different market conditions
         self.risk_profiles = {
@@ -558,8 +567,16 @@ class SniperRiskManager:
         if self.dry_run and self.paper_wallet:
             # Use paper wallet balance
             return self.paper_wallet.balance
-        # This would integrate with your wallet balance
-        return 10.0  # Placeholder: 10 SOL for live trading
+        if self.wallet_context and self.wallet_context.public_key:
+            try:
+                balances = check_wallet_balances(self.wallet_context.public_key)
+                sol_mint = TOKEN_MINTS.get("SOL")
+                if sol_mint:
+                    return float(balances.get(sol_mint, 0.0))
+            except Exception as exc:
+                logger.debug("Failed to read on-chain balance for %s: %s", self.wallet_context.public_key, exc)
+        # Fallback placeholder when balance cannot be resolved
+        return 10.0
         
     def _estimate_volatility(self, token_mint: str) -> float:
         """Estimate token volatility."""

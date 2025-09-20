@@ -31,7 +31,7 @@ __all__ = [
 
 def save_config(
     config: Mapping[str, Any],
-    config_path: str | Path | None = None,
+    config_path: Union[str, Path, None] = None,
 ) -> Path:
     """Persist a validated configuration to a YAML override file."""
 

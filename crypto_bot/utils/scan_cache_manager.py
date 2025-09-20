@@ -1,7 +1,7 @@
 """Adaptive cache management for trading bot data."""
 
 from collections import defaultdict, deque
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 import time
 import asyncio
 from dataclasses import dataclass, field
@@ -367,6 +367,7 @@ class AdaptiveCacheManager:
         cache_stats = self.stats.copy()
 
         # Add cache-specific statistics
+        per_cache_counts = {cache_type: len(cache) for cache_type, cache in self.caches.items()}
         cache_stats.update({
             "cache_types": list(self.caches.keys()),
             "total_caches": len(self.caches),
@@ -375,8 +376,16 @@ class AdaptiveCacheManager:
             "eviction_counts": dict(self.eviction_counts),
             "compression_ratios": dict(self.compression_ratios),
             "total_accesses": dict(self.total_accesses),
-            "total_hits": dict(self.total_hits)
+            "total_hits": dict(self.total_hits),
+            "entries_per_cache": per_cache_counts,
         })
+
+        # Provide friendly aliases expected by status tooling
+        cache_stats.setdefault("scan_results", per_cache_counts.get("scan_results", 0))
+        cache_stats.setdefault("strategy_fits", per_cache_counts.get("strategy_fits", 0))
+        cache_stats.setdefault("execution_opportunities", per_cache_counts.get("execution_opportunities", 0))
+        cache_stats.setdefault("review_queue_size", per_cache_counts.get("review_queue", 0))
+        cache_stats.setdefault("cache_size_limit", self.max_size)
 
         # Calculate overall hit rate
         total_accesses = sum(self.total_accesses.values())
@@ -401,21 +410,69 @@ class AdaptiveCacheManager:
         # Scan through all cached results to find opportunities
         for cache_type, cache in self.caches.items():
             for key, entry in cache.items():
-                if hasattr(entry.data, 'get') and 'confidence' in entry.data:
-                    confidence = entry.data.get('confidence', 0)
-                    if confidence >= min_confidence:
-                        opportunity = {
-                            'symbol': entry.data.get('symbol', key),
-                            'strategy': entry.data.get('strategy', 'unknown'),
-                            'direction': entry.data.get('direction', 'unknown'),
-                            'confidence': confidence,
-                            'entry_price': entry.data.get('entry_price'),
-                            'stop_loss': entry.data.get('stop_loss'),
-                            'take_profit': entry.data.get('take_profit'),
-                            'risk_reward_ratio': entry.data.get('risk_reward_ratio'),
-                            'timestamp': entry.timestamp
-                        }
-                        opportunities.append(opportunity)
+                data = entry.data if isinstance(entry.data, dict) else {}
+                if not data:
+                    continue
+
+                confidence = float(data.get('confidence', 0) or 0)
+                if confidence < min_confidence:
+                    continue
+
+                symbol = str(data.get('symbol') or key)
+                strategy = str(data.get('strategy') or 'enhanced_solana_scanner')
+                direction = str(data.get('direction') or 'long').lower()
+
+                # Derive pricing information with sensible fallbacks
+                price = float(data.get('entry_price') or data.get('price') or 0)
+                if price <= 0:
+                    continue  # Skip malformed entries
+
+                atr = float(data.get('atr') or 0)
+
+                stop_loss = data.get('stop_loss')
+                take_profit = data.get('take_profit')
+
+                if stop_loss is None or stop_loss <= 0:
+                    if atr > 0 and atr < price:
+                        stop_loss = max(price - (2 * atr), 0.0001)
+                    else:
+                        stop_loss = price * 0.97
+
+                if take_profit is None or take_profit <= 0:
+                    if atr > 0 and atr < price * 10:
+                        take_profit = price + (3 * atr)
+                    else:
+                        take_profit = price * 1.05
+
+                risk_reward = data.get('risk_reward_ratio')
+                if not risk_reward or risk_reward <= 0:
+                    risk = price - stop_loss
+                    reward = take_profit - price
+                    risk_reward = (reward / risk) if risk > 0 else 0
+                    if risk_reward <= 0:
+                        risk_reward = 2.0
+
+                position_size = float(data.get('position_size') or 0.02)
+                status = str(data.get('status') or 'pending')
+
+                opportunity = {
+                    'symbol': symbol,
+                    'strategy': strategy,
+                    'direction': direction,
+                    'confidence': confidence,
+                    'entry_price': price,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'risk_reward_ratio': float(risk_reward),
+                    'position_size': position_size,
+                    'timestamp': entry.timestamp,
+                    'status': status,
+                    'cache_key': key,
+                    'cache_type': cache_type,
+                    'raw': data,
+                }
+
+                opportunities.append(opportunity)
 
         # Sort by confidence descending
         opportunities.sort(key=lambda x: x['confidence'], reverse=True)
@@ -446,7 +503,66 @@ class AdaptiveCacheManager:
             scan_data.update(market_conditions)
 
         # Cache with appropriate TTL (12 hours for scan results)
+        price = float(scan_data.get('entry_price') or scan_data.get('price') or 0)
+
+        atr_value = scan_data.get('atr')
+        if atr_value is None and market_conditions:
+            atr_value = market_conditions.get('atr')
+        atr = float(atr_value or 0)
+
+        if price > 0:
+            scan_data.setdefault('entry_price', price)
+            if atr > 0 and atr < price:
+                scan_data.setdefault('stop_loss', max(price - (2 * atr), 0.0001))
+                scan_data.setdefault('take_profit', price + (3 * atr))
+
+        scan_data.setdefault('risk_reward_ratio', (scan_data.get('risk_reward_ratio') or 0.0))
+        scan_data.setdefault('position_size', (scan_data.get('position_size') or 0.02))
+        scan_data.setdefault('strategy', (scan_data.get('strategy') or 'enhanced_solana_scanner'))
+        scan_data.setdefault('direction', (scan_data.get('direction') or 'long'))
+        scan_data.setdefault('status', (scan_data.get('status') or 'pending'))
+
         self.set("scan_results", symbol, scan_data, ttl=43200)
+
+    def get_scan_result(self, symbol: str) -> Optional[CacheEntry]:
+        """Return cached scan result entry for ``symbol`` if present."""
+
+        cache = self.caches.get("scan_results")
+        self.total_accesses["scan_results"] += 1
+
+        if not cache or symbol not in cache:
+            self.hit_rates["scan_results"].append(False)
+            return None
+
+        entry = cache[symbol]
+        entry.access_count += 1
+        entry.last_access = time.time()
+        self.total_hits["scan_results"] += 1
+        self.hit_rates["scan_results"].append(True)
+        return entry
+
+    def mark_execution_attempted(self, opportunity: Union[Dict[str, Any], str],
+                                  default_cache_type: str = "scan_results") -> None:
+        """Mark ``opportunity`` as attempted in the cache."""
+
+        if isinstance(opportunity, dict):
+            cache_type = opportunity.get('cache_type', default_cache_type)
+            key = opportunity.get('cache_key') or opportunity.get('symbol')
+        else:
+            cache_type = default_cache_type
+            key = opportunity
+
+        if not key:
+            return
+
+        cache = self.caches.get(cache_type)
+        if not cache or key not in cache:
+            return
+
+        entry = cache[key]
+        if isinstance(entry.data, dict):
+            entry.data['status'] = 'attempted'
+        entry.last_access = time.time()
 
     def get_scan_results(self, min_score: float = 0.0, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """

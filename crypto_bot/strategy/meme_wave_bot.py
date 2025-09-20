@@ -7,7 +7,7 @@ import pandas as pd
 
 from ..sentiment_filter import get_lunarcrush_sentiment_boost, get_sentiment_score
 from crypto_bot.utils.indicators import calculate_atr
-from crypto_bot.utils.logging import setup_strategy_logger
+from crypto_bot.utils.logging_utils import setup_strategy_logger
 
 NAME = "meme_wave_bot"
 

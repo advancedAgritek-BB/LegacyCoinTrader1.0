@@ -4,19 +4,49 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, AsyncGenerator
 
 import redis.asyncio as redis
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 
-from services.monitoring.config import get_monitoring_settings
-from services.monitoring.instrumentation import instrument_fastapi_app
-from services.monitoring.logging import configure_logging
+try:
+    from services.monitoring.config import get_monitoring_settings
+    from services.monitoring.instrumentation import instrument_fastapi_app
+    from services.monitoring.logging_compat import configure_logging
+    MONITORING_AVAILABLE = True
+except ImportError:
+    # Fallback when monitoring service is not available
+    MONITORING_AVAILABLE = False
+    
+    class MockMonitoringSettings:
+        def __init__(self):
+            self.log_level = "INFO"
+            self.metrics = MockMetrics()
+        
+        def for_service(self, name):
+            return self
+        
+        def clone(self, **kwargs):
+            return self
+    
+    class MockMetrics:
+        def __init__(self):
+            self.default_labels = {}
+    
+    def get_monitoring_settings():
+        return MockMonitoringSettings()
+    
+    def instrument_fastapi_app(app, settings=None):
+        pass
+    
+    def configure_logging(settings):
+        import logging
+        logging.basicConfig(level=logging.INFO)
 
-from .config import Settings, get_settings
-from .publisher import DiscoveryPublisher
-from .scanner import TokenDiscoveryCoordinator
-from .schemas import (
+from config import Settings, get_settings
+from publisher import DiscoveryPublisher
+from scanner import TokenDiscoveryCoordinator
+from schemas import (
     DiscoveryResponse,
     Opportunity,
     OpportunityResponse,
@@ -26,20 +56,42 @@ from .schemas import (
     StatusResponse,
 )
 
+# Configure file logging for the token discovery service
+import os
+from pathlib import Path
+from crypto_bot.utils.logger import setup_logger
+
+# Ensure log directory exists
+log_dir = Path("/app/crypto_bot/logs")
+log_dir.mkdir(parents=True, exist_ok=True)
+
+# Setup logger with file output for all token discovery related loggers
+logger = setup_logger(
+    "services.token_discovery",
+    log_file=log_dir / "token_discovery.log",
+    to_console=True
+)
+
+# Also setup for crypto_bot token discovery loggers
+crypto_logger = setup_logger(
+    "crypto_bot.solana",
+    log_file=log_dir / "token_discovery.log",
+    to_console=True
+)
+
 service_settings = get_settings()
 service_identifier = service_settings.app_name.replace(" ", "-").lower()
 monitoring_settings = get_monitoring_settings().for_service(service_identifier)
-monitoring_settings = monitoring_settings.model_copy(
-    update={"log_level": service_settings.log_level}
-)
+monitoring_settings = monitoring_settings.clone(log_level=service_settings.log_level)
 monitoring_settings.metrics.default_labels.setdefault("component", "token-discovery")
 configure_logging(monitoring_settings)
 
-logger = logging.getLogger(__name__)
+# Use the configured logger
+logger = logging.getLogger("token_discovery")
 
 
 @asynccontextmanager
-def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
     logging.getLogger().setLevel(settings.log_level.upper())
 
@@ -140,6 +192,8 @@ async def status_endpoint(
         last_enhanced_scan=stats.get("last_enhanced_scan"),
         tokens_cached=stats.get("tokens_cached", 0),
         opportunities_cached=stats.get("opportunities_cached", 0),
+        last_cex_scan=stats.get("last_cex_scan"),
+        cex_tokens_cached=stats.get("cex_tokens_cached", 0),
     )
 
 
@@ -168,12 +222,49 @@ async def trigger_enhanced_scan(
     )
 
 
+@app.post("/scan/cex", response_model=DiscoveryResponse)
+async def trigger_cex_scan(
+    request: ScanRequest,
+    coordinator: TokenDiscoveryCoordinator = Depends(get_coordinator),
+    settings: Settings = Depends(get_settings_dependency),
+) -> DiscoveryResponse:
+    tokens = await coordinator.run_cex_scan(limit=request.limit)
+    listings = await coordinator.get_latest_cex_listings()
+    exchange = settings.cex_exchange
+    return DiscoveryResponse(
+        tokens=tokens,
+        metadata={
+            "source": request.source or f"cex:{exchange.lower()}",
+            "count": len(tokens),
+            "exchange": exchange,
+            "listings": listings,
+        },
+    )
+
+
 @app.get("/tokens/latest", response_model=DiscoveryResponse)
 async def latest_tokens(
     coordinator: TokenDiscoveryCoordinator = Depends(get_coordinator),
 ) -> DiscoveryResponse:
     tokens = await coordinator.get_latest_tokens()
     return DiscoveryResponse(tokens=tokens, metadata={"count": len(tokens)})
+
+
+@app.get("/cex/latest", response_model=DiscoveryResponse)
+async def latest_cex_tokens(
+    coordinator: TokenDiscoveryCoordinator = Depends(get_coordinator),
+    settings: Settings = Depends(get_settings_dependency),
+) -> DiscoveryResponse:
+    tokens = await coordinator.get_latest_cex_tokens()
+    listings = await coordinator.get_latest_cex_listings()
+    return DiscoveryResponse(
+        tokens=tokens,
+        metadata={
+            "count": len(tokens),
+            "exchange": settings.cex_exchange,
+            "listings": listings,
+        },
+    )
 
 
 @app.get("/opportunities/top", response_model=OpportunityResponse)

@@ -3,6 +3,17 @@
 
 <!-- Modern Elegant Dashboard -->
 <div class="dashboard-container fade-in">
+  <!-- Global Loading Indicator -->
+  <div class="global-loading-indicator" id="global-loading-indicator" style="display: none;">
+    <div class="loading-content">
+      <i class="fas fa-spinner fa-spin"></i>
+      <span>Loading market data...</span>
+      <div class="loading-progress">
+        <div class="loading-bar" id="loading-bar"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Metrics Grid -->
   <div class="metrics-grid">
     <div class="metric-card ai-card">
@@ -11,12 +22,16 @@
       </div>
       <div class="metric-content">
         <h3>Total P&L</h3>
-        <div class="metric-value ai-gradient {{ 'positive' if (pnl if pnl is not none else 0) >= 0 else 'negative' }}" id="totalPnl">
-          ${{ "%.2f"|format(pnl if pnl is not none else 0) }}
+        {% set total_pnl_value = pnl if pnl is not none else 0 %}
+        {% set total_pnl_pct = (pnl_data.get('pnl_percentage') if pnl_data else 0) or 0 %}
+        {% set pnl_value_positive = total_pnl_value >= 0 %}
+        {% set pnl_pct_positive = total_pnl_pct >= 0 %}
+        <div class="metric-value ai-gradient {{ 'positive' if pnl_value_positive else 'negative' }}" id="totalPnl">
+          ${{ "%.2f"|format(total_pnl_value) }}
         </div>
-        <div class="metric-change {{ 'positive' if (pnl if pnl is not none else 0) >= 0 else 'negative' }}">
-          <i class="fas fa-arrow-{{ 'up' if (pnl if pnl is not none else 0) >= 0 else 'down' }}"></i>
-          {{ "%.2f"|format(pnl if pnl is not none else 0) }}%
+        <div class="metric-change {{ 'positive' if pnl_pct_positive else 'negative' }}">
+          <i class="fas fa-arrow-{{ 'up' if pnl_pct_positive else 'down' }}"></i>
+          {{ "%.2f"|format(total_pnl_pct) }}%
       </div>
     </div>
   </div>
@@ -69,17 +84,29 @@
     <div class="section-header">
       <h2><i class="fas fa-chart-line"></i> Open Positions</h2>
       <div class="section-actions">
+        <div class="position-filters">
+          <select id="positionFilter" onchange="filterPositions()">
+            <option value="all">All Positions ({{ open_positions|length if open_positions else 0 }})</option>
+            <option value="profitable">Profitable Only</option>
+            <option value="losing">Losing Only</option>
+            <option value="large">Large Positions (&gt;$1000)</option>
+            <option value="small">Small Positions (&lt;$100)</option>
+          </select>
+        </div>
         <span class="position-count">{{ open_positions|length if open_positions else 0 }} positions</span>
         <button class="btn btn-primary" onclick="refreshPrices()">
           <i class="fas fa-sync-alt"></i> Refresh
         </button>
+        <div id="refresh-indicator" style="display: inline-block; margin-left: 10px; font-size: 12px; color: #666;">
+          Last refresh: <span id="last-refresh-time">Never</span>
+        </div>
       </div>
     </div>
     
     <div class="positions-grid">
       {% if open_positions %}
         {% for position in open_positions %}
-          <div class="position-card {{ 'positive' if position.pnl >= 0 else 'negative' }}" data-symbol="{{ position.symbol }}">
+          <div class="position-card {{ 'positive' if position.pnl >= 0 else 'negative' }}" data-symbol="{{ position.symbol }}" data-price-unavailable="{{ 'true' if position.price_unavailable else 'false' }}" data-entry-price="{{ "%.8f"|format(position.entry_price) if position.entry_price is not none else '' }}" data-stop-loss="{{ "%.8f"|format(position.stop_loss_price) if position.stop_loss_price is not none else '' }}">
             <!-- Position Header -->
             <div class="position-header">
               <div class="position-info">
@@ -89,6 +116,9 @@
                 <div class="position-type {{ position.side }}">
                   {{ position.side.upper() }}
                 </div>
+                {% if position.price_unavailable %}
+                <span class="badge bg-warning text-dark price-unavailable-badge">Price unavailable</span>
+                {% endif %}
               </div>
               <div class="position-pnl">
                 <div class="pnl-percentage {{ 'positive' if position.pnl >= 0 else 'negative' }}">
@@ -102,27 +132,29 @@
 
             <!-- Position Metrics Grid -->
             <div class="position-metrics">
-              <div class="metrics-row">
-                <div class="metric-column">
-                  <div class="metric-item">
-                    <div class="metric-label">ENTRY PRICE</div>
-                    <div class="metric-value {{ 'positive' if position.entry_price > 0 else 'negative' }}">${{ "%.2f"|format(position.entry_price) }}</div>
-                  </div>
-                  <div class="metric-item">
-                    <div class="metric-label">POSITION SIZE</div>
-                    <div class="metric-value {{ 'positive' if position.size > 0 else 'negative' }}">{{ "%.2f"|format(position.size) }}</div>
-                  </div>
+              <div class="position-metrics-grid">
+                <div class="metric-item" data-metric-key="entry_price">
+                  <div class="metric-label">ENTRY PRICE</div>
+                  <div class="metric-value {{ 'positive' if position.entry_price > 0 else 'negative' }}">${{ "%.2f"|format(position.entry_price) }}</div>
                 </div>
-                <div class="metric-column">
-                  <div class="metric-item">
-                    <div class="metric-label">CURRENT PRICE</div>
-                    <div class="metric-value {{ 'positive' if position.current_price > 0 else 'negative' }}">${{ "%.2f"|format(position.current_price) }}</div>
-                  </div>
-                  <div class="metric-item">
-                    <div class="metric-label">CURRENT VALUE</div>
-                    <div class="metric-value {{ 'positive' if position.current_value > 0 else 'negative' }}">${{ "%.2f"|format(position.current_value) }}</div>
-                  </div>
+                <div class="metric-item" data-metric-key="current_price">
+                  <div class="metric-label">CURRENT PRICE</div>
+                  <div class="metric-value {{ 'positive' if position.current_price > 0 else 'negative' }}">${{ "%.2f"|format(position.current_price) }}</div>
                 </div>
+                <div class="metric-item" data-metric-key="position_size">
+                  <div class="metric-label">POSITION SIZE</div>
+                  <div class="metric-value {{ 'positive' if position.size > 0 else 'negative' }}">{{ "%.2f"|format(position.size) }}</div>
+                </div>
+                <div class="metric-item" data-metric-key="current_value">
+                  <div class="metric-label">CURRENT VALUE</div>
+                  <div class="metric-value {{ 'positive' if position.current_value > 0 else 'negative' }}">${{ "%.2f"|format(position.current_value) }}</div>
+                </div>
+                {% if position.stop_loss_price %}
+                <div class="metric-item metric-span-2" data-metric-key="stop_loss">
+                  <div class="metric-label">STOP LOSS</div>
+                  <div class="metric-value warning">${{ "%.2f"|format(position.stop_loss_price) }}</div>
+                </div>
+                {% endif %}
               </div>
             </div>
 
@@ -136,10 +168,32 @@
                 <canvas id="chart-{{ position.symbol.replace('/', '-') }}" width="300" height="80" style="display: none;"></canvas>
               </div>
               <div class="chart-info">
-                <div class="trend-indicator {{ 'positive' if position.pnl >= 0 else 'negative' }}">
-                  {{ 'UPWARD' if position.pnl >= 0 else 'DOWNWARD' }}
+                {% set entry_price = position.entry_price if position.entry_price is not none else 0 %}
+                {% set current_price = position.current_price if position.current_price is not none else (position.mark_price if position.mark_price is not none else entry_price) %}
+                {% set raw_price_delta = position.price_delta if position.price_delta is not none else (current_price - entry_price) %}
+                {% set price_change_pct = ((raw_price_delta / entry_price) * 100) if entry_price > 0 else 0 %}
+                {% set trend_label = position.trend_direction if position.trend_direction is not none else ('UPWARD' if raw_price_delta >= 0 else 'DOWNWARD') %}
+                {% set is_short = (position.side or 'long')|lower == 'short' %}
+                {% if position.trend_is_favorable is not none %}
+                  {% set trend_positive = position.trend_is_favorable %}
+                {% else %}
+                  {% set trend_positive = (raw_price_delta >= 0 and not is_short) or (raw_price_delta <= 0 and is_short) %}
+                {% endif %}
+                <div class="trend-block">
+                  <div class="trend-indicator {{ 'positive' if trend_positive else 'negative' }}">
+                    {{ trend_label }}
+                  </div>
+                  <div class="position-strategy">
+                    <span class="strategy-label">Strategy</span>
+                    <span class="strategy-name">{{ position.strategy|default('Unknown', true) }}</span>
+                  </div>
                 </div>
-                <div class="r-squared">R²: {{ "%.1f"|format(position.r_squared) }}%</div>
+                <div class="timeframe-info">
+                  <span class="timeframe-label">5M CHART</span>
+                  {% if position.r_squared is not none and position.r_squared > 0 %}
+                    <span class="r-squared">R²: {{ "%.1f"|format(position.r_squared * 100) }}%</span>
+                  {% endif %}
+                </div>
               </div>
             </div>
 
@@ -204,44 +258,570 @@ function parseNumberWithCommas(str) {
   return parseFloat(str.toString().replace(/,/g, '')) || 0;
 }
 
+function toNumber(value, fallback = 0) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function formatUsd(value) {
+  return `$${toNumber(value).toFixed(2)}`;
+}
+
+function formatSignedUsd(value) {
+  const num = toNumber(value);
+  const sign = num >= 0 ? '+' : '';
+  return `${sign}$${num.toFixed(2)}`;
+}
+
+const STRATEGY_PLACEHOLDER_PATTERN = /(dry\s*run|paper\s*trading?|manual|simulation|simulated|demo|test|unknown)/i;
+
+function normalizeStrategyToken(value) {
+  if (!value) return '';
+  return String(value).trim();
+}
+
+function humanizeStrategyName(raw) {
+  const text = normalizeStrategyToken(raw);
+  if (!text) return '';
+  const spaced = text
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_\-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!spaced) return text;
+  return spaced
+    .split(' ')
+    .map(part => (part ? part[0].toUpperCase() + part.slice(1).toLowerCase() : ''))
+    .join(' ');
+}
+
+function formatStrategyLabel(displayCandidate, codeCandidate) {
+  const candidates = [displayCandidate, codeCandidate]
+    .map(normalizeStrategyToken)
+    .filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (!STRATEGY_PLACEHOLDER_PATTERN.test(candidate.toLowerCase())) {
+      return humanizeStrategyName(candidate);
+    }
+  }
+
+  if (candidates.length) {
+    const placeholder = candidates[0].toLowerCase();
+    if (placeholder.includes('manual')) {
+      return 'Manual Action';
+    }
+    if (placeholder.includes('paper') || placeholder.includes('dry')) {
+      return 'Paper Trading';
+    }
+    if (placeholder.includes('sim')) {
+      return 'Simulation';
+    }
+  }
+
+  return candidates.length ? humanizeStrategyName(candidates[0]) : 'Unknown';
+}
+
+function normalizeSymbolForId(symbol) {
+  return (symbol || 'unknown').replace(/[^a-z0-9]+/gi, '-');
+}
+
+function createMetricItem(label, valueText, valueClass, options = {}) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'metric-item';
+  if (options && options.metricKey) {
+    wrapper.dataset.metricKey = options.metricKey;
+  }
+  if (options && options.extraClasses) {
+    options.extraClasses.split(' ').forEach(cls => {
+      if (cls) wrapper.classList.add(cls);
+    });
+  }
+
+  const labelEl = document.createElement('div');
+  labelEl.className = 'metric-label';
+  labelEl.textContent = label;
+  wrapper.appendChild(labelEl);
+
+  const valueEl = document.createElement('div');
+  valueEl.className = 'metric-value';
+  if (valueClass) {
+    valueClass.split(' ').forEach(cls => {
+      if (cls) valueEl.classList.add(cls);
+    });
+  }
+  valueEl.textContent = valueText;
+  wrapper.appendChild(valueEl);
+
+  return wrapper;
+}
+
+function ensurePositionCard(position) {
+  if (!position || !position.symbol) {
+    console.warn('Unable to render position card without symbol', position);
+    return null;
+  }
+
+  const symbol = String(position.symbol).toUpperCase();
+  let card = document.querySelector(`.position-card[data-symbol="${symbol}"]`);
+  if (card) {
+    return card;
+  }
+
+  const grid = document.querySelector('.positions-grid');
+  if (!grid) {
+    console.warn('Positions grid container not found');
+    return null;
+  }
+
+  const pnl = toNumber(position.pnl);
+  const pnlValue = toNumber(position.pnl_value);
+  const side = String(position.side || 'long').toLowerCase();
+  const sideLabel = side.toUpperCase();
+  const entryPrice = toNumber(position.entry_price);
+  const currentPrice = toNumber(position.current_price, entryPrice || 0);
+  const currentValue = toNumber(position.current_value);
+  const positionSize = toNumber(position.size ?? position.amount);
+  const priceUnavailable = Boolean(position.price_unavailable);
+  const stopLoss = position.stop_loss_price === null || position.stop_loss_price === undefined
+    ? null
+    : toNumber(position.stop_loss_price);
+  const symbolId = normalizeSymbolForId(symbol);
+  const priceDelta = currentPrice - entryPrice;
+  const priceChangePct = entryPrice > 0 ? (priceDelta / entryPrice) * 100 : 0;
+  const trendLabel = position.trend_direction || (priceDelta >= 0 ? 'UPWARD' : 'DOWNWARD');
+  const trendFavorable = typeof position.trend_is_favorable === 'boolean'
+    ? position.trend_is_favorable
+    : (side === 'short' ? priceDelta <= 0 : priceDelta >= 0);
+
+  card = document.createElement('div');
+  card.className = `position-card ${pnl >= 0 ? 'positive' : 'negative'}`;
+  card.setAttribute('data-symbol', symbol);
+  card.setAttribute('data-price-unavailable', priceUnavailable ? 'true' : 'false');
+  if (entryPrice > 0) {
+    card.dataset.entryPrice = entryPrice.toFixed(8);
+  }
+  if (stopLoss !== null && stopLoss > 0) {
+    card.dataset.stopLoss = stopLoss.toFixed(8);
+  }
+  if (position.strategy_code) {
+    card.dataset.strategyCode = String(position.strategy_code);
+  } else if (card.dataset.strategyCode) {
+    delete card.dataset.strategyCode;
+  }
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'position-header';
+
+  const info = document.createElement('div');
+  info.className = 'position-info';
+
+  const symbolEl = document.createElement('div');
+  symbolEl.className = `position-symbol ${pnl >= 0 ? 'positive' : 'negative'}`;
+  symbolEl.textContent = symbol;
+  info.appendChild(symbolEl);
+
+  const typeEl = document.createElement('div');
+  typeEl.className = `position-type ${side}`;
+  typeEl.textContent = sideLabel;
+  info.appendChild(typeEl);
+
+  if (priceUnavailable) {
+    const badgeEl = document.createElement('span');
+    badgeEl.className = 'badge bg-warning text-dark price-unavailable-badge';
+    badgeEl.textContent = 'Price unavailable';
+    info.appendChild(badgeEl);
+  }
+
+  const pnlWrapper = document.createElement('div');
+  pnlWrapper.className = 'position-pnl';
+
+  const pnlPctEl = document.createElement('div');
+  pnlPctEl.className = `pnl-percentage ${pnl >= 0 ? 'positive' : 'negative'}`;
+  pnlPctEl.textContent = `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%`;
+  pnlWrapper.appendChild(pnlPctEl);
+
+  const pnlValueEl = document.createElement('div');
+  pnlValueEl.className = `pnl-value ${pnlValue >= 0 ? 'positive' : 'negative'}`;
+  pnlValueEl.textContent = formatSignedUsd(pnlValue);
+  pnlWrapper.appendChild(pnlValueEl);
+
+  header.appendChild(info);
+  header.appendChild(pnlWrapper);
+  card.appendChild(header);
+
+  // Metrics grid
+  const metrics = document.createElement('div');
+  metrics.className = 'position-metrics';
+
+  const metricsGrid = document.createElement('div');
+  metricsGrid.className = 'position-metrics-grid';
+
+  metricsGrid.appendChild(
+    createMetricItem(
+      'ENTRY PRICE',
+      formatUsd(entryPrice),
+      entryPrice > 0 ? 'positive' : 'negative',
+      { metricKey: 'entry_price' }
+    )
+  );
+  metricsGrid.appendChild(
+    createMetricItem(
+      'CURRENT PRICE',
+      formatUsd(currentPrice),
+      currentPrice > 0 ? 'positive' : 'negative',
+      { metricKey: 'current_price' }
+    )
+  );
+  metricsGrid.appendChild(
+    createMetricItem(
+      'POSITION SIZE',
+      toNumber(positionSize).toFixed(2),
+      positionSize >= 0 ? 'positive' : 'negative',
+      { metricKey: 'position_size' }
+    )
+  );
+  metricsGrid.appendChild(
+    createMetricItem(
+      'CURRENT VALUE',
+      formatUsd(currentValue),
+      currentValue >= 0 ? 'positive' : 'negative',
+      { metricKey: 'current_value' }
+    )
+  );
+
+  if (stopLoss !== null && stopLoss > 0) {
+    const stopLossItem = createMetricItem(
+      'STOP LOSS',
+      formatUsd(stopLoss),
+      'warning',
+      { metricKey: 'stop_loss', extraClasses: 'metric-span-2' }
+    );
+    metricsGrid.appendChild(stopLossItem);
+  }
+
+  metrics.appendChild(metricsGrid);
+  card.appendChild(metrics);
+
+  // Chart section
+  const chartSection = document.createElement('div');
+  chartSection.className = 'position-chart';
+
+  const chartContainer = document.createElement('div');
+  chartContainer.className = 'chart-container';
+
+  const loadingEl = document.createElement('div');
+  loadingEl.className = 'chart-loading';
+  loadingEl.id = `loading-${symbolId}`;
+  const spinner = document.createElement('div');
+  spinner.className = 'loading-spinner';
+  loadingEl.appendChild(spinner);
+  const loadingText = document.createElement('span');
+  loadingText.textContent = 'Loading chart...';
+  loadingEl.appendChild(loadingText);
+
+  const canvas = document.createElement('canvas');
+  canvas.id = `chart-${symbolId}`;
+  canvas.width = 300;
+  canvas.height = 80;
+  canvas.style.display = 'none';
+
+  chartContainer.appendChild(loadingEl);
+  chartContainer.appendChild(canvas);
+  chartSection.appendChild(chartContainer);
+
+  const chartInfo = document.createElement('div');
+  chartInfo.className = 'chart-info';
+
+  const trendBlock = document.createElement('div');
+  trendBlock.className = 'trend-block';
+
+  const trendIndicator = document.createElement('div');
+  trendIndicator.className = `trend-indicator ${trendFavorable ? 'positive' : 'negative'}`;
+  trendIndicator.textContent = trendLabel;
+  trendBlock.appendChild(trendIndicator);
+
+  const rawStrategy = position.strategy ?? position.strategy_label ?? position.strategy_display;
+  const strategyName = formatStrategyLabel(rawStrategy, position.strategy_code);
+  const strategyEl = document.createElement('div');
+  strategyEl.className = 'position-strategy';
+  const strategyLabelEl = document.createElement('span');
+  strategyLabelEl.className = 'strategy-label';
+  strategyLabelEl.textContent = 'Strategy';
+  const strategyNameEl = document.createElement('span');
+  strategyNameEl.className = 'strategy-name';
+  strategyNameEl.textContent = strategyName;
+  strategyEl.appendChild(strategyLabelEl);
+  strategyEl.appendChild(strategyNameEl);
+  trendBlock.appendChild(strategyEl);
+  chartInfo.appendChild(trendBlock);
+
+  const timeframeInfo = document.createElement('div');
+  timeframeInfo.className = 'timeframe-info';
+  const timeframeLabel = document.createElement('span');
+  timeframeLabel.className = 'timeframe-label';
+  timeframeLabel.textContent = '5M CHART';
+  timeframeInfo.appendChild(timeframeLabel);
+  if (position.r_squared && position.r_squared > 0) {
+    const rSquared = document.createElement('span');
+    rSquared.className = 'r-squared';
+    rSquared.textContent = `R²: ${(position.r_squared * 100).toFixed(1)}%`;
+    timeframeInfo.appendChild(rSquared);
+  }
+  chartInfo.appendChild(timeframeInfo);
+
+  chartSection.appendChild(chartInfo);
+  card.appendChild(chartSection);
+
+  // Actions
+  const actions = document.createElement('div');
+  actions.className = 'position-actions';
+  const sellBtn = document.createElement('button');
+  sellBtn.type = 'button';
+  sellBtn.className = 'btn btn-danger';
+  sellBtn.dataset.action = 'market-sell';
+  sellBtn.dataset.symbol = symbol;
+  sellBtn.dataset.amount = positionSize.toString();
+  sellBtn.textContent = 'Market Sell';
+  actions.appendChild(sellBtn);
+  card.appendChild(actions);
+
+  grid.appendChild(card);
+
+  if (typeof window.registerPositionCardForLazyCharts === 'function') {
+    try {
+      window.registerPositionCardForLazyCharts(card);
+    } catch (chartError) {
+      console.warn(`Chart registration failed for ${symbol}`, chartError);
+    }
+  }
+
+  return card;
+}
+
 // Pass position data from backend to frontend (safe JSON)
 (function(){
   try {
-    const positionsList = {{ (open_positions or []) | tojson }};
-    const map = {};
-    if (Array.isArray(positionsList)) {
-      positionsList.forEach(p => { if (p && p.symbol) map[p.symbol] = p; });
-    }
-    window.positionData = map;
+    // Simple approach: just store the positions list directly
+    window.positionData = {{ (open_positions or []) | tojson }};
+    console.log('Position data loaded, count:', window.positionData ? window.positionData.length : 0);
   } catch (e) {
     console.error('Failed to parse position data:', e);
-    window.positionData = {};
+    window.positionData = [];
   }
 })();
 
 console.log('Position data loaded:', window.positionData);
 
+// Function to clean up stale position cards on page load
+function cleanupStalePositionCards() {
+  console.log('Cleaning up stale position cards...');
+  console.log('Expected positions from server:', window.positionData ? window.positionData.length : 0);
+
+  try {
+    const allCards = document.querySelectorAll('.position-card[data-symbol]');
+    console.log('Found', allCards.length, 'position cards in DOM');
+
+    if (!window.positionData || !Array.isArray(window.positionData)) {
+      console.warn('No valid position data available for cleanup');
+      return;
+    }
+
+    // Get expected symbols from server data
+    const expectedSymbols = new Set(window.positionData.map(p => p.symbol).filter(s => s));
+    console.log('Expected symbols:', Array.from(expectedSymbols));
+
+    // Count symbols in DOM
+    const symbolCounts = {};
+    allCards.forEach(card => {
+      const symbol = card.getAttribute('data-symbol');
+      if (symbol) {
+        symbolCounts[symbol] = (symbolCounts[symbol] || 0) + 1;
+      }
+    });
+    console.log('DOM symbol counts:', symbolCounts);
+
+    // Remove duplicates and stale cards
+    const seenSymbols = new Set();
+    allCards.forEach(card => {
+      const symbol = card.getAttribute('data-symbol');
+      if (symbol) {
+        if (seenSymbols.has(symbol)) {
+          console.log('Removing duplicate card for:', symbol);
+          card.remove();
+        } else if (!expectedSymbols.has(symbol)) {
+          console.log('Removing stale card for unexpected symbol:', symbol);
+          card.remove();
+        } else {
+          seenSymbols.add(symbol);
+        }
+      } else {
+        console.log('Removing card with no symbol');
+        card.remove();
+      }
+    });
+
+    // Update position count
+    const finalCards = document.querySelectorAll('.position-card[data-symbol]');
+    const positionCount = document.querySelector('.position-count');
+    if (positionCount) {
+      positionCount.textContent = `${finalCards.length} positions`;
+    }
+
+    console.log(`Cleanup complete: ${finalCards.length} cards remaining, expected ${expectedSymbols.size}`);
+  } catch (e) {
+    console.warn('Failed to cleanup stale position cards:', e);
+  }
+}
+
+// Function to filter positions based on criteria
+function filterPositions() {
+  const filterValue = document.getElementById('positionFilter').value;
+  const positionCards = document.querySelectorAll('.position-card[data-symbol]');
+  let visibleCount = 0;
+
+  positionCards.forEach(card => {
+    const pnl = parseFloat(card.querySelector('.pnl-percentage')?.textContent?.replace('%', '') || 0);
+    const symbol = card.getAttribute('data-symbol');
+
+    // Get position data from our injected data
+    const positionData = window.positionData ? window.positionData.find(p => p.symbol === symbol) : null;
+    const currentValue = positionData ? positionData.current_value : 0;
+
+    let shouldShow = true;
+
+    switch (filterValue) {
+      case 'profitable':
+        shouldShow = pnl > 0;
+        break;
+      case 'losing':
+        shouldShow = pnl < 0;
+        break;
+      case 'large':
+        shouldShow = currentValue > 1000;
+        break;
+      case 'small':
+        shouldShow = currentValue < 100;
+        break;
+      case 'all':
+      default:
+        shouldShow = true;
+        break;
+    }
+
+    card.style.display = shouldShow ? 'flex' : 'none';
+    if (shouldShow) visibleCount++;
+  });
+
+  // Update position count
+  const positionCount = document.querySelector('.position-count');
+  if (positionCount) {
+    positionCount.textContent = `${visibleCount} positions`;
+  }
+
+  console.log(`Filtered positions: ${visibleCount} visible out of ${positionCards.length} total`);
+}
+
+// Initialize dashboard functionality
+function initializeDashboard() {
+  console.log('Initializing dashboard functionality...');
+
+  // Small delay to ensure all cards are rendered
+  setTimeout(cleanupStalePositionCards, 100);
+
+  // Update initial refresh indicator
+  const indicatorEl = document.getElementById('last-refresh-time');
+  if (indicatorEl) {
+    indicatorEl.textContent = new Date().toLocaleTimeString();
+  }
+
+  // Set up automatic refresh every 30 seconds (production interval)
+  console.log('Setting up automatic refresh every 30 seconds...');
+  const refreshInterval = setInterval(() => {
+    console.log('Auto-refresh triggered at:', new Date().toISOString());
+    try {
+      refreshPrices({ silent: true });
+    } catch (e) {
+      console.warn('Auto-refresh failed:', e);
+      // If auto-refresh fails repeatedly, we might want to clear the interval
+      // But for now, let's keep it running
+    }
+  }, 30000); // Back to 30 seconds for production
+
+  // Store interval ID for potential cleanup
+  window.dashboardRefreshInterval = refreshInterval;
+
+  // Set up backup refresh mechanism using visibility change
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) {
+      console.log('Page became visible, triggering refresh...');
+      try {
+        refreshPrices({ silent: true });
+      } catch (e) {
+        console.warn('Visibility-triggered refresh failed:', e);
+      }
+    }
+  });
+
+  // Add a manual refresh function that can be called from console
+  window.manualRefresh = function() {
+    console.log('Manual refresh triggered');
+    refreshPrices({ silent: false });
+  };
+
+  console.log('Dashboard initialization completed');
+}
+
+// Run initialization when DOM is loaded
+document.addEventListener('DOMContentLoaded', initializeDashboard);
+
+// Also run on window load as fallback
+window.addEventListener('load', function() {
+  // Only initialize if not already done
+  if (!window.dashboardRefreshInterval) {
+    console.log('Fallback initialization on window load');
+    initializeDashboard();
+  }
+});
+
 // Function to refresh position prices and P&L
-function refreshPrices() {
-  console.log('Refreshing position prices...');
-  
-  // Show loading state on refresh button
-  const refreshBtn = document.querySelector('button[onclick="refreshPrices()"]');
+function refreshPrices(options = {}) {
+  const { silent = false, onComplete } = options || {};
+
+  console.log('Refreshing position prices and metrics...', { silent, timestamp: new Date().toISOString() });
+
+  // Update refresh indicator
+  const indicatorEl = document.getElementById('last-refresh-time');
+  if (indicatorEl) {
+    indicatorEl.textContent = new Date().toLocaleTimeString();
+  }
+
+  const refreshBtn = !silent ? document.querySelector('button[onclick="refreshPrices()"]') : null;
   const originalText = refreshBtn ? refreshBtn.innerHTML : '';
   if (refreshBtn) {
     refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
     refreshBtn.disabled = true;
   }
-  
-  // Fetch updated position data
-  fetch('/api/open-positions')
-    .then(response => response.json())
-    .then(positions => {
+
+  const promise = Promise.all([
+    fetch('/api/open-positions').then(r => r.json()),
+    fetch('/api/portfolio/pnl').then(r => r.json())
+  ])
+    .then(([positions, pnlData]) => {
       console.log('Received updated positions:', positions);
-      
-      // Remove any cards for symbols no longer present
+      if (!Array.isArray(positions)) {
+        console.warn('Unexpected payload from /api/open-positions', positions);
+        if (!silent && positions && positions.error && window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+          window.LegacyCoinTrader.showToast(`Error refreshing positions: ${positions.error}`, 'error');
+        }
+        return;
+      }
+
+      window.positionData = positions.slice();
+
       try {
-        const present = new Set((positions || []).map(p => p.symbol));
+        const present = new Set(positions.map(p => p.symbol));
         document.querySelectorAll('.position-card[data-symbol]')
           .forEach(card => {
             const sym = card.getAttribute('data-symbol');
@@ -254,29 +834,50 @@ function refreshPrices() {
         console.warn('Failed to remove stale cards', e);
       }
 
-      // Update each position card with new data
       positions.forEach(position => {
+        const card = ensurePositionCard(position);
+        if (!card) {
+          console.warn('Unable to prepare card for position', position);
+          return;
+        }
         updatePositionCard(position);
       });
-      
-      // Show success message
-      if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
-        window.LegacyCoinTrader.showToast('Prices refreshed successfully', 'success');
+
+      if (pnlData && typeof pnlData === 'object') {
+        updateMetricsCards(pnlData, positions);
+      }
+
+      try {
+        filterPositions();
+      } catch (filterError) {
+        console.warn('Failed to reapply position filter', filterError);
+      }
+
+      if (!silent && window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+        window.LegacyCoinTrader.showToast('Prices and metrics refreshed successfully', 'success');
       }
     })
     .catch(error => {
       console.error('Error refreshing prices:', error);
-      if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+      if (!silent && window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
         window.LegacyCoinTrader.showToast('Error refreshing prices', 'error');
       }
     })
     .finally(() => {
-      // Reset refresh button
       if (refreshBtn) {
         refreshBtn.innerHTML = originalText;
         refreshBtn.disabled = false;
       }
+      if (typeof onComplete === 'function') {
+        try {
+          onComplete();
+        } catch (callbackError) {
+          console.warn('refreshPrices completion callback failed', callbackError);
+        }
+      }
     });
+
+  return promise;
 }
 
 // Function to update a position card with new data
@@ -286,60 +887,244 @@ function updatePositionCard(position) {
     console.warn(`Position card not found for symbol: ${position.symbol}`);
     return;
   }
+
+  const priceUnavailable = Boolean(position.price_unavailable);
+  card.setAttribute('data-price-unavailable', priceUnavailable ? 'true' : 'false');
+  let badgeEl = card.querySelector('.price-unavailable-badge');
+  if (priceUnavailable) {
+    if (!badgeEl) {
+      const info = card.querySelector('.position-info');
+      if (info) {
+        badgeEl = document.createElement('span');
+        badgeEl.className = 'badge bg-warning text-dark price-unavailable-badge';
+        badgeEl.textContent = 'Price unavailable';
+        info.appendChild(badgeEl);
+      }
+    }
+  } else if (badgeEl) {
+    badgeEl.remove();
+  }
+
+  const strategyText = formatStrategyLabel(
+    position.strategy ?? position.strategy_label ?? position.strategy_display,
+    position.strategy_code ?? card.dataset.strategyCode
+  );
+  const strategyNameEl = card.querySelector('.position-strategy .strategy-name');
+  if (strategyNameEl) {
+    strategyNameEl.textContent = strategyText;
+  }
+  if (position.strategy_code) {
+    card.dataset.strategyCode = String(position.strategy_code);
+  } else if (card.dataset.strategyCode) {
+    delete card.dataset.strategyCode;
+  }
+  
+  const entryPrice =
+    typeof position.entry_price === 'number'
+      ? position.entry_price
+      : parseFloat(position.entry_price ?? card.dataset.entryPrice ?? '0') || 0;
+  const currentPrice =
+    typeof position.current_price === 'number'
+      ? position.current_price
+      : parseFloat(position.current_price ?? entryPrice) || entryPrice;
+  const stopLossRaw = position.stop_loss_price ?? position.stop_loss;
+  const stopLossValue =
+    typeof stopLossRaw === 'number' ? stopLossRaw : parseFloat(stopLossRaw ?? '');
+  const hasStopLoss = Number.isFinite(stopLossValue) && stopLossValue > 0;
+  const entryDataString =
+    Number.isFinite(entryPrice) && entryPrice > 0 ? entryPrice.toFixed(8) : '';
+  const stopLossDataString = hasStopLoss ? stopLossValue.toFixed(8) : '';
+  const previousEntryData = card.dataset.entryPrice || '';
+  const previousStopData = card.dataset.stopLoss || '';
+
+  if (entryDataString) {
+    card.dataset.entryPrice = entryDataString;
+  } else {
+    delete card.dataset.entryPrice;
+  }
+
+  if (stopLossDataString) {
+    card.dataset.stopLoss = stopLossDataString;
+  } else {
+    delete card.dataset.stopLoss;
+  }
   
   // Update P&L percentage
   const pnlPercentageEl = card.querySelector('.pnl-percentage');
   if (pnlPercentageEl) {
     const sign = position.pnl >= 0 ? '+' : '';
-    pnlPercentageEl.textContent = `${sign}${position.pnl.toFixed(2)}%`;
+    const newPnlText = `${sign}${position.pnl.toFixed(2)}%`;
+    console.log(`Updating P&L percentage for ${position.symbol}: ${pnlPercentageEl.textContent} -> ${newPnlText}`);
+    pnlPercentageEl.textContent = newPnlText;
     pnlPercentageEl.className = `pnl-percentage ${position.pnl >= 0 ? 'positive' : 'negative'}`;
   }
-  
+
   // Update P&L value
   const pnlValueEl = card.querySelector('.pnl-value');
   if (pnlValueEl) {
     const sign = position.pnl_value >= 0 ? '+' : '';
-    pnlValueEl.textContent = `${sign}$${position.pnl_value.toFixed(2)}`;
+    const newPnlValueText = `${sign}$${position.pnl_value.toFixed(2)}`;
+    console.log(`Updating P&L value for ${position.symbol}: ${pnlValueEl.textContent} -> ${newPnlValueText}`);
+    pnlValueEl.textContent = newPnlValueText;
     pnlValueEl.className = `pnl-value ${position.pnl_value >= 0 ? 'positive' : 'negative'}`;
   }
   
-  // Update current price (reliable label matching)
-  const metricItemsForPrice = card.querySelectorAll('.metric-item');
-  metricItemsForPrice.forEach(item => {
-    const label = item.querySelector('.metric-label');
-    if (label && label.textContent.trim().toUpperCase() === 'CURRENT PRICE') {
-      const valueEl = item.querySelector('.metric-value');
-      if (valueEl) {
-        valueEl.textContent = `$${position.current_price.toFixed(2)}`;
-        valueEl.className = `metric-value ${position.current_price > 0 ? 'positive' : 'negative'}`;
-      }
+  const positionSize =
+    typeof position.size === 'number'
+      ? position.size
+      : parseFloat(position.size ?? position.amount ?? '0') || 0;
+  const currentValue =
+    typeof position.current_value === 'number'
+      ? position.current_value
+      : parseFloat((position.current_value ?? currentPrice * positionSize) || '0') || 0;
+
+  const updateMetricValue = (key, text, classes) => {
+    const valueEl = card.querySelector(
+      `.metric-item[data-metric-key="${key}"] .metric-value`
+    );
+    if (valueEl) {
+      valueEl.textContent = text;
+      valueEl.className = `metric-value${classes ? ` ${classes}` : ''}`;
     }
-  });
-  
-  // Update current value
-  const metricItems = card.querySelectorAll('.metric-item');
-  metricItems.forEach(item => {
-    const label = item.querySelector('.metric-label');
-    if (label && label.textContent.includes('CURRENT VALUE')) {
-      const valueEl = item.querySelector('.metric-value');
-      if (valueEl) {
-        valueEl.textContent = `$${position.current_value.toFixed(2)}`;
-        valueEl.className = `metric-value ${position.current_value > 0 ? 'positive' : 'negative'}`;
+  };
+
+  updateMetricValue(
+    'entry_price',
+    `$${entryPrice.toFixed(2)}`,
+    entryPrice > 0 ? 'positive' : 'negative'
+  );
+
+  updateMetricValue(
+    'current_price',
+    `$${currentPrice.toFixed(2)}`,
+    currentPrice > 0 ? 'positive' : 'negative'
+  );
+
+  updateMetricValue(
+    'position_size',
+    positionSize.toFixed(2),
+    positionSize >= 0 ? 'positive' : 'negative'
+  );
+
+  updateMetricValue(
+    'current_value',
+    `$${currentValue.toFixed(2)}`,
+    currentValue >= 0 ? 'positive' : 'negative'
+  );
+
+  const metricsGrid = card.querySelector('.position-metrics-grid');
+  if (metricsGrid) {
+    let stopLossItem = metricsGrid.querySelector('.metric-item[data-metric-key="stop_loss"]');
+    if (hasStopLoss) {
+      if (!stopLossItem) {
+        stopLossItem = createMetricItem(
+          'STOP LOSS',
+          `$${stopLossValue.toFixed(2)}`,
+          'warning',
+          { metricKey: 'stop_loss', extraClasses: 'metric-span-2' }
+        );
+        metricsGrid.appendChild(stopLossItem);
+      } else {
+        const valueEl = stopLossItem.querySelector('.metric-value');
+        if (valueEl) {
+          valueEl.textContent = `$${stopLossValue.toFixed(2)}`;
+          valueEl.className = 'metric-value warning';
+        }
       }
+    } else if (stopLossItem) {
+      stopLossItem.remove();
     }
-  });
+  }
+
+  if (
+    (previousEntryData && Math.abs(parseFloat(previousEntryData) - entryPrice) > 1e-6) ||
+    (!previousEntryData && entryDataString) ||
+    (previousStopData && Math.abs(parseFloat(previousStopData) - (stopLossValue || 0)) > 1e-6) ||
+    (!previousStopData && stopLossDataString) ||
+    (previousStopData && !stopLossDataString)
+  ) {
+    if (
+      card.dataset.chartLoaded === 'true' &&
+      typeof window.registerPositionCardForLazyCharts === 'function'
+    ) {
+      window.registerPositionCardForLazyCharts(card, { force: true });
+    }
+  }
   
   // Update card overall styling
   card.className = `position-card ${position.pnl >= 0 ? 'positive' : 'negative'}`;
   
   // Update trend indicator
-  const trendEl = card.querySelector('.trend-indicator');
+  const trendBlock = card.querySelector('.trend-block');
+  const trendEl = trendBlock ? trendBlock.querySelector('.trend-indicator') : null;
   if (trendEl) {
-    trendEl.textContent = position.pnl >= 0 ? 'UPWARD' : 'DOWNWARD';
-    trendEl.className = `trend-indicator ${position.pnl >= 0 ? 'positive' : 'negative'}`;
+    const rawDelta = typeof position.price_delta === 'number' ? position.price_delta : currentPrice - entryPrice;
+    const priceMovedUp = rawDelta >= 0;
+    const side = String(position.side || 'long').trim().toLowerCase();
+    const trendLabel = position.trend_direction || (priceMovedUp ? 'UPWARD' : 'DOWNWARD');
+    
+    let trendFavorable;
+    if (typeof position.trend_is_favorable === 'boolean') {
+      trendFavorable = position.trend_is_favorable;
+    } else {
+      trendFavorable = side === 'short' ? !priceMovedUp : priceMovedUp;
+    }
+
+    // Update the trend text
+    trendEl.textContent = trendLabel;
+    trendEl.className = `trend-indicator ${trendFavorable ? 'positive' : 'negative'}`;
   }
   
   console.log(`Updated position card for ${position.symbol}`);
+}
+
+// Function to update metrics cards with fresh data
+function updateMetricsCards(pnlData, positions) {
+  console.log('Updating metrics cards with fresh data', { pnlData, positionCount: positions.length });
+  if (pnlData && pnlData.success === false) {
+    console.warn('PNL endpoint reported an error', pnlData.error);
+    if (pnlData.error && pnlData.error.message && window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+      window.LegacyCoinTrader.showToast(`PNL update failed: ${pnlData.error.message}`, 'warning');
+    }
+    return;
+  }
+  
+  // Update Total P&L
+  const totalPnlEl = document.getElementById('totalPnl');
+  if (totalPnlEl && pnlData.total !== undefined) {
+    const totalPnl = parseFloat(pnlData.total) || 0;
+    const sign = totalPnl >= 0 ? '+' : '';
+    totalPnlEl.textContent = `${sign}$${totalPnl.toFixed(2)}`;
+    totalPnlEl.className = `metric-value ai-gradient ${totalPnl >= 0 ? 'positive' : 'negative'}`;
+  }
+  
+  // Update Active Positions count
+  const activePositionsEl = document.querySelector('.metric-card:nth-child(2) .metric-value');
+  if (activePositionsEl) {
+    activePositionsEl.textContent = positions.length;
+  }
+  
+  // Update position count in section header
+  const positionCounts = document.querySelectorAll('.position-count');
+  positionCounts.forEach(el => {
+    el.textContent = `${positions.length} positions`;
+  });
+  
+  // Update filter dropdown
+  const filterEl = document.getElementById('positionFilter');
+  if (filterEl && filterEl.options[0]) {
+    filterEl.options[0].text = `All Positions (${positions.length})`;
+  }
+
+  // Update header unrealized P&L
+  const headerUnrealizedPnlEl = document.getElementById('headerUnrealizedPnl');
+  if (headerUnrealizedPnlEl && positions) {
+    const totalUnrealizedPnl = positions.reduce((sum, pos) => sum + (pos.pnl_value || 0), 0);
+    const sign = totalUnrealizedPnl >= 0 ? '+' : '';
+    headerUnrealizedPnlEl.textContent = `${sign}$${totalUnrealizedPnl.toFixed(2)}`;
+  }
+
+  console.log('Metrics cards updated successfully');
 }
 
 // Function to sell a position (referenced in template)
@@ -350,7 +1135,7 @@ function sellPosition(symbol, amount) {
       return;
     }
 
-    const sellBtn = document.querySelector(`button[onclick="sellPosition('${symbol}', ${amount})"]`);
+    const sellBtn = document.querySelector(`button[data-action="market-sell"][data-symbol="${symbol}"][data-amount="${amount}"]`);
     const originalText = sellBtn ? sellBtn.innerHTML : '';
     if (sellBtn) {
       sellBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Selling...';
@@ -359,15 +1144,16 @@ function sellPosition(symbol, amount) {
 
     // Add a timeout so the UI never stays stuck if the request hangs
     const controller = new AbortController();
-    const timeoutMs = 12000; // 12s primary attempt
+    const timeoutMs = 10000; // 10s timeout (reduced for faster feedback)
     const timeoutId = setTimeout(() => {
       console.warn('[MarketSell] Aborting sell due to timeout', { symbol });
       controller.abort();
     }, timeoutMs);
 
-    const primaryUrl = new URL('/api/sell-position', window.location.origin).toString();
-    const fallbackUrl = new URL('/sell-position', window.location.origin).toString();
+    const primaryUrl = '/api/sell-position';
+    const fallbackUrl = '/sell-position';
 
+    console.log('[MarketSell] Starting fetch request to:', primaryUrl, 'full URL:', window.location.origin + primaryUrl);
     fetch(primaryUrl, {
       method: 'POST',
       headers: {
@@ -377,14 +1163,31 @@ function sellPosition(symbol, amount) {
       signal: controller.signal
     })
     .then(response => {
-      console.log('[MarketSell] Response received', { status: response.status });
-      return response.json().catch(() => ({ success: false, error: 'Invalid JSON response' }));
+      console.log('[MarketSell] Response received', { status: response.status, ok: response.ok });
+      return response.json().catch(err => {
+        console.error('[MarketSell] JSON parse error:', err);
+        return { success: false, error: 'Invalid JSON response' };
+      });
+    })
+    .catch(fetchError => {
+      console.error('[MarketSell] Fetch error:', fetchError);
+      throw fetchError;
     })
     .then(data => {
       console.log('[MarketSell] Response data', data);
       if (data && data.success) {
-        if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
-          window.LegacyCoinTrader.showToast(`Market sell order submitted for ${amount} ${symbol}`, 'success');
+        // Check if execution failed but trade was recorded successfully
+        const executionFailed = data.execution && !data.execution.submitted;
+        const tradeRecorded = data.trade_id && data.trade;
+
+        if (executionFailed && tradeRecorded) {
+          // Trade recorded but execution failed - show informational message
+          if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+            window.LegacyCoinTrader.showToast(`Trade recorded for ${amount} ${symbol}, but execution failed`, 'warning');
+          }
+          console.log('[MarketSell] Trade recorded successfully but execution failed');
+        } else if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+          window.LegacyCoinTrader.showToast(`Market sell order executed for ${amount} ${symbol}`, 'success');
         }
 
         // Immediately remove the position card from the DOM
@@ -415,8 +1218,18 @@ function sellPosition(symbol, amount) {
         .then(fb => {
           console.log('[MarketSell] Fallback response', fb);
           if (fb && fb.success) {
-            if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
-              window.LegacyCoinTrader.showToast(`Market sell order submitted for ${amount} ${symbol}`, 'success');
+            // Check if execution failed but trade was recorded successfully
+            const executionFailed = fb.execution && !fb.execution.submitted;
+            const tradeRecorded = fb.trade_id && fb.trade;
+
+            if (executionFailed && tradeRecorded) {
+              // Trade recorded but execution failed - show informational message
+              if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+                window.LegacyCoinTrader.showToast(`Trade recorded for ${amount} ${symbol}, but execution failed`, 'warning');
+              }
+              console.log('[MarketSell] Fallback: Trade recorded successfully but execution failed');
+            } else if (window.LegacyCoinTrader && window.LegacyCoinTrader.showToast) {
+              window.LegacyCoinTrader.showToast(`Market sell order executed for ${amount} ${symbol}`, 'success');
             }
             const positionCard = document.querySelector(`.position-card[data-symbol="${symbol}"]`);
             if (positionCard) { positionCard.remove(); }
@@ -461,6 +1274,8 @@ window.sellPosition = sellPosition;
 document.addEventListener('click', function(e) {
   const btn = e.target.closest('button.btn.btn-danger[data-action="market-sell"][data-symbol][data-amount]');
   if (!btn) return;
+  e.preventDefault(); // Prevent onclick handler from also firing
+  e.stopPropagation(); // Stop event bubbling
   const symbol = btn.getAttribute('data-symbol');
   const amountAttr = btn.getAttribute('data-amount');
   const amount = parseFloat(amountAttr);
@@ -470,7 +1285,38 @@ document.addEventListener('click', function(e) {
 });
 </script>
 
-<!-- Chart functionality moved to position_charts.js to fix CSP issues -->
-<script src="{{ url_for('static', filename='position_charts.js') }}" defer></script>
+<!-- Test JavaScript execution -->
+<script>
+console.log('=== INLINE SCRIPT TEST ===');
+document.addEventListener('DOMContentLoaded', function() {
+  console.log('DOM loaded - creating test element');
+  const testDiv = document.createElement('div');
+  testDiv.style.position = 'fixed';
+  testDiv.style.top = '50px';
+  testDiv.style.right = '10px';
+  testDiv.style.background = 'green';
+  testDiv.style.color = 'white';
+  testDiv.style.padding = '5px';
+  testDiv.style.zIndex = '9999';
+  testDiv.textContent = 'INLINE JS WORKING';
+  document.body.appendChild(testDiv);
+  setTimeout(() => testDiv.remove(), 5000);
+});
+</script>
+
+<!-- Simple test for external script -->
+<script src="{{ url_for('static', filename='position_charts.js') }}"></script>
+<script>
+// Test if the external functions are available
+setTimeout(() => {
+  console.log('Testing external functions...');
+  if (typeof loadAllCharts === 'function') {
+    console.log('loadAllCharts function is available');
+    loadAllCharts();
+  } else {
+    console.log('loadAllCharts function is NOT available');
+  }
+}, 1000);
+</script>
 
 {% endblock %}

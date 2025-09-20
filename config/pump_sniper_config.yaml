@@ -69,6 +69,16 @@ rapid_executor:
     - "orca"
     - "serum"
 
+# Dedicated wallet used by the pump sniper runtime
+pump_wallet:
+  name: pump_sniper
+  public_key: "${PUMP_SOL_WALLET:-}"
+  private_key_env: "PUMP_SOLANA_PRIVATE_KEY"
+  rpc_url: "${PUMP_SOLANA_RPC_URL:-https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}}"
+  jito_key_env: "PUMP_JITO_KEY"
+  allow_main_balance_fallback: false
+  rate_limit_per_second: 8
+
 # Risk Management System
 sniper_risk_manager:
   enabled: true
@@ -210,21 +220,29 @@ monitoring:
   large_loss_threshold: 0.20       # 20% loss alert
   high_risk_threshold: 0.80        # 80% risk score alert
 
+# Runtime token discovery feed overrides to avoid clashing with the main bot
+token_discovery_feed:
+  redis_channel_tokens: pump_sniper.token_candidates
+  redis_channel_opportunities: pump_sniper.token_opportunities
+  kafka_group_id: pump-sniper-runtime
+  kafka_topic_tokens: pump-sniper.tokens
+  kafka_topic_opportunities: pump-sniper.opportunities
+
 # Integration Settings
 integration:
   # Main bot integration
-  integrate_with_main_bot: true
-  use_main_bot_balance: true
-  share_risk_limits: true
+  integrate_with_main_bot: false
+  use_main_bot_balance: false
+  share_risk_limits: false
   
   # Strategy router integration
-  register_as_strategy: true
+  register_as_strategy: false
   strategy_name: "pump_sniper"
   strategy_weight: 0.3
   
   # Execution integration
   use_rapid_executor: true
-  fallback_to_main_executor: true
+  fallback_to_main_executor: false
 
 # Development and Testing
 development:

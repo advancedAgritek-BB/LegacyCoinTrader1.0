@@ -36,12 +36,11 @@ ensure_docker() {
 }
 
 compose() {
-    if docker compose version >/dev/null 2>&1; then
-        docker compose "$@"
-    elif command -v docker-compose >/dev/null 2>&1; then
-        docker-compose "$@"
+    # Use the specific Docker Compose command format for this project
+    if command -v docker-compose >/dev/null 2>&1; then
+        docker-compose -f docker-compose.yml -f docker-compose.dev.yml "$@"
     else
-        error "Docker Compose is not available. Install Docker Compose v2 or docker-compose."
+        error "docker-compose is not available."
         exit 1
     fi
 }
@@ -49,14 +48,14 @@ compose() {
 bootstrap_stack() {
     ensure_docker
     info "Pulling images for trading stack (${STACK_SERVICES[*]})"
-    compose -f "$COMPOSE_FILE" pull "${STACK_SERVICES[@]}"
+    compose pull "${STACK_SERVICES[@]}"
     success "Images pulled"
 }
 
 start_stack() {
     ensure_docker
     info "Starting LegacyCoinTrader services via Docker Compose"
-    compose -f "$COMPOSE_FILE" up -d "${STACK_SERVICES[@]}"
+    compose up -d "${STACK_SERVICES[@]}"
     success "Services started"
     info "Gateway: http://localhost:8000"
     info "Frontend dashboard (optional): http://localhost:5000"
@@ -67,7 +66,7 @@ start_stack() {
 stop_stack() {
     ensure_docker
     info "Stopping LegacyCoinTrader services"
-    compose -f "$COMPOSE_FILE" down
+    compose down
     success "Services stopped"
 }
 
@@ -79,7 +78,7 @@ restart_stack() {
 stack_status() {
     ensure_docker
     info "Service status"
-    compose -f "$COMPOSE_FILE" ps
+    compose ps
 }
 
 stack_logs() {
@@ -89,7 +88,7 @@ stack_logs() {
         services=("$@")
     fi
     info "Tailing logs for: ${services[*]}"
-    compose -f "$COMPOSE_FILE" logs -f "${services[@]}"
+    compose logs -f "${services[@]}"
 }
 
 run_cli() {

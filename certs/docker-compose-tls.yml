@@ -1,0 +1,12 @@
+
+    # TLS Configuration for API Gateway
+    environment:
+      - TLS_ENABLED=true
+      - TLS_CERT_FILE=/app/server.crt
+      - TLS_KEY_FILE=/app/server.key
+      - TLS_CA_FILE=/app/ca.crt
+    volumes:
+      - certs:/app/certs:ro
+    ports:
+      - "443:8443"  # HTTPS port
+      - "80:8000"   # HTTP redirect to HTTPS

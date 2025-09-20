@@ -518,7 +518,7 @@ def classify_regime(
     # ml_min_bars = cfg.get("ml_min_bars", 20)  # Unused variable
 
     if df_map is None and (df is None or len(df) < 5):
-        return "unknown", set()
+        return "unknown", _probabilities("unknown", 0.0)
 
     result = _classify_all(df, higher_df, cfg, df_map=df_map)
 

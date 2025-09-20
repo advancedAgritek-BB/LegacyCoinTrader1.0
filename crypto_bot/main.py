@@ -11,11 +11,11 @@ import httpx
 
 from crypto_bot.runtime_signals import cleanup_pid_file
 
-TRADING_ENGINE_START_PATH = "/trading-engine/cycles/start"
-TRADING_ENGINE_STOP_PATH = "/trading-engine/cycles/stop"
-TRADING_ENGINE_STATUS_PATH = "/trading-engine/cycles/status"
-TRADING_ENGINE_RUN_ONCE_PATH = "/trading-engine/cycles/run"
-TRADING_ENGINE_CLOSE_ALL_PATH = "/trading-engine/positions/close-all"
+TRADING_ENGINE_START_PATH = "/api/v1/trading/cycles/start"
+TRADING_ENGINE_STOP_PATH = "/api/v1/trading/cycles/stop"
+TRADING_ENGINE_STATUS_PATH = "/api/v1/trading/cycles/status"
+TRADING_ENGINE_RUN_ONCE_PATH = "/api/v1/trading/cycles/run"
+TRADING_ENGINE_CLOSE_ALL_PATH = "/api/v1/trading/positions/close-all"
 
 DEFAULT_GATEWAY_URL = os.getenv("API_GATEWAY_URL", "http://localhost:8000")
 DEFAULT_TIMEOUT = float(os.getenv("API_GATEWAY_TIMEOUT", "10.0"))
@@ -25,7 +25,7 @@ class TradingEngineClientError(RuntimeError):
     """Raised when the trading engine API cannot be reached or returns an error."""
 
 
-@dataclass(slots=True)
+@dataclass
 class TradingEngineClient:
     """Thin HTTP client for interacting with the trading engine via the gateway."""
 

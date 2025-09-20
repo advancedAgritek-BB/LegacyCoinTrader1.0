@@ -41,6 +41,10 @@ async def _run(cfg: Mapping[str, object]) -> None:
         updated_exec_cfg = exec_cfg.copy()
         updated_exec_cfg["dry_run"] = dry_run
         updated_exec_cfg["paper_wallet"] = paper_wallet
+        if "wallet_context" in exec_cfg:
+            updated_exec_cfg["wallet_context"] = exec_cfg["wallet_context"]
+        elif "wallet_override" in exec_cfg:
+            updated_exec_cfg["wallet_override"] = exec_cfg["wallet_override"]
 
         await snipe(event, score, updated_exec_cfg)
 

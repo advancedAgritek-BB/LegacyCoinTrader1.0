@@ -641,7 +641,7 @@ class PaperWallet:
 
             # Ensure single source of truth is synchronized
             try:
-                from .utils.balance_manager import set_single_balance
+                from crypto_bot.utils.balance_manager import set_single_balance
                 set_single_balance(self.balance)
             except Exception as e:
                 logger.warning(f"Failed to sync single balance source: {e}")

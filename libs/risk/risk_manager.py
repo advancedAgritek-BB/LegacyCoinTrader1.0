@@ -15,6 +15,15 @@ from crypto_bot.utils import trade_memory
 from crypto_bot.utils import ev_tracker
 from crypto_bot.utils.strategy_utils import compute_drawdown
 
+# Portfolio optimization imports
+try:
+    import cvxpy as cp
+    import numpy as np
+    from scipy.optimize import minimize
+    PORTFOLIO_OPTIMIZATION_AVAILABLE = True
+except ImportError:
+    PORTFOLIO_OPTIMIZATION_AVAILABLE = False
+
 
 # Log to the main bot file so risk messages are consolidated
 logger = setup_logger(__name__, LOG_DIR / "bot.log")
@@ -50,6 +59,13 @@ class RiskConfig:
     take_profit_atr_mult: float = 4.0
     max_pair_drawdown: float = 0.0
     pair_drawdown_lookback: int = 20
+
+    # Portfolio optimization settings
+    enable_portfolio_optimization: bool = True
+    max_portfolio_allocation: float = 0.2  # Max allocation per asset
+    min_portfolio_allocation: float = 0.01  # Min allocation per asset
+    rebalance_threshold: float = 0.05  # Rebalance when deviation > 5%
+    risk_parity_weighting: bool = False
 
 
 class RiskManager:
@@ -442,3 +458,603 @@ class RiskManager:
     def deallocate_capital(self, strategy: str, amount: float) -> None:
         """Release previously allocated capital."""
         self.capital_tracker.deallocate(strategy, amount)
+
+    def calculate_var(self, returns: pd.Series, confidence_level: float = 0.95) -> float:
+        """Calculate Value at Risk (VaR) for a series of returns."""
+        if returns.empty:
+            return 0.0
+
+        try:
+            # Historical VaR
+            return -np.percentile(returns.values, (1 - confidence_level) * 100)
+        except Exception as e:
+            logger.error(f"VaR calculation error: {e}")
+            return 0.0
+
+    def calculate_cvar(self, returns: pd.Series, confidence_level: float = 0.95) -> float:
+        """Calculate Conditional Value at Risk (CVaR/Expected Shortfall)."""
+        if returns.empty:
+            return 0.0
+
+        try:
+            var_threshold = -self.calculate_var(returns, confidence_level)
+            tail_losses = returns[returns <= var_threshold]
+
+            if len(tail_losses) == 0:
+                return var_threshold
+
+            return -tail_losses.mean()
+        except Exception as e:
+            logger.error(f"CVaR calculation error: {e}")
+            return 0.0
+
+    def calculate_portfolio_var(
+        self,
+        weights: Dict[str, float],
+        asset_returns: pd.DataFrame,
+        confidence_level: float = 0.95
+    ) -> float:
+        """Calculate portfolio VaR using covariance matrix approach."""
+        try:
+            if asset_returns.empty or not weights:
+                return 0.0
+
+            # Calculate covariance matrix
+            cov_matrix = asset_returns.cov()
+
+            # Convert weights to array in correct order
+            asset_list = list(weights.keys())
+            weight_array = np.array([weights[asset] for asset in asset_list])
+
+            # Portfolio volatility
+            portfolio_volatility = np.sqrt(weight_array.T @ cov_matrix.values @ weight_array)
+
+            # Portfolio VaR (assuming normal distribution)
+            # Z-score for confidence level
+            from scipy.stats import norm
+            z_score = norm.ppf(confidence_level)
+
+            portfolio_var = -z_score * portfolio_volatility
+
+            return portfolio_var
+
+        except Exception as e:
+            logger.error(f"Portfolio VaR calculation error: {e}")
+            return 0.0
+
+    def calculate_portfolio_cvar(
+        self,
+        weights: Dict[str, float],
+        asset_returns: pd.DataFrame,
+        confidence_level: float = 0.95
+    ) -> float:
+        """Calculate portfolio CVaR using Monte Carlo simulation."""
+        try:
+            if asset_returns.empty or not weights:
+                return 0.0
+
+            # Monte Carlo simulation
+            n_simulations = 10000
+
+            # Calculate mean returns and covariance matrix
+            mean_returns = asset_returns.mean()
+            cov_matrix = asset_returns.cov()
+
+            # Generate random scenarios
+            scenarios = np.random.multivariate_normal(
+                mean_returns.values,
+                cov_matrix.values,
+                n_simulations
+            )
+
+            # Calculate portfolio returns for each scenario
+            asset_list = list(weights.keys())
+            weight_array = np.array([weights[asset] for asset in asset_list])
+            portfolio_returns = scenarios @ weight_array
+
+            # Calculate CVaR
+            var_threshold = np.percentile(portfolio_returns, (1 - confidence_level) * 100)
+            tail_losses = portfolio_returns[portfolio_returns <= var_threshold]
+
+            if len(tail_losses) == 0:
+                return -var_threshold
+
+            return -tail_losses.mean()
+
+        except Exception as e:
+            logger.error(f"Portfolio CVaR calculation error: {e}")
+            return 0.0
+
+    def calculate_risk_metrics(
+        self,
+        returns: pd.Series,
+        confidence_level: float = 0.95
+    ) -> Dict[str, float]:
+        """Calculate comprehensive risk metrics."""
+        try:
+            if returns.empty:
+                return {
+                    "sharpe_ratio": 0.0,
+                    "sortino_ratio": 0.0,
+                    "max_drawdown": 0.0,
+                    "var_95": 0.0,
+                    "cvar_95": 0.0,
+                    "volatility": 0.0,
+                    "skewness": 0.0,
+                    "kurtosis": 0.0
+                }
+
+            # Basic metrics
+            mean_return = returns.mean()
+            volatility = returns.std()
+            risk_free_rate = 0.02  # Assume 2% risk-free rate
+
+            # Sharpe ratio
+            sharpe_ratio = (mean_return - risk_free_rate) / volatility if volatility > 0 else 0
+
+            # Sortino ratio (downside deviation)
+            downside_returns = returns[returns < 0]
+            downside_deviation = downside_returns.std() if len(downside_returns) > 0 else 0
+            sortino_ratio = (mean_return - risk_free_rate) / downside_deviation if downside_deviation > 0 else 0
+
+            # Maximum drawdown
+            cumulative = (1 + returns).cumprod()
+            running_max = cumulative.expanding().max()
+            drawdowns = (cumulative - running_max) / running_max
+            max_drawdown = abs(drawdowns.min()) if len(drawdowns) > 0 else 0
+
+            # VaR and CVaR
+            var_95 = self.calculate_var(returns, confidence_level)
+            cvar_95 = self.calculate_cvar(returns, confidence_level)
+
+            # Higher moments
+            skewness = returns.skew() if len(returns) > 2 else 0
+            kurtosis = returns.kurtosis() if len(returns) > 3 else 0
+
+            return {
+                "sharpe_ratio": sharpe_ratio,
+                "sortino_ratio": sortino_ratio,
+                "max_drawdown": max_drawdown,
+                "var_95": var_95,
+                "cvar_95": cvar_95,
+                "volatility": volatility,
+                "skewness": skewness,
+                "kurtosis": kurtosis,
+                "expected_return": mean_return,
+                "total_return": (1 + returns).prod() - 1
+            }
+
+        except Exception as e:
+            logger.error(f"Risk metrics calculation error: {e}")
+            return {
+                "sharpe_ratio": 0.0,
+                "sortino_ratio": 0.0,
+                "max_drawdown": 0.0,
+                "var_95": 0.0,
+                "cvar_95": 0.0,
+                "volatility": 0.0,
+                "skewness": 0.0,
+                "kurtosis": 0.0,
+                "expected_return": 0.0,
+                "total_return": 0.0
+            }
+
+    def assess_risk_limits(
+        self,
+        current_metrics: Dict[str, float],
+        position_size: float,
+        portfolio_value: float
+    ) -> Dict[str, Any]:
+        """Assess if current risk metrics are within acceptable limits."""
+
+        try:
+            # Check individual risk limits
+            violations = []
+
+            # Maximum drawdown limit
+            if current_metrics.get("max_drawdown", 0) > self.config.max_drawdown:
+                violations.append({
+                    "type": "max_drawdown",
+                    "current": current_metrics["max_drawdown"],
+                    "limit": self.config.max_drawdown,
+                    "breached": True
+                })
+
+            # VaR limit (if configured)
+            var_limit = getattr(self.config, 'max_var_limit', 0.1)  # 10% default
+            if current_metrics.get("var_95", 0) > var_limit:
+                violations.append({
+                    "type": "var_95",
+                    "current": current_metrics["var_95"],
+                    "limit": var_limit,
+                    "breached": True
+                })
+
+            # Position size limit
+            max_position_pct = getattr(self.config, 'max_position_size_pct', 0.1)  # 10% default
+            position_pct = position_size / portfolio_value if portfolio_value > 0 else 0
+            if position_pct > max_position_pct:
+                violations.append({
+                    "type": "position_size",
+                    "current": position_pct,
+                    "limit": max_position_pct,
+                    "breached": True
+                })
+
+            # Volatility limit
+            max_volatility = getattr(self.config, 'max_volatility_limit', 0.5)  # 50% default
+            if current_metrics.get("volatility", 0) > max_volatility:
+                violations.append({
+                    "type": "volatility",
+                    "current": current_metrics["volatility"],
+                    "limit": max_volatility,
+                    "breached": True
+                })
+
+            return {
+                "within_limits": len(violations) == 0,
+                "violations": violations,
+                "overall_risk_score": self._calculate_risk_score(current_metrics)
+            }
+
+        except Exception as e:
+            logger.error(f"Risk limit assessment error: {e}")
+            return {
+                "within_limits": False,
+                "violations": [{"type": "calculation_error", "error": str(e)}],
+                "overall_risk_score": 1.0
+            }
+
+    def _calculate_risk_score(self, metrics: Dict[str, float]) -> float:
+        """Calculate overall risk score (0-1, higher = riskier)."""
+        try:
+            # Normalize each risk metric to 0-1 scale
+            normalized_metrics = []
+
+            # Sharpe ratio (lower is riskier)
+            sharpe = metrics.get("sharpe_ratio", 0)
+            sharpe_score = max(0, min(1, 1 / (1 + sharpe)))  # Invert and normalize
+            normalized_metrics.append(sharpe_score)
+
+            # Maximum drawdown (higher is riskier)
+            max_dd = metrics.get("max_drawdown", 0)
+            dd_score = max(0, min(1, max_dd / self.config.max_drawdown))
+            normalized_metrics.append(dd_score)
+
+            # VaR (higher is riskier)
+            var = metrics.get("var_95", 0)
+            var_score = max(0, min(1, var / 0.1))  # Assume 10% is max acceptable
+            normalized_metrics.append(var_score)
+
+            # Volatility (higher is riskier)
+            vol = metrics.get("volatility", 0)
+            vol_score = max(0, min(1, vol / 0.5))  # Assume 50% is max acceptable
+            normalized_metrics.append(vol_score)
+
+            # Average of all normalized metrics
+            return np.mean(normalized_metrics) if normalized_metrics else 0.5
+
+        except Exception as e:
+            logger.error(f"Risk score calculation error: {e}")
+            return 0.5
+
+
+class PortfolioOptimizer:
+    """Modern portfolio theory implementation for optimal asset allocation."""
+
+    def __init__(self, config: RiskConfig):
+        self.config = config
+        self.available = PORTFOLIO_OPTIMIZATION_AVAILABLE
+
+        if not self.available:
+            logger.warning("Portfolio optimization libraries not available (cvxpy, scipy)")
+            return
+
+    def optimize_portfolio(
+        self,
+        expected_returns: pd.Series,
+        covariance_matrix: pd.DataFrame,
+        risk_free_rate: float = 0.02
+    ) -> Dict[str, Any]:
+        """Optimize portfolio using modern portfolio theory (Markowitz optimization)."""
+
+        if not self.available:
+            return self._fallback_equal_weight(expected_returns)
+
+        try:
+            assets = expected_returns.index.tolist()
+            n_assets = len(assets)
+
+            # Convert to numpy arrays
+            mu = expected_returns.values
+            Sigma = covariance_matrix.values
+
+            # Define optimization variables
+            weights = cp.Variable(n_assets)
+
+            # Define constraints
+            constraints = [
+                cp.sum(weights) == 1,  # Weights sum to 1
+                weights >= self.config.min_portfolio_allocation,  # Minimum allocation
+                weights <= self.config.max_portfolio_allocation   # Maximum allocation
+            ]
+
+            # Portfolio return and risk
+            portfolio_return = mu.T @ weights
+            portfolio_risk = cp.quad_form(weights, Sigma)
+
+            # Optimization objectives
+            if self.config.risk_parity_weighting:
+                # Risk parity optimization
+                risk_contributions = cp.multiply(weights, Sigma @ weights) / portfolio_risk
+                objective = cp.sum_squares(risk_contributions - 1/n_assets)
+            else:
+                # Mean-variance optimization (maximizing Sharpe ratio)
+                objective = cp.Minimize(portfolio_risk - portfolio_return)
+
+            # Solve optimization
+            problem = cp.Problem(objective, constraints)
+            problem.solve()
+
+            if problem.status != cp.OPTIMAL:
+                logger.warning(f"Portfolio optimization failed: {problem.status}")
+                return self._fallback_equal_weight(expected_returns)
+
+            # Extract optimal weights
+            optimal_weights = weights.value
+
+            # Calculate portfolio metrics
+            portfolio_return_opt = float(mu.T @ optimal_weights)
+            portfolio_volatility = float(np.sqrt(optimal_weights.T @ Sigma @ optimal_weights))
+            sharpe_ratio = (portfolio_return_opt - risk_free_rate) / portfolio_volatility
+
+            return {
+                "weights": dict(zip(assets, optimal_weights)),
+                "expected_return": portfolio_return_opt,
+                "volatility": portfolio_volatility,
+                "sharpe_ratio": sharpe_ratio,
+                "optimization_method": "mean_variance" if not self.config.risk_parity_weighting else "risk_parity",
+                "status": "success"
+            }
+
+        except Exception as e:
+            logger.error(f"Portfolio optimization error: {e}")
+            return self._fallback_equal_weight(expected_returns)
+
+    def _fallback_equal_weight(self, expected_returns: pd.Series) -> Dict[str, Any]:
+        """Fallback to equal weight allocation when optimization fails."""
+        n_assets = len(expected_returns)
+        equal_weight = 1.0 / n_assets
+
+        weights = {asset: equal_weight for asset in expected_returns.index}
+
+        return {
+            "weights": weights,
+            "expected_return": expected_returns.mean(),
+            "volatility": expected_returns.std(),
+            "sharpe_ratio": expected_returns.mean() / expected_returns.std() if expected_returns.std() > 0 else 0,
+            "optimization_method": "equal_weight",
+            "status": "fallback"
+        }
+
+    def calculate_efficient_frontier(
+        self,
+        expected_returns: pd.Series,
+        covariance_matrix: pd.DataFrame,
+        n_points: int = 50
+    ) -> pd.DataFrame:
+        """Calculate the efficient frontier for portfolio optimization."""
+
+        if not self.available:
+            return pd.DataFrame()
+
+        try:
+            assets = expected_returns.index.tolist()
+            n_assets = len(assets)
+            mu = expected_returns.values
+            Sigma = Sigma = covariance_matrix.values
+
+            # Generate range of target returns
+            min_return = np.min(mu)
+            max_return = np.max(mu)
+            target_returns = np.linspace(min_return, max_return, n_points)
+
+            frontier_points = []
+
+            for target_return in target_returns:
+                # Define optimization
+                weights = cp.Variable(n_assets)
+
+                constraints = [
+                    cp.sum(weights) == 1,
+                    weights >= self.config.min_portfolio_allocation,
+                    weights <= self.config.max_portfolio_allocation,
+                    mu.T @ weights >= target_return
+                ]
+
+                portfolio_risk = cp.quad_form(weights, Sigma)
+                objective = cp.Minimize(portfolio_risk)
+                problem = cp.Problem(objective, constraints)
+
+                try:
+                    problem.solve()
+                    if problem.status == cp.OPTIMAL:
+                        optimal_weights = weights.value
+                        volatility = float(np.sqrt(optimal_weights.T @ Sigma @ optimal_weights))
+
+                        frontier_points.append({
+                            "return": target_return,
+                            "volatility": volatility,
+                            "sharpe_ratio": target_return / volatility if volatility > 0 else 0,
+                            "weights": dict(zip(assets, optimal_weights))
+                        })
+                except:
+                    continue
+
+            return pd.DataFrame(frontier_points)
+
+        except Exception as e:
+            logger.error(f"Efficient frontier calculation error: {e}")
+            return pd.DataFrame()
+
+    def rebalance_portfolio(
+        self,
+        current_weights: Dict[str, float],
+        target_weights: Dict[str, float],
+        current_prices: Dict[str, float],
+        portfolio_value: float
+    ) -> Dict[str, float]:
+        """Calculate rebalancing trades to achieve target weights."""
+
+        try:
+            # Calculate current values
+            current_values = {
+                asset: current_weights.get(asset, 0) * portfolio_value
+                for asset in target_weights.keys()
+            }
+
+            # Calculate target values
+            target_values = {
+                asset: target_weights[asset] * portfolio_value
+                for asset in target_weights.keys()
+            }
+
+            # Calculate required trades
+            trades = {}
+            for asset in target_weights.keys():
+                current_value = current_values.get(asset, 0)
+                target_value = target_values[asset]
+                value_difference = target_value - current_value
+
+                # Only trade if difference exceeds threshold
+                if abs(value_difference / portfolio_value) > self.config.rebalance_threshold:
+                    price = current_prices.get(asset, 1.0)
+                    trades[asset] = value_difference / price
+
+            return trades
+
+        except Exception as e:
+            logger.error(f"Portfolio rebalancing error: {e}")
+            return {}
+
+    def calculate_portfolio_metrics(
+        self,
+        weights: Dict[str, float],
+        expected_returns: pd.Series,
+        covariance_matrix: pd.DataFrame,
+        risk_free_rate: float = 0.02
+    ) -> Dict[str, float]:
+        """Calculate comprehensive portfolio metrics."""
+
+        try:
+            weight_array = np.array([weights.get(asset, 0) for asset in expected_returns.index])
+            mu = expected_returns.values
+            Sigma = covariance_matrix.values
+
+            # Expected return
+            expected_return = weight_array.T @ mu
+
+            # Volatility (standard deviation)
+            volatility = np.sqrt(weight_array.T @ Sigma @ weight_array)
+
+            # Sharpe ratio
+            sharpe_ratio = (expected_return - risk_free_rate) / volatility if volatility > 0 else 0
+
+            # Value at Risk (95% confidence)
+            var_95 = np.percentile(
+                np.random.multivariate_normal(mu, Sigma, 10000) @ weight_array,
+                5
+            )
+
+            # Conditional VaR (Expected Shortfall)
+            portfolio_returns = np.random.multivariate_normal(mu, Sigma, 10000) @ weight_array
+            tail_returns = portfolio_returns[portfolio_returns <= var_95]
+            cvar_95 = tail_returns.mean() if len(tail_returns) > 0 else var_95
+
+            # Maximum drawdown (simplified)
+            cumulative_returns = np.cumprod(1 + portfolio_returns)
+            running_max = np.maximum.accumulate(cumulative_returns)
+            drawdowns = (running_max - cumulative_returns) / running_max
+            max_drawdown = np.max(drawdowns)
+
+            return {
+                "expected_return": expected_return,
+                "volatility": volatility,
+                "sharpe_ratio": sharpe_ratio,
+                "var_95": var_95,
+                "cvar_95": cvar_95,
+                "max_drawdown": max_drawdown
+            }
+
+        except Exception as e:
+            logger.error(f"Portfolio metrics calculation error: {e}")
+            return {
+                "expected_return": 0.0,
+                "volatility": 0.0,
+                "sharpe_ratio": 0.0,
+                "var_95": 0.0,
+                "cvar_95": 0.0,
+                "max_drawdown": 0.0
+            }
+
+
+class EnhancedRiskManager(RiskManager):
+    """Enhanced risk manager with portfolio optimization capabilities."""
+
+    def __init__(self, config: RiskConfig) -> None:
+        super().__init__(config)
+        self.portfolio_optimizer = PortfolioOptimizer(config) if config.enable_portfolio_optimization else None
+
+    def optimize_portfolio_allocation(
+        self,
+        strategy_returns: Dict[str, pd.Series],
+        correlation_matrix: Optional[pd.DataFrame] = None
+    ) -> Dict[str, Any]:
+        """Optimize portfolio allocation across strategies."""
+
+        if not self.portfolio_optimizer:
+            # Fallback to equal weighting
+            n_strategies = len(strategy_returns)
+            equal_weight = 1.0 / n_strategies if n_strategies > 0 else 0
+
+            return {
+                "weights": {strategy: equal_weight for strategy in strategy_returns.keys()},
+                "method": "equal_weight",
+                "status": "fallback"
+            }
+
+        try:
+            # Calculate expected returns for each strategy
+            expected_returns = pd.Series({
+                strategy: returns.mean() for strategy, returns in strategy_returns.items()
+            })
+
+            # Calculate covariance matrix
+            returns_df = pd.DataFrame(strategy_returns)
+            if correlation_matrix is None:
+                covariance_matrix = returns_df.cov()
+            else:
+                # Use correlation matrix to construct covariance matrix
+                volatilities = returns_df.std()
+                covariance_matrix = correlation_matrix * np.outer(volatilities, volatilities)
+
+            # Optimize portfolio
+            optimization_result = self.portfolio_optimizer.optimize_portfolio(
+                expected_returns, covariance_matrix
+            )
+
+            return optimization_result
+
+        except Exception as e:
+            logger.error(f"Portfolio allocation optimization error: {e}")
+
+            # Fallback to equal weighting
+            n_strategies = len(strategy_returns)
+            equal_weight = 1.0 / n_strategies if n_strategies > 0 else 0
+
+            return {
+                "weights": {strategy: equal_weight for strategy in strategy_returns.keys()},
+                "method": "equal_weight_fallback",
+                "status": "error",
+                "error": str(e)
+            }

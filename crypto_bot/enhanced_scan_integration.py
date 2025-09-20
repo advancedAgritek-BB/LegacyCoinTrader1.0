@@ -7,20 +7,47 @@ analysis, and execution opportunity detection.
 """
 
 import asyncio
-import logging
 import time
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from pathlib import Path
 
 import yaml
 
-from .utils.scan_cache_manager import get_scan_cache_manager, ScanResult
-from .utils.logger import setup_logger, LOG_DIR
-from .solana.enhanced_scanner import get_enhanced_scanner, start_enhanced_scanner, stop_enhanced_scanner
+from .utils.scan_cache_manager import get_scan_cache_manager
+from .utils.logger import setup_logger, LOG_DIR, ReadableFormatter
+from .utils.status_tracker import update_status
+from .solana.enhanced_scanner import (
+    get_enhanced_scanner,
+    start_enhanced_scanner,
+    stop_enhanced_scanner,
+)
 from .utils.telegram import TelegramNotifier
-from .utils.logger import LOG_DIR
 
-logger = setup_logger(__name__, LOG_DIR / "enhanced_scan_integration.log")
+logger = setup_logger(__name__, LOG_DIR / "enhanced_scan_integration.log", formatter="readable")
+
+
+class OpportunityView(dict):
+    """Dictionary-backed opportunity with attribute access helpers."""
+
+    __slots__ = ()
+
+    def __getattr__(self, item):
+        try:
+            return self[item]
+        except KeyError as exc:  # pragma: no cover - defensive
+            raise AttributeError(item) from exc
+
+    def __setattr__(self, key, value):
+        self[key] = value
+
+# Import execution services
+try:
+    from .services.adapters.execution import ExecutionAdapter
+    from .services.adapters.execution import TradeExecutionRequest
+    EXECUTION_AVAILABLE = True
+except ImportError:
+    logger.warning("Execution adapter not available - opportunities will be logged only")
+    EXECUTION_AVAILABLE = False
 
 
 class EnhancedScanIntegration:
@@ -45,11 +72,35 @@ class EnhancedScanIntegration:
         self.cache_manager = get_scan_cache_manager(self.enhanced_config)
         self.enhanced_scanner = get_enhanced_scanner(self.enhanced_config)
         
-        # Integration settings
-        self.integration_enabled = self.enhanced_config.get("integration", {}).get("enable_bot_integration", True)
-        self.strategy_integration = self.enhanced_config.get("integration", {}).get("enable_strategy_router_integration", True)
-        self.risk_integration = self.enhanced_config.get("integration", {}).get("enable_risk_manager_integration", True)
+        # Initialize execution adapter if available
+        self.execution_adapter = None
+        if EXECUTION_AVAILABLE:
+            try:
+                self.execution_adapter = ExecutionAdapter()
+                logger.info("Execution adapter initialized - trades will be executed")
+            except Exception as exc:
+                logger.warning(f"Failed to initialize execution adapter: {exc}")
+                self.execution_adapter = None
+        else:
+            logger.warning("Execution adapter not available - opportunities will be logged only")
         
+        integration_config = self.enhanced_config.get("integration", {})
+        scanner_config = self.enhanced_config.get("solana_scanner", {})
+
+        # Integration settings
+        self.integration_enabled = integration_config.get("enable_bot_integration", True)
+        self.strategy_integration = integration_config.get("enable_strategy_router_integration", True)
+        self.risk_integration = integration_config.get("enable_risk_manager_integration", True)
+
+        # Alignment between scanner output and execution filters
+        default_confidence = scanner_config.get("min_confidence", 0.5)
+        self.opportunity_min_confidence = float(
+            max(0.0, min(1.0, integration_config.get("opportunity_min_confidence", default_confidence)))
+        )
+        self.min_risk_reward_ratio = float(
+            max(1.0, integration_config.get("min_risk_reward_ratio", 1.5))
+        )
+
         # Test compatibility attributes
         self.enabled = self.enhanced_config.get("enhanced_scanning", {}).get("enabled", True)
         self.scan_interval = self.enhanced_config.get("enhanced_scanning", {}).get("scan_interval", 30)
@@ -60,7 +111,14 @@ class EnhancedScanIntegration:
             "cache_misses": 0,
             "strategy_analyses": 0,
             "execution_opportunities": 0,
-            "integration_errors": 0
+            "successful_executions": 0,
+            "failed_executions": 0,
+            "integration_errors": 0,
+            "last_execution_attempt": None,
+            "last_successful_execution": None,
+            "last_failed_execution": None,
+            "last_execution_symbol": None,
+            "last_execution_result": "idle",
         }
         
         # Background tasks
@@ -146,7 +204,9 @@ class EnhancedScanIntegration:
             "integration": {
                 "enable_bot_integration": True,
                 "enable_strategy_router_integration": True,
-                "enable_risk_manager_integration": True
+                "enable_risk_manager_integration": True,
+                "opportunity_min_confidence": 0.5,
+                "min_risk_reward_ratio": 1.5,
             }
         }
     
@@ -163,12 +223,14 @@ class EnhancedScanIntegration:
             self.running = True
             self.integration_task = asyncio.create_task(self._integration_loop())
             self.monitoring_task = asyncio.create_task(self._monitoring_loop())
-            
+
             logger.info("Enhanced scan integration started")
-            
+
             if self.notifier:
                 self.notifier.notify("🚀 Enhanced scan integration started")
-                
+
+            self._publish_status(state="started")
+
         except Exception as exc:
             logger.error(f"Failed to start enhanced scan integration: {exc}")
             raise
@@ -198,12 +260,14 @@ class EnhancedScanIntegration:
             
             # Stop enhanced scanner
             await stop_enhanced_scanner()
-            
+
             logger.info("Enhanced scan integration stopped")
-            
+
             if self.notifier:
                 self.notifier.notify("🛑 Enhanced scan integration stopped")
-                
+
+            self._publish_status(state="stopped")
+
         except Exception as exc:
             logger.error(f"Error stopping enhanced scan integration: {exc}")
     
@@ -218,6 +282,7 @@ class EnhancedScanIntegration:
             except Exception as exc:
                 logger.error(f"Error in integration loop: {exc}")
                 self.performance_stats["integration_errors"] += 1
+                self._publish_status(state="error", extra={"error": str(exc)})
                 await asyncio.sleep(30)  # Wait before retrying
     
     async def _monitoring_loop(self):
@@ -230,6 +295,7 @@ class EnhancedScanIntegration:
                 break
             except Exception as exc:
                 logger.error(f"Error in monitoring loop: {exc}")
+                self._publish_status(state="error", extra={"error": str(exc)})
                 await asyncio.sleep(60)
     
     async def _process_cached_results(self):
@@ -237,7 +303,7 @@ class EnhancedScanIntegration:
         try:
             # Get execution opportunities
             opportunities = self.cache_manager.get_execution_opportunities(
-                min_confidence=0.7
+                min_confidence=self.opportunity_min_confidence
             )
             
             if not opportunities:
@@ -246,28 +312,48 @@ class EnhancedScanIntegration:
             logger.info(f"Processing {len(opportunities)} execution opportunities")
             
             for opportunity in opportunities:
+                wrapped = self._wrap_opportunity(opportunity)
                 try:
-                    await self._process_execution_opportunity(opportunity)
+                    await self._process_execution_opportunity(wrapped)
                 except Exception as exc:
-                    logger.error(f"Failed to process opportunity {opportunity.symbol}: {exc}")
+                    symbol = wrapped.get('symbol', 'unknown')
+                    logger.error(f"Failed to process opportunity {symbol}: {exc}")
             
             self.performance_stats["execution_opportunities"] += len(opportunities)
             
         except Exception as exc:
             logger.error(f"Failed to process cached results: {exc}")
-    
+
+    @staticmethod
+    def _wrap_opportunity(opportunity) -> OpportunityView:
+        """Return an ``OpportunityView`` for downstream processing."""
+
+        if isinstance(opportunity, OpportunityView):
+            return opportunity
+        if isinstance(opportunity, dict):
+            return OpportunityView(opportunity)
+        data = getattr(opportunity, '__dict__', {})
+        if not data:
+            data = {'raw': opportunity}
+        return OpportunityView(data)
+
     async def _process_execution_opportunity(self, opportunity):
         """Process a single execution opportunity."""
         try:
+            symbol = opportunity.get('symbol')
+            if not symbol:
+                logger.debug("Skipping opportunity without symbol metadata")
+                return
+
             # Check if opportunity is still valid
             if not self._is_opportunity_valid(opportunity):
                 return
-            
+
             # Get current market data
-            current_data = await self._get_current_market_data(opportunity.symbol)
+            current_data = await self._get_current_market_data(symbol)
             if not current_data:
                 return
-            
+
             # Validate opportunity against current conditions
             if not self._validate_opportunity(opportunity, current_data):
                 return
@@ -278,23 +364,29 @@ class EnhancedScanIntegration:
             
             # Execute or queue for execution
             await self._handle_execution(opportunity)
-            
+
         except Exception as exc:
-            logger.error(f"Failed to process opportunity {opportunity.symbol}: {exc}")
-    
+            symbol = opportunity.get('symbol', 'unknown')
+            logger.error(f"Failed to process opportunity {symbol}: {exc}")
+
     def _is_opportunity_valid(self, opportunity) -> bool:
         """Check if an execution opportunity is still valid."""
         # Check age
         max_age_hours = 2  # Opportunities expire after 2 hours
-        age_hours = (time.time() - opportunity.timestamp) / 3600
-        
+        timestamp = opportunity.get('timestamp')
+        if not timestamp:
+            return False
+
+        age_hours = (time.time() - timestamp) / 3600
+
         if age_hours > max_age_hours:
             return False
-        
+
         # Check status
-        if opportunity.status != "pending":
+        status = opportunity.get('status', 'pending')
+        if status != "pending":
             return False
-        
+
         return True
     
     async def _get_current_market_data(self, symbol: str) -> Optional[Dict[str, Any]]:
@@ -323,11 +415,15 @@ class EnhancedScanIntegration:
             current_price = current_data.get("price", 0)
             if not current_price:
                 return False
-            
-            price_deviation = abs(current_price - opportunity.entry_price) / opportunity.entry_price
+
+            entry_price = opportunity.get('entry_price')
+            if not entry_price:
+                return False
+
+            price_deviation = abs(current_price - entry_price) / entry_price
             if price_deviation > 0.05:  # 5% price deviation threshold
                 return False
-            
+
             # Check volume conditions
             current_volume = current_data.get("volume", 0)
             if current_volume < 10000:  # Minimum volume threshold
@@ -348,52 +444,254 @@ class EnhancedScanIntegration:
         """Check risk management constraints."""
         try:
             # Check risk/reward ratio
-            if opportunity.risk_reward_ratio < 2.0:
+            risk_reward = opportunity.get('risk_reward_ratio', 0.0)
+            if risk_reward < self.min_risk_reward_ratio:
                 return False
-            
+
             # Check position size
             max_position_size = 0.1  # 10% of account
-            if opportunity.position_size > max_position_size:
+            position_size = opportunity.get('position_size', 0.0)
+            if position_size > max_position_size:
                 return False
-            
+
             return True
             
         except Exception as exc:
             logger.debug(f"Failed to check risk management: {exc}")
             return False
-    
+
     async def _handle_execution(self, opportunity):
         """Handle execution of a validated opportunity."""
         try:
+            symbol = opportunity.get('symbol', 'unknown')
+
             # Mark as attempted
-            self.cache_manager.mark_execution_attempted(opportunity.symbol)
+            self.cache_manager.mark_execution_attempted(opportunity)
+            opportunity['status'] = 'attempted'
+
+            now = time.time()
+            self.performance_stats["last_execution_attempt"] = now
+            self.performance_stats["last_execution_symbol"] = symbol
+            self.performance_stats["last_execution_result"] = "pending"
+
+            self._publish_status(
+                state="attempting",
+                extra={
+                    "symbol": symbol,
+                    "confidence": opportunity.get('confidence'),
+                    "direction": opportunity.get('direction'),
+                },
+            )
             
             # Log opportunity details
             logger.info(
-                f"Execution opportunity: {opportunity.symbol} | "
-                f"Strategy: {opportunity.strategy} | "
-                f"Direction: {opportunity.direction} | "
-                f"Confidence: {opportunity.confidence:.3f} | "
-                f"R/R: {opportunity.risk_reward_ratio:.2f}"
+                f"Execution opportunity: {symbol} | "
+                f"Strategy: {opportunity.get('strategy', 'unknown')} | "
+                f"Direction: {opportunity.get('direction', 'unknown')} | "
+                f"Confidence: {opportunity.get('confidence', 0.0):.3f} | "
+                f"R/R: {opportunity.get('risk_reward_ratio', 0.0):.2f}"
             )
             
             # Send notification
             if self.notifier:
+                direction = str(opportunity.get('direction', 'unknown'))
                 self.notifier.notify(
-                    f"🎯 Execution Opportunity: {opportunity.symbol}\n"
-                    f"Strategy: {opportunity.strategy}\n"
-                    f"Direction: {opportunity.direction.upper()}\n"
-                    f"Confidence: {opportunity.confidence:.1%}\n"
-                    f"Risk/Reward: {opportunity.risk_reward_ratio:.2f}"
+                    f"🎯 Execution Opportunity: {symbol}\n"
+                    f"Strategy: {opportunity.get('strategy', 'unknown')}\n"
+                    f"Direction: {direction.upper()}\n"
+                    f"Confidence: {opportunity.get('confidence', 0.0):.1%}\n"
+                    f"Risk/Reward: {opportunity.get('risk_reward_ratio', 0.0):.2f}"
                 )
             
-            # Here you would integrate with your execution engine
-            # For now, we'll just mark it as processed
-            # await self._execute_trade(opportunity)
+            # Execute the trade if execution adapter is available
+            if self.execution_adapter:
+                await self._execute_trade(opportunity)
+            else:
+                logger.warning(f"Execution adapter not available - opportunity {symbol} not executed")
+                self.performance_stats["last_execution_result"] = "skipped"
+                self._publish_status(
+                    state="skipped",
+                    extra={"symbol": symbol, "reason": "execution_adapter_unavailable"},
+                )
+
+        except Exception as exc:
+            logger.error(f"Failed to handle execution for {opportunity.get('symbol', 'unknown')}: {exc}")
+    
+    async def _execute_trade(self, opportunity):
+        """Execute a trade based on the opportunity."""
+        try:
+            # Convert opportunity to trade execution request
+            trade_request = self._opportunity_to_trade_request(opportunity)
+            
+            logger.info(f"Executing trade: {trade_request.symbol} {trade_request.side} {trade_request.amount}")
+            
+            # Execute the trade through the execution adapter
+            result = await self.execution_adapter.execute_trade(trade_request)
+
+            if result.order:
+                logger.info(f"Trade executed successfully: {opportunity['symbol']} - Order ID: {result.order.get('id', 'N/A')}")
+                self.performance_stats["successful_executions"] += 1
+                now = time.time()
+                self.performance_stats["last_successful_execution"] = now
+                self.performance_stats["last_execution_result"] = "success"
+
+                if self.notifier:
+                    self.notifier.notify(
+                        f"✅ Trade Executed: {opportunity['symbol']}\n"
+                        f"Side: {trade_request.side.upper()}\n"
+                        f"Amount: {trade_request.amount}\n"
+                        f"Order ID: {result.order.get('id', 'N/A')}"
+                    )
+
+                self._publish_status(
+                    state="filled",
+                    extra={
+                        "symbol": opportunity['symbol'],
+                        "order_id": result.order.get('id'),
+                        "amount": trade_request.amount,
+                        "side": trade_request.side,
+                    },
+                )
+            else:
+                logger.warning(f"Trade execution failed: {opportunity['symbol']} - No order returned")
+                self.performance_stats["failed_executions"] += 1
+                now = time.time()
+                self.performance_stats["last_failed_execution"] = now
+                self.performance_stats["last_execution_result"] = "failed"
+
+                self._publish_status(
+                    state="failed",
+                    extra={
+                        "symbol": opportunity['symbol'],
+                        "reason": "no_order_returned",
+                        "side": trade_request.side,
+                    },
+                )
+
+        except Exception as exc:
+            logger.error(f"Failed to execute trade for {opportunity['symbol']}: {exc}")
+            self.performance_stats["failed_executions"] += 1
+            now = time.time()
+            self.performance_stats["last_failed_execution"] = now
+            self.performance_stats["last_execution_result"] = "error"
+            self._publish_status(
+                state="error",
+                extra={
+                    "symbol": opportunity.get('symbol'),
+                    "error": str(exc),
+                },
+            )
+    
+    def _opportunity_to_trade_request(self, opportunity):
+        """Convert an opportunity to a trade execution request."""
+        try:
+            # Extract opportunity data
+            symbol = opportunity.get('symbol')
+            direction = opportunity.get('direction', 'buy').lower()
+            entry_price = opportunity.get('entry_price')
+            
+            # Calculate trade amount based on risk management
+            trade_amount = self._calculate_trade_amount(opportunity)
+            
+            # Create trade request
+            trade_request = TradeExecutionRequest(
+                symbol=symbol,
+                side=direction,
+                amount=trade_amount,
+                price=entry_price,
+                dry_run=self.enhanced_config.get("execution", {}).get("dry_run", True),
+                use_websocket=self.enhanced_config.get("execution", {}).get("use_websocket", False),
+                score=opportunity.get('confidence', 0.0),
+                config=self.enhanced_config.get("execution", {}),
+                metadata={
+                    "source": "enhanced_scanner",
+                    "strategy": opportunity.get('strategy', 'unknown'),
+                    "confidence": opportunity.get('confidence', 0.0),
+                    "risk_reward_ratio": opportunity.get('risk_reward_ratio', 0.0)
+                }
+            )
+            
+            return trade_request
             
         except Exception as exc:
-            logger.error(f"Failed to handle execution for {opportunity.symbol}: {exc}")
+            logger.error(f"Failed to convert opportunity to trade request: {exc}")
+            raise
     
+    def _calculate_trade_amount(self, opportunity):
+        """Calculate appropriate trade amount based on risk management."""
+        try:
+            # Get base trade amount from config
+            base_amount = self.enhanced_config.get("execution", {}).get("base_trade_amount", 0.01)
+            
+            # Adjust based on confidence
+            confidence = opportunity.get('confidence', 0.5)
+            confidence_multiplier = min(confidence * 2, 1.5)  # Cap at 1.5x
+            
+            # Adjust based on risk/reward ratio
+            risk_reward = opportunity.get('risk_reward_ratio', 1.0)
+            rr_multiplier = min(risk_reward / 2, 1.2)  # Cap at 1.2x
+            
+            # Calculate final amount
+            final_amount = base_amount * confidence_multiplier * rr_multiplier
+            
+            # Apply limits
+            min_amount = self.enhanced_config.get("execution", {}).get("min_trade_amount", 0.001)
+            max_amount = self.enhanced_config.get("execution", {}).get("max_trade_amount", 0.1)
+            
+            final_amount = max(min_amount, min(final_amount, max_amount))
+            
+            logger.debug(f"Calculated trade amount: {final_amount} (base: {base_amount}, confidence: {confidence}, rr: {risk_reward})")
+            
+            return final_amount
+            
+        except Exception as exc:
+            logger.error(f"Failed to calculate trade amount: {exc}")
+            return self.enhanced_config.get("execution", {}).get("base_trade_amount", 0.01)
+
+    def _publish_status(self, state: Optional[str] = None, extra: Optional[Dict[str, Any]] = None) -> None:
+        """Write the current integration status to the shared status file."""
+
+        try:
+            cache_stats = self.cache_manager.get_cache_stats()
+        except Exception:
+            cache_stats = {}
+        try:
+            scanner_stats = self.enhanced_scanner.get_scan_stats()
+        except Exception:
+            scanner_stats = {}
+
+        total_cache_access = self.performance_stats["cache_hits"] + self.performance_stats["cache_misses"]
+        cache_hit_rate = (
+            (self.performance_stats["cache_hits"] / total_cache_access) * 100.0
+            if total_cache_access
+            else 0.0
+        )
+
+        payload: Dict[str, Any] = {
+            "running": self.running,
+            "cache_hit_rate": round(cache_hit_rate, 2),
+            "cache_entries": cache_stats.get("total_entries", 0),
+            "execution_opportunities": self.performance_stats["execution_opportunities"],
+            "successful_executions": self.performance_stats["successful_executions"],
+            "failed_executions": self.performance_stats["failed_executions"],
+            "integration_errors": self.performance_stats["integration_errors"],
+            "last_execution_attempt": self.performance_stats["last_execution_attempt"],
+            "last_successful_execution": self.performance_stats["last_successful_execution"],
+            "last_failed_execution": self.performance_stats["last_failed_execution"],
+            "last_execution_symbol": self.performance_stats["last_execution_symbol"],
+            "last_execution_result": self.performance_stats["last_execution_result"],
+            "scanner_total_scans": scanner_stats.get("total_scans", 0),
+            "scanner_last_scan": scanner_stats.get("last_scan_time", 0),
+        }
+        if state:
+            payload["state"] = state
+        if extra:
+            payload.update(extra)
+        try:
+            update_status("enhanced_scan_integration", payload)
+        except Exception:
+            logger.debug("Failed to publish integration status", exc_info=True)
+
     async def _generate_performance_report(self):
         """Generate and log performance report."""
         try:
@@ -417,19 +715,22 @@ class EnhancedScanIntegration:
             }
             
             # Log report
+            total_entries = cache_stats.get('total_entries', 0)
             logger.info(
                 f"Performance Report: "
-                f"Cache: {cache_stats['scan_results']} results, "
+                f"Cache: {total_entries} results, "
                 f"Scanner: {scanner_stats['total_scans']} scans, "
                 f"Opportunities: {self.performance_stats['execution_opportunities']}, "
+                f"Executions: {self.performance_stats['successful_executions']}/{self.performance_stats['successful_executions'] + self.performance_stats['failed_executions']}, "
                 f"Cache Hit Rate: {cache_hit_rate:.1f}%"
             )
             
             # Send periodic notification
             if self.notifier and self.performance_stats["execution_opportunities"] > 0:
+                total_entries = cache_stats.get('total_entries', 0)
                 self.notifier.notify(
                     f"📊 Scan Performance Update:\n"
-                    f"Cache: {cache_stats['scan_results']} results\n"
+                    f"Cache: {total_entries} results\n"
                     f"Scans: {scanner_stats['total_scans']}\n"
                     f"Opportunities: {self.performance_stats['execution_opportunities']}\n"
                     f"Cache Hit Rate: {cache_hit_rate:.1f}%"
@@ -437,7 +738,9 @@ class EnhancedScanIntegration:
             
             # Reset counters
             self.performance_stats["execution_opportunities"] = 0
-            
+
+            self._publish_status(state="report")
+
         except Exception as exc:
             logger.error(f"Failed to generate performance report: {exc}")
     

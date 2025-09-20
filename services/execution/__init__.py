@@ -14,7 +14,7 @@ from .models import (
     OrderRequest,
     SecretRef,
 )
-from .secrets import SecretLoader
+from .secret_loader import SecretLoader
 from .service import ExecutionService
 
 __all__ = [

@@ -15,7 +15,7 @@ try:  # pragma: no cover - optional dependency
 except Exception:  # pragma: no cover - aiokafka optional
     AIOKafkaProducer = None  # type: ignore[misc,assignment]
 
-from .config import Settings
+from config import Settings
 
 logger = logging.getLogger(__name__)
 

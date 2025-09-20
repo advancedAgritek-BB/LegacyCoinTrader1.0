@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, MutableMapping, Optional
 
 
-@dataclass(slots=True)
+@dataclass
 class SecretRef:
     """Reference to a secret stored in Vault, Kubernetes, or the environment."""
 
@@ -40,7 +40,7 @@ class SecretRef:
         return cls(source="literal", name=str(value))
 
 
-@dataclass(slots=True)
+@dataclass
 class ExchangeCredentials:
     """Resolved exchange credentials."""
 
@@ -51,7 +51,7 @@ class ExchangeCredentials:
     api_token: Optional[str] = None
 
 
-@dataclass(slots=True)
+@dataclass
 class ExchangeSession:
     """Represents an active exchange session managed by the service."""
 
@@ -60,7 +60,7 @@ class ExchangeSession:
     config_hash: str
 
 
-@dataclass(slots=True)
+@dataclass
 class OrderRequest:
     """Order submission payload accepted by the execution service."""
 
@@ -76,7 +76,7 @@ class OrderRequest:
     metadata: MutableMapping[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
+@dataclass
 class OrderAck:
     """Acknowledgement message published after accepting an order."""
 
@@ -87,7 +87,7 @@ class OrderAck:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
+@dataclass
 class OrderFill:
     """Fill event published when the exchange returns a result."""
 

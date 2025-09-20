@@ -135,6 +135,39 @@ async def fetch_pump_fun_launches(api_key: str, limit: int) -> List[str]:
     return tokens[:limit]
 
 
+async def _fallback_token_discovery(limit: int) -> List[str]:
+    """Fallback token discovery when primary APIs are not available."""
+
+    # Default popular Solana tokens to use as fallback
+    fallback_tokens = [
+        "So11111111111111111111111111111112",  # SOL
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",  # USDC
+        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  # USDT
+        "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",   # JUP
+        "7xKXtg2CW87ZdacwQCUJLrf4VYJrFCBAcHX7ebUQWV2w",  # PYTH
+        "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So", # mSOL
+        "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", # BONK
+        "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7AR",  # stSOL
+        "HxhWkVpk5NS4Ltg5nijHJEifHodS6z4QcK5poe9JQ5LK", # HXRO (DEPRECATED)
+        "SRMuApVNdxXokk5GT7XD5cUUgXMBCoAz2LHeuAoKWRt",  # SRM
+        "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E", # BTC
+        "2FPyTwcZLUg1MDrwsyoP4D6s1tM7hAkHYRjkNb5w6Px", # ETH
+        "MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey",   # MNDE
+        "ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx", # ATLAS
+        "EP2aYBDD4WvdhnwWLUMyqU49g9k9eC8jNn7Cvf8d2AfT", # ORCA
+        "EchesyfXePKdLtoiZSL8pBe8Myagyy8ZRqsACNCFGnvp", # FIDA
+        "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R", # RAY
+        "8HGyAAB1yoM1ttS7pXjHMa3dukTFGQggnFFH3hJZgzQh", #COPE
+        "AGFEad2et2ZJif9jaGpdMixQqvW5i81aBdvKe7PHNfz3", #FTT
+        "9S4t2NEAiJVMvPdRYKVrfJpBafPBLtvb6YXGbHqjDjT",   #COPE
+    ]
+
+    # Return formatted tokens
+    formatted_tokens = [f"{token}/USDC" for token in fallback_tokens[:limit]]
+    logger.info(f"Using {len(formatted_tokens)} fallback tokens for discovery")
+    return formatted_tokens
+
+
 async def get_solana_new_tokens(config: dict) -> List[str]:
     """Return deduplicated Solana token symbols from multiple sources."""
 
@@ -163,7 +196,8 @@ async def get_solana_new_tokens(config: dict) -> List[str]:
         tasks.append(coro)
 
     if not tasks:
-        return []
+        logger.info("No Solana API keys configured, using fallback token sources")
+        return await _fallback_token_discovery(limit)
 
     try:
         # Add timeout to prevent hanging
@@ -197,10 +231,22 @@ async def get_solana_new_tokens(config: dict) -> List[str]:
         )
     except asyncio.TimeoutError:
         logger.warning("GeckoTerminal search timed out after 20 seconds, skipping volume filtering")
-        return [f"{m}/USDC" for m in candidates]
+        # Filter by minimum volume if we have volume data from other sources
+        filtered_candidates = []
+        for mint in candidates:
+            # For now, include all candidates since we can't verify volume without GeckoTerminal
+            if len(filtered_candidates) < limit:
+                filtered_candidates.append(mint)
+        return [f"{m}/USDC" for m in filtered_candidates]
     except Exception as exc:
         logger.error("GeckoTerminal search failed: %s", exc)
-        return [f"{m}/USDC" for m in candidates]
+        # Filter by minimum volume if we have volume data from other sources
+        filtered_candidates = []
+        for mint in candidates:
+            # For now, include all candidates since we can't verify volume without GeckoTerminal
+            if len(filtered_candidates) < limit:
+                filtered_candidates.append(mint)
+        return [f"{m}/USDC" for m in filtered_candidates]
 
     final: list[Tuple[str, float]] = []
     seen: set[str] = set()

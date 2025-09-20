@@ -20,6 +20,7 @@ from .sniper_risk_manager import SniperRiskManager
 from .social_sentiment_analyzer import SocialSentimentAnalyzer, SentimentAnalysis
 from .momentum_detector import MomentumDetector, TokenMomentum
 from .watcher import PoolWatcher, NewPoolEvent
+from .wallet_context import WalletContext
 from ..utils.telemetry import telemetry
 
 logger = logging.getLogger(__name__)
@@ -79,17 +80,34 @@ class PumpSniperOrchestrator:
     - Emergency controls and safeguards
     """
     
-    def __init__(self, config: Dict, dry_run: bool = True, paper_wallet=None):
+    def __init__(
+        self,
+        config: Dict,
+        dry_run: bool = True,
+        paper_wallet=None,
+        wallet_context: Optional[WalletContext] = None,
+    ):
         self.config = config
         self.orchestrator_config = config.get("pump_sniper_orchestrator", {})
         self.dry_run = dry_run
         self.paper_wallet = paper_wallet
+        self.wallet_context = wallet_context
 
         # Core components
         self.pump_detector = PumpDetector(config)
         self.pool_analyzer = LiquidityPoolAnalyzer(config)
-        self.rapid_executor = RapidExecutor(config, dry_run=dry_run, paper_wallet=paper_wallet)
-        self.risk_manager = SniperRiskManager(config, dry_run=dry_run, paper_wallet=paper_wallet)
+        self.rapid_executor = RapidExecutor(
+            config,
+            dry_run=dry_run,
+            paper_wallet=paper_wallet,
+            wallet_context=wallet_context,
+        )
+        self.risk_manager = SniperRiskManager(
+            config,
+            dry_run=dry_run,
+            paper_wallet=paper_wallet,
+            wallet_context=wallet_context,
+        )
         self.sentiment_analyzer = SocialSentimentAnalyzer(config)
         self.momentum_detector = MomentumDetector(config)
         self.pool_watcher = PoolWatcher()

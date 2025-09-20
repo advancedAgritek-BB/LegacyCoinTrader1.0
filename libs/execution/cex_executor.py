@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
+from datetime import datetime
 try:
     import ccxt  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
@@ -17,33 +19,65 @@ ccxtpro = None
 
 from libs.notifications import TelegramNotifier, send_message
 from crypto_bot.utils.notifier import Notifier
-from crypto_bot.execution.kraken_ws import KrakenWSClient
-from crypto_bot.utils.trade_logger import log_trade
+from crypto_bot.utils.single_source_trade_manager import get_single_source_trade_manager, create_trade
 from crypto_bot import tax_logger
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from crypto_bot.utils.trade_logger import log_trade
 
 
 logger = setup_logger(__name__, LOG_DIR / "execution.log")
+
+
+def _get_kraken_ws_client():
+    """Lazy import of KrakenWSClient to avoid circular imports."""
+    try:
+        from crypto_bot.execution.kraken_ws import KrakenWSClient
+        return KrakenWSClient
+    except ImportError:
+        logger.warning("KrakenWSClient not available due to import error")
+        return None
 
 
 # Thread-safe nonce management for Kraken
 import threading
 nonce_lock = threading.Lock()
 last_nonce = 0
+time_sync_failure_count = 0
 
 
 def custom_nonce():
     """Thread-safe custom nonce function for Kraken to prevent nonce errors."""
-    global last_nonce
+    global last_nonce, time_sync_failure_count
     with nonce_lock:
         current_time = int(time.time() * 1000)
-        # Add a small buffer to ensure we're ahead of server time
-        current_time += 100  # 100ms buffer
-        # Ensure nonce is always increasing
+
+        # Add a larger buffer to ensure we're ahead of server time
+        current_time += 500  # 500ms buffer (increased from 100ms)
+
+        # Ensure nonce is always increasing and unique
         if current_time <= last_nonce:
             current_time = last_nonce + 1
+
         last_nonce = current_time
         return current_time
+
+
+def _handle_kraken_time_sync_failure(error: Exception) -> None:
+    """Fallback to local clock when Kraken time sync is unavailable."""
+    global time_sync_failure_count, last_nonce
+    time_sync_failure_count += 1
+    message = (
+        "Could not synchronize time with Kraken server: %s; falling back to local clock"
+        % error
+    )
+    if time_sync_failure_count == 1:
+        logger.warning(message)
+    else:
+        logger.debug(message)
+
+    with nonce_lock:
+        fallback_time = int(time.time() * 1000) + 200
+        last_nonce = max(last_nonce, fallback_time)
 
 
 def setup_kraken_nonce_improvements(exchange, config):
@@ -62,15 +96,15 @@ def setup_kraken_nonce_improvements(exchange, config):
         # Set time synchronization
         time_sync_threshold = kraken_settings.get("time_sync_threshold", 1000)
         exchange.options['timeSyncThreshold'] = time_sync_threshold
-        
+
         # Enable automatic time synchronization
         exchange.options['adjustForTimeDifference'] = True
-        
+
         # Skip server time synchronization in dry-run mode to avoid API calls
         if execution_mode == "dry_run":
             logger.info("Dry-run mode: skipping server time synchronization")
         else:
-            # Try to synchronize time with Kraken server
+            # Try to synchronize time with Kraken server once at setup
             try:
                 server_time = exchange.fetch_time()
                 local_time = int(time.time() * 1000)
@@ -80,9 +114,9 @@ def setup_kraken_nonce_improvements(exchange, config):
                     # Adjust the nonce buffer based on time difference
                     global last_nonce
                     with nonce_lock:
-                        last_nonce = max(last_nonce, server_time + 100)
+                        last_nonce = max(last_nonce, server_time + 1000)  # Larger buffer
             except Exception as e:
-                logger.warning(f"Could not synchronize time with Kraken server: {e}")
+                _handle_kraken_time_sync_failure(e)
 
         logger.info("Applied Kraken nonce improvements: custom nonce function, time sync, and auto-adjustment")
 
@@ -111,7 +145,7 @@ def fetch_balance_with_retry(exchange, max_retries=3):
     return None
 
 
-def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
+def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[object]]:
     """Instantiate and return a ccxt exchange and optional websocket client.
 
     Uses standard ``ccxt`` exchange with enhanced Kraken nonce improvements
@@ -139,7 +173,7 @@ def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
 
     use_ws = config.get("use_websocket", False)
 
-    ws_client: Optional[KrakenWSClient] = None
+    ws_client: Optional[object] = None
     # Prefer generic names, but fall back to Kraken-specific env vars
     api_key = os.getenv("API_KEY") or os.getenv("KRAKEN_API_KEY")
     api_secret = os.getenv("API_SECRET") or os.getenv("KRAKEN_API_SECRET")
@@ -176,11 +210,13 @@ def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
 
         # Create WebSocket client with the exchange that has nonce improvements
         if use_ws:
-            ws_client = KrakenWSClient(api_key, api_secret, ws_token, api_token)
-            # Pass the exchange instance with nonce improvements to the WebSocket client
-            # This ensures the WebSocket client uses the same nonce management as the main exchange
-            ws_client.exchange = exchange
-            logger.info("WebSocket client configured with improved nonce management")
+            KrakenWSClient = _get_kraken_ws_client()
+            if KrakenWSClient:
+                ws_client = KrakenWSClient(api_key, api_secret, ws_token, api_token)
+                # Pass the exchange instance with nonce improvements to the WebSocket client
+                # This ensures the WebSocket client uses the same nonce management as the main exchange
+                ws_client.exchange = exchange
+                logger.info("WebSocket client configured with improved nonce management")
 
         # Add retry method to exchange instance
         exchange.fetch_balance_with_retry = lambda: fetch_balance_with_retry(exchange)
@@ -198,7 +234,7 @@ def get_exchange(config) -> Tuple[ccxt.Exchange, Optional[KrakenWSClient]]:
 
 def execute_trade(
     exchange: ccxt.Exchange,
-    ws_client: Optional[KrakenWSClient],
+    ws_client: Optional[object],
     symbol: str,
     side: str,
     amount: float,
@@ -370,7 +406,25 @@ def execute_trade(
                         order["price"] = 0.0
                 except Exception:
                     order["price"] = 0.0
-            log_trade(order)
+            # Record trade to SingleSourceTradeManager (single source of truth)
+            try:
+                trade_manager = get_single_source_trade_manager()
+                tm_trade = create_trade(
+                    symbol=order.get("symbol", ""),
+                    side=order.get("side", ""),
+                    amount=order.get("amount", 0),
+                    price=order.get("price", 0),
+                    strategy=config.get("strategy", "cex_executor") if config else "cex_executor",
+                    exchange="kraken",  # Default to kraken, can be made configurable
+                    timestamp=datetime.utcnow()
+                )
+                trade_manager.record_trade(tm_trade)
+                logger.info(f"Trade recorded to SingleSourceTradeManager: {tm_trade.id}")
+            except Exception as tm_error:
+                logger.error(f"Failed to record trade to SingleSourceTradeManager: {tm_error}")
+                # Continue with execution even if recording fails
+
+            # Handle tax tracking
             if (config or {}).get("tax_tracking", {}).get("enabled"):
                 try:
                     if order.get("side") == "buy":
@@ -403,8 +457,8 @@ def execute_trade(
 
 
 async def execute_trade_async(
-    exchange: ccxt.Exchange,
-    ws_client: Optional[KrakenWSClient],
+    exchange: Optional[ccxt.Exchange],
+    ws_client: Optional[object],
     symbol: str,
     side: str,
     amount: float,
@@ -448,32 +502,108 @@ async def execute_trade_async(
     if err:
         logger.error("Failed to send message: %s", err)
     if dry_run:
-        order = {"symbol": symbol, "side": side, "amount": amount, "dry_run": True}
+        order_id = f"DRYRUN-{uuid.uuid4().hex[:12]}"
+        order = {
+            "id": order_id,
+            "clientOrderId": order_id,
+            "symbol": symbol,
+            "side": side,
+            "amount": amount,
+            "filled": amount,
+            "remaining": 0.0,
+            "dry_run": True,
+            "status": "filled",
+            "type": "market",
+            "timestamp": int(time.time() * 1000),
+            "info": {
+                "dry_run": True,
+                "score": score,
+            },
+        }
+        hint_price = None
+        if isinstance(config, dict):
+            for key in ("last_price", "price", "close"):
+                value = config.get(key)
+                if isinstance(value, (int, float)):
+                    hint_price = float(value)
+                    break
+        if hint_price is not None:
+            order["price"] = hint_price
     else:
-        try:
-            if score > 0.8 and hasattr(exchange, "create_limit_order"):
-                price = None
-                try:
-                    if asyncio.iscoroutinefunction(getattr(exchange, "fetch_ticker", None)):
-                        t = await exchange.fetch_ticker(symbol)
+        # In dry-run mode, fetch real pricing data but create mock orders only
+        if dry_run:
+            price = None
+            try:
+                if asyncio.iscoroutinefunction(getattr(exchange, "fetch_ticker", None)):
+                    t = await exchange.fetch_ticker(symbol)
+                else:
+                    t = await asyncio.to_thread(exchange.fetch_ticker, symbol)
+                bid = t.get("bid")
+                ask = t.get("ask")
+                if bid and ask:
+                    price = (bid + ask) / 2
+            except Exception as err:
+                logger.warning("Price fetch failed in dry-run: %s", err)
+                price = hint_price  # Fall back to market data service price
+
+            # Create mock order with real pricing data
+            order_id = f"DRYRUN-{uuid.uuid4().hex[:12]}"
+            order = {
+                "id": order_id,
+                "clientOrderId": order_id,
+                "symbol": symbol,
+                "side": side,
+                "amount": amount,
+                "filled": amount,
+                "remaining": 0.0,
+                "dry_run": True,
+                "status": "filled",
+                "type": "market",
+                "timestamp": int(time.time() * 1000),
+                "info": {
+                    "dry_run": True,
+                    "score": score,
+                },
+            }
+            if price:
+                order["price"] = price
+        else:
+            # Live trading - place real orders
+            try:
+                if score > 0.8 and hasattr(exchange, "create_limit_order"):
+                    price = None
+                    try:
+                        if asyncio.iscoroutinefunction(getattr(exchange, "fetch_ticker", None)):
+                            t = await exchange.fetch_ticker(symbol)
+                        else:
+                            t = await asyncio.to_thread(exchange.fetch_ticker, symbol)
+                        bid = t.get("bid")
+                        ask = t.get("ask")
+                        if bid and ask:
+                            price = (bid + ask) / 2
+                    except Exception as err:
+                        logger.warning("Limit price fetch failed: %s", err)
+                    if price:
+                        params = {"postOnly": True}
+                        if config.get("hidden_limit"):
+                            params["hidden"] = True
+                        if asyncio.iscoroutinefunction(getattr(exchange, "create_limit_order", None)):
+                            order = await exchange.create_limit_order(symbol, side, amount, price, params)
+                        else:
+                            order = await asyncio.to_thread(
+                                exchange.create_limit_order, symbol, side, amount, price, params
+                            )
                     else:
-                        t = await asyncio.to_thread(exchange.fetch_ticker, symbol)
-                    bid = t.get("bid")
-                    ask = t.get("ask")
-                    if bid and ask:
-                        price = (bid + ask) / 2
-                except Exception as err:
-                    logger.warning("Limit price fetch failed: %s", err)
-                if price:
-                    params = {"postOnly": True}
-                    if config.get("hidden_limit"):
-                        params["hidden"] = True
-                    if asyncio.iscoroutinefunction(getattr(exchange, "create_limit_order", None)):
-                        order = await exchange.create_limit_order(symbol, side, amount, price, params)
-                    else:
-                        order = await asyncio.to_thread(
-                            exchange.create_limit_order, symbol, side, amount, price, params
-                        )
+                        if use_websocket and ws_client is not None and not ccxtpro:
+                            order = ws_client.add_order(symbol, side, amount, order_type="market")
+                        elif asyncio.iscoroutinefunction(
+                            getattr(exchange, "create_market_order", None)
+                        ):
+                            order = await exchange.create_market_order(symbol, side, amount)
+                        else:
+                            order = await asyncio.to_thread(
+                                exchange.create_market_order, symbol, side, amount
+                            )
                 else:
                     if use_websocket and ws_client is not None and not ccxtpro:
                         order = ws_client.add_order(symbol, side, amount, order_type="market")
@@ -485,42 +615,31 @@ async def execute_trade_async(
                         order = await asyncio.to_thread(
                             exchange.create_market_order, symbol, side, amount
                         )
-            else:
-                if use_websocket and ws_client is not None and not ccxtpro:
-                    order = ws_client.add_order(symbol, side, amount, order_type="market")
-                elif asyncio.iscoroutinefunction(
-                    getattr(exchange, "create_market_order", None)
-                ):
-                    order = await exchange.create_market_order(symbol, side, amount)
+            except Exception as e:  # pragma: no cover - network
+                error_str = str(e).lower()
+
+                # Check for specific error types and provide better diagnostics
+                if "too many requests" in error_str or "429" in error_str or "rate limit" in error_str:
+                    logger.warning(f"Rate limit error for {symbol} {side} {amount}: {e}")
+                    err_msg = notifier.notify(f"\u26a0\ufe0f Rate Limit: Order delayed for {symbol}")
+                elif "insufficient funds" in error_str or "balance" in error_str:
+                    logger.error(f"Insufficient funds for {symbol} {side} {amount}: {e}")
+                    err_msg = notifier.notify(f"\u26a0\ufe0f Insufficient Funds: {symbol} order cancelled")
+                elif "invalid" in error_str and "nonce" in error_str:
+                    logger.warning(f"Nonce error for {symbol} {side} {amount}: {e}")
+                    err_msg = notifier.notify(f"\u26a0\ufe0f Nonce Error: Retrying {symbol} order")
+                    # For nonce errors, we could implement retry logic here
+                    # But for now, just log and return empty to indicate failure
+                elif "minimum" in error_str or "amount" in error_str:
+                    logger.warning(f"Order amount too small for {symbol} {side} {amount}: {e}")
+                    err_msg = notifier.notify(f"\u26a0\ufe0f Amount Too Small: {symbol} order cancelled")
                 else:
-                    order = await asyncio.to_thread(
-                        exchange.create_market_order, symbol, side, amount
-                    )
-        except Exception as e:  # pragma: no cover - network
-            error_str = str(e).lower()
+                    logger.error(f"Unknown order error for {symbol} {side} {amount}: {e}")
+                    err_msg = notifier.notify(f"\u26a0\ufe0f Error: Order failed for {symbol}")
 
-            # Check for specific error types and provide better diagnostics
-            if "too many requests" in error_str or "429" in error_str or "rate limit" in error_str:
-                logger.warning(f"Rate limit error for {symbol} {side} {amount}: {e}")
-                err_msg = notifier.notify(f"\u26a0\ufe0f Rate Limit: Order delayed for {symbol}")
-            elif "insufficient funds" in error_str or "balance" in error_str:
-                logger.error(f"Insufficient funds for {symbol} {side} {amount}: {e}")
-                err_msg = notifier.notify(f"\u26a0\ufe0f Insufficient Funds: {symbol} order cancelled")
-            elif "invalid" in error_str and "nonce" in error_str:
-                logger.warning(f"Nonce error for {symbol} {side} {amount}: {e}")
-                err_msg = notifier.notify(f"\u26a0\ufe0f Nonce Error: Retrying {symbol} order")
-                # For nonce errors, we could implement retry logic here
-                # But for now, just log and return empty to indicate failure
-            elif "minimum" in error_str or "amount" in error_str:
-                logger.warning(f"Order amount too small for {symbol} {side} {amount}: {e}")
-                err_msg = notifier.notify(f"\u26a0\ufe0f Amount Too Small: {symbol} order cancelled")
-            else:
-                logger.error(f"Unknown order error for {symbol} {side} {amount}: {e}")
-                err_msg = notifier.notify(f"\u26a0\ufe0f Error: Order failed for {symbol}")
-
-            if err_msg:
-                logger.error("Failed to send message: %s", err_msg)
-            return {}
+                if err_msg:
+                    logger.error("Failed to send message: %s", err_msg)
+                return {}
     err = notifier.notify(f"Order executed: {order}")
     if err:
         logger.error("Failed to send message: %s", err)
@@ -546,7 +665,24 @@ async def execute_trade_async(
             order["price"] = t.get("last") or t.get("bid") or t.get("ask") or 0.0
         except Exception:
             order["price"] = 0.0
-    log_trade(order)
+    # Record trade to SingleSourceTradeManager (single source of truth)
+    try:
+        trade_manager = get_single_source_trade_manager()
+        tm_trade = create_trade(
+            symbol=order.get("symbol", ""),
+            side=order.get("side", ""),
+            amount=order.get("amount", 0),
+            price=order.get("price", 0),
+            strategy=config.get("strategy", "cex_executor") if config else "cex_executor",
+            exchange="kraken",  # Default to kraken, can be made configurable
+            timestamp=datetime.utcnow()
+        )
+        trade_manager.record_trade(tm_trade)
+        logger.info(f"Trade recorded to SingleSourceTradeManager: {tm_trade.id}")
+    except Exception as tm_error:
+        logger.error(f"Failed to record trade to SingleSourceTradeManager: {tm_error}")
+        # Continue with execution even if recording fails
+
     logger.info(
         "Order executed - id=%s side=%s amount=%s price=%s dry_run=%s",
         order.get("id"),

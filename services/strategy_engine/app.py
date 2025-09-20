@@ -10,9 +10,39 @@ import pandas as pd
 import redis.asyncio as redis
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 
-from services.monitoring.config import get_monitoring_settings
-from services.monitoring.instrumentation import instrument_fastapi_app
-from services.monitoring.logging import configure_logging
+try:
+    from services.monitoring.config import get_monitoring_settings
+    from services.monitoring.instrumentation import instrument_fastapi_app
+    from services.monitoring.logging_compat import configure_logging
+    MONITORING_AVAILABLE = True
+except ImportError:
+    # Fallback when monitoring service is not available
+    MONITORING_AVAILABLE = False
+    
+    class MockMonitoringSettings:
+        def __init__(self):
+            self.log_level = "INFO"
+            self.metrics = MockMetrics()
+        
+        def for_service(self, name):
+            return self
+        
+        def clone(self, **kwargs):
+            return self
+    
+    class MockMetrics:
+        def __init__(self):
+            self.default_labels = {}
+    
+    def get_monitoring_settings():
+        return MockMonitoringSettings()
+    
+    def instrument_fastapi_app(app, settings=None):
+        pass
+    
+    def configure_logging(settings):
+        import logging
+        logging.basicConfig(level=logging.INFO)
 
 from libs.services.interfaces import (
     StrategyBatchRequest,
@@ -20,10 +50,10 @@ from libs.services.interfaces import (
     StrategyEvaluationResult,
 )
 
-from .config import get_settings
-from .engine import StrategyEngine
-from .queue import MarketDataSubscriber
-from .schemas import (
+from config import get_settings
+from engine import StrategyEngine
+from market_data_subscriber import MarketDataSubscriber
+from schemas import (
     BatchEvaluationRequest,
     BatchEvaluationResponse,
     EvaluationResultModel,
@@ -31,13 +61,11 @@ from .schemas import (
     HealthResponse,
     RankedSignalModel,
 )
-from .storage import ModelRegistry
+from storage import ModelRegistry
 
 service_settings = get_settings()
 monitoring_settings = get_monitoring_settings().for_service(service_settings.app_name)
-monitoring_settings = monitoring_settings.model_copy(
-    update={"log_level": service_settings.log_level}
-)
+monitoring_settings = monitoring_settings.clone(log_level=service_settings.log_level)
 monitoring_settings.metrics.default_labels.setdefault("component", "strategy-engine")
 configure_logging(monitoring_settings)
 

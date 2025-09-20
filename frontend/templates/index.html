@@ -850,6 +850,9 @@ function updateOpenPositions() {
     })
     .then(positions => {
       console.log('Positions received:', positions);
+      if (Array.isArray(positions)) {
+        window.positionData = positions.slice();
+      }
       // Position cards removed - no longer displaying individual positions
       
       // Also update wallet PnL when positions change
@@ -873,6 +876,9 @@ function refreshOpenPositions() {
     .then(response => response.json())
     .then(positions => {
       // Position cards removed - no longer displaying individual positions
+      if (Array.isArray(positions)) {
+        window.positionData = positions.slice();
+      }
       if (refreshBtn) {
         refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
         refreshBtn.disabled = false;
@@ -902,12 +908,25 @@ function clearOldPositions() {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-    }
+    },
+    body: JSON.stringify({
+      max_age_hours: 0,
+      symbols: Array.isArray(window.positionData)
+        ? window.positionData.map(pos => pos.symbol).filter(Boolean)
+        : []
+    })
   })
   .then(response => response.json())
   .then(data => {
     if (data.success) {
-      window.LegacyCoinTrader.showToast('Old positions cleared successfully', 'success');
+      const closed = data.closed ?? 0;
+      const symbols = Array.isArray(data.symbols) ? data.symbols.join(', ') : '';
+      const message = closed > 0 ? `Closed ${closed} position${closed === 1 ? '' : 's'}` : 'No stale positions found';
+      if (closed > 0 && Array.isArray(window.positionData)) {
+        const closedSet = new Set(Array.isArray(data.symbols) ? data.symbols : []);
+        window.positionData = window.positionData.filter(pos => !closedSet.has(pos.symbol));
+      }
+      window.LegacyCoinTrader.showToast(symbols ? `${message}: ${symbols}` : message, 'success');
       // Refresh positions after clearing
       setTimeout(() => {
         refreshOpenPositions();

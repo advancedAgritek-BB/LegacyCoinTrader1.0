@@ -61,7 +61,7 @@ class ProductionSymbolValidator:
         """Load patterns for blacklisted symbols."""
         blacklist = {
             "INVALID", "TEST", "DEPRECATED", "DELISTED",
-            "BANNED", "SUSPENDED", "DISABLED"
+            "BANNED", "SUSPENDED", "DISABLED", "UNKNOWN"
         }
 
         # Add regex patterns for problematic symbols
@@ -71,6 +71,8 @@ class ProductionSymbolValidator:
             r"^/.*",  # Symbols starting with slash
             r".*/$",  # Symbols ending with slash
             r".*//.*",  # Multiple slashes
+            r".*INVALID.*",  # Any symbol containing INVALID substring
+            r"^UNKNOWN(/|$).*",  # Symbols with UNKNOWN base indicator
         }
 
         return blacklist.union(patterns)

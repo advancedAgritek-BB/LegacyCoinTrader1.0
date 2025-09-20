@@ -15,7 +15,7 @@ from .config import GatewaySettings
 LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(slots=True)
+@dataclass
 class TokenPayload:
     """Represents authentication context for the current request."""
 

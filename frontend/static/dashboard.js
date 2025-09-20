@@ -1,5 +1,8 @@
 // Dashboard page JS (moved from inline script to comply with CSP)
 
+const LIVE_UPDATE_INTERVAL_MS = 15000;
+let liveUpdatesIntervalId = null;
+
 function showManualPriceModal() {
   const modal = new bootstrap.Modal(document.getElementById('manualPriceModal'));
   modal.show();
@@ -169,7 +172,14 @@ function updateWalletBalance() {
   .catch(() => window.LegacyCoinTrader.showToast('Error updating wallet balance', 'error'));
 }
 
-function startLiveUpdates() { console.log('Live updates initialized'); }
+function startLiveUpdates() {
+  if (liveUpdatesIntervalId) {
+    clearInterval(liveUpdatesIntervalId);
+  }
+  console.log('Live updates initialized');
+  updateDashboard();
+  liveUpdatesIntervalId = setInterval(updateDashboard, LIVE_UPDATE_INTERVAL_MS);
+}
 
 function updateDashboard() {
   fetch('/api/live-updates')
@@ -206,34 +216,158 @@ function updatePaperWalletBalance(balance) {
 }
 
 function updateOpenPositions() {
-  fetch('/api/open-positions')
-    .then(r => r.json())
-    .then(() => { updateWalletPnl?.(); })
-    .catch(err => console.error('Error updating open positions:', err));
+  // Clear existing position cards and repopulate with fresh data
+  return fetch('/api/open-positions')
+    .then(r => {
+      if (!r.ok) {
+        throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+      }
+      return r.json();
+    })
+    .then(positions => {
+      // Clear existing position cards
+      const positionsContainer = document.querySelector('.positions-grid');
+      if (positionsContainer) {
+        // Remove all existing position cards
+        const existingCards = positionsContainer.querySelectorAll('.position-card');
+        existingCards.forEach(card => card.remove());
+
+        // If no positions, show the "no positions" message
+        if (!positions || positions.length === 0) {
+          const noPositionsMsg = positionsContainer.querySelector('.no-positions-message');
+          if (!noPositionsMsg) {
+            const msg = document.createElement('div');
+            msg.className = 'no-positions-message';
+            msg.innerHTML = '<p>No open positions</p>';
+            positionsContainer.appendChild(msg);
+          }
+        } else {
+          // Remove "no positions" message if it exists
+          const noPositionsMsg = positionsContainer.querySelector('.no-positions-message');
+          if (noPositionsMsg) {
+            noPositionsMsg.remove();
+          }
+
+          // Create new position cards
+          positions.forEach(position => {
+            const card = createPositionCard(position);
+            positionsContainer.appendChild(card);
+          });
+        }
+      }
+
+      // Update position count
+      updatePositionCount();
+
+      // Update wallet PnL if function exists
+      if (typeof updateWalletPnl === 'function') {
+        updateWalletPnl();
+      }
+
+      console.log(`Updated ${positions ? positions.length : 0} open positions`);
+    })
+    .catch(err => {
+      console.error('Error updating open positions:', err);
+      // Show error state
+      const positionsContainer = document.querySelector('.positions-grid');
+      if (positionsContainer) {
+        const existingCards = positionsContainer.querySelectorAll('.position-card');
+        existingCards.forEach(card => card.remove());
+
+        const errorMsg = document.createElement('div');
+        errorMsg.className = 'error-message';
+        errorMsg.innerHTML = '<p>Error loading positions. Please try again.</p>';
+        positionsContainer.appendChild(errorMsg);
+      }
+    });
+}
+
+// Helper function to create a position card
+function createPositionCard(position) {
+  const card = document.createElement('div');
+  card.className = 'position-card';
+  card.setAttribute('data-symbol', position.symbol || 'Unknown');
+
+  // Create basic card structure (simplified version)
+  card.innerHTML = `
+    <div class="position-header">
+      <h3>${position.symbol || 'Unknown'}</h3>
+      <span class="position-side ${position.side || 'long'}">${(position.side || 'long').toUpperCase()}</span>
+    </div>
+    <div class="position-details">
+      <div class="position-metric">
+        <span class="metric-label">Amount:</span>
+        <span class="metric-value">${(position.amount || position.size || 0).toFixed(6)}</span>
+      </div>
+      <div class="position-metric">
+        <span class="metric-label">Entry Price:</span>
+        <span class="metric-value">$${(position.entry_price || 0).toFixed(6)}</span>
+      </div>
+      <div class="position-metric">
+        <span class="metric-label">Current P&L:</span>
+        <span class="metric-value ${position.pnl >= 0 ? 'positive' : 'negative'}">
+          ${position.pnl >= 0 ? '+' : ''}$${position.pnl ? position.pnl.toFixed(2) : '0.00'}
+        </span>
+      </div>
+    </div>
+  `;
+
+  return card;
+}
+
+// Helper function to update position count display
+function updatePositionCount() {
+  const positionCards = document.querySelectorAll('.position-card[data-symbol]');
+  const positionCountElement = document.querySelector('.position-count');
+
+  if (positionCountElement) {
+    positionCountElement.textContent = `${positionCards.length} positions`;
+  }
+
+  // Also update the metric value in the header
+  const metricValueElement = document.querySelector('.metric-value.ai-gradient');
+  if (metricValueElement) {
+    metricValueElement.textContent = positionCards.length;
+  }
 }
 
 function refreshOpenPositions() {
   const refreshBtn = document.getElementById('btnRefreshOpenPositions');
   if (refreshBtn) { refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; refreshBtn.disabled = true; }
-  fetch('/api/open-positions')
-    .then(r => r.json())
-    .then(() => {
-      if (refreshBtn) { refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i>'; refreshBtn.disabled = false; }
-    })
-    .catch(() => {
-      if (refreshBtn) { refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i>'; refreshBtn.disabled = false; }
-    });
+  const resetButton = () => {
+    if (refreshBtn) {
+      refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+      refreshBtn.disabled = false;
+    }
+  };
+
+  // Use the updated updateOpenPositions function
+  updateOpenPositions().finally(resetButton);
 }
 
 function clearOldPositions() {
   if (!confirm('Are you sure you want to clear old position entries? This will remove positions older than 24 hours.')) return;
   const clearBtn = document.getElementById('btnClearOldPositions');
   if (clearBtn) { clearBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clearing...'; clearBtn.disabled = true; }
-  fetch('/api/clear-old-positions', { method: 'POST', headers: { 'Content-Type': 'application/json' }})
+  const symbols = Array.isArray(window.positionData)
+    ? window.positionData.map(pos => pos.symbol).filter(Boolean)
+    : [];
+  fetch('/api/clear-old-positions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_age_hours: 0, symbols })
+  })
     .then(r => r.json())
     .then(data => {
       if (data.success) {
-        window.LegacyCoinTrader.showToast('Old positions cleared successfully', 'success');
+        const closed = data.closed ?? 0;
+        const symbols = Array.isArray(data.symbols) ? data.symbols.join(', ') : '';
+        const message = closed > 0 ? `Closed ${closed} position${closed === 1 ? '' : 's'}` : 'No stale positions found';
+        if (closed > 0 && Array.isArray(window.positionData)) {
+          const closedSet = new Set(Array.isArray(data.symbols) ? data.symbols : []);
+          window.positionData = window.positionData.filter(pos => !closedSet.has(pos.symbol));
+        }
+        window.LegacyCoinTrader.showToast(symbols ? `${message}: ${symbols}` : message, 'success');
         setTimeout(() => refreshOpenPositions(), 1000);
       } else {
         window.LegacyCoinTrader.showToast(`Error: ${data.error}`, 'error');
@@ -365,5 +499,3 @@ document.addEventListener('DOMContentLoaded', function() {
     loadPriceSourceHealth(); 
   }, 15000); // Refresh every 15 seconds instead of 30
 });
-
-

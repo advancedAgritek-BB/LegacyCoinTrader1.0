@@ -12,7 +12,7 @@ from libs.execution import get_exchange
 
 from .models import ExchangeCredentials, ExchangeSession
 from .nonce import NonceManager
-from .secrets import SecretLoader
+from .secret_loader import SecretLoader
 
 
 @contextlib.contextmanager

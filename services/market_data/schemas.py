@@ -70,7 +70,7 @@ class OrderBookPayload(BaseExchangePayload):
 
 class OrderBookResponse(BaseModel):
     symbol: str
-    order_book: Mapping[str, Any] | None
+    order_book: Optional[Mapping[str, Any]]
     updated_at: datetime
 
 

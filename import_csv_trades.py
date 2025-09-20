@@ -10,8 +10,8 @@ from datetime import datetime
 from decimal import Decimal
 import uuid
 
-# Add the project root to Python path
-sys.path.insert(0, '/Users/brandonburnette/Downloads/LegacyCoinTrader1.0')
+PROJECT_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from crypto_bot.utils.trade_manager import get_trade_manager, Trade
 
@@ -94,7 +94,8 @@ def import_csv_trades(csv_file_path: str) -> None:
     # Verify the save worked
     print("\nVerifying save...")
     try:
-        with open('/Users/brandonburnette/Downloads/LegacyCoinTrader1.0/crypto_bot/logs/trade_manager_state.json', 'r') as f:
+        state_file = PROJECT_ROOT / 'crypto_bot' / 'logs' / 'trade_manager_state.json'
+        with open(state_file, 'r') as f:
             import json
             saved_state = json.load(f)
             saved_trades = len(saved_state.get('trades', []))
@@ -119,13 +120,13 @@ def import_csv_trades(csv_file_path: str) -> None:
 
 def main():
     """Main function."""
-    csv_path = "/Users/brandonburnette/Downloads/LegacyCoinTrader1.0/crypto_bot/logs/trades.csv"
+    csv_path = PROJECT_ROOT / "crypto_bot" / "logs" / "trades.csv"
 
-    if not Path(csv_path).exists():
+    if not csv_path.exists():
         print(f"CSV file not found: {csv_path}")
         return
 
-    import_csv_trades(csv_path)
+    import_csv_trades(str(csv_path))
 
 if __name__ == "__main__":
     main()

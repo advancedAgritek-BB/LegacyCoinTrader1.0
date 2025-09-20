@@ -6,7 +6,12 @@ from typing import Iterable
 
 import pytest
 
-from frontend.app import app, get_open_positions
+from frontend.app import (
+    ApiGatewayError,
+    POSITION_DUST_THRESHOLD,
+    app,
+    get_open_positions,
+)
 
 
 @pytest.fixture(scope="module")
@@ -63,9 +68,9 @@ def test_get_open_positions_deduplicates_latest_entries(monkeypatch, database_co
     """Ensure duplicate symbols are reduced to their most recent entry."""
 
     sample_rows = [
-        ("BTC/USD", "long", 100.0, 105.0, "2024-01-01T00:00:00Z"),
-        ("ETH/USD", "long", 50.0, 49.0, "2024-01-02T00:00:00Z"),
-        ("BTC/USD", "long", 102.0, 106.0, "2024-01-03T00:00:00Z"),
+        (" btc/usd ", "BUY", 100.0, 105.0, "2024-01-01T00:00:00Z"),
+        ("eth/usd", "long", 50.0, 49.0, "2024-01-02T00:00:00Z"),
+        ("BTC/USD", "LONG", 102.0, 106.0, "2024-01-03T00:00:00Z"),
     ]
     with database_connection:
         database_connection.executemany(
@@ -77,13 +82,55 @@ def test_get_open_positions_deduplicates_latest_entries(monkeypatch, database_co
         "SELECT symbol, side, entry_price, current_price, entry_time FROM positions"
     ).fetchall())
 
-    monkeypatch.setattr("frontend.app.fetch_positions_from_service", lambda: payload)
+    monkeypatch.setattr("frontend.app.get_gateway_json", lambda *_args, **_kwargs: payload)
+    monkeypatch.setattr("frontend.app.post_gateway_json", lambda *_args, **_kwargs: {"results": {}})
 
     positions = get_open_positions()
     assert {p["symbol"] for p in positions} == {"BTC/USD", "ETH/USD"}
     btc = next(item for item in positions if item["symbol"] == "BTC/USD")
     assert btc["entry_price"] == pytest.approx(102.0)
     assert btc["current_price"] == pytest.approx(106.0)
+    assert btc["side"] == "long"
+
+
+def test_get_open_positions_skips_closed_and_dust_positions(monkeypatch):
+    """Positions flagged closed or with dust amounts should be ignored."""
+
+    payload = [
+        {
+            "symbol": "XRP/USD",
+            "side": "long",
+            "total_amount": POSITION_DUST_THRESHOLD / 10,
+            "average_price": 0.55,
+            "current_price": 0.57,
+            "entry_time": "2024-01-04T00:00:00Z",
+        },
+        {
+            "symbol": "ADA/USD",
+            "side": "sell",
+            "total_amount": 25.0,
+            "average_price": 0.45,
+            "current_price": 0.40,
+            "is_open": False,
+            "entry_time": "2024-01-05T00:00:00Z",
+        },
+        {
+            "symbol": "SOL/USD",
+            "side": "short",
+            "total_amount": 3.0,
+            "average_price": 100.0,
+            "current_price": 95.0,
+            "entry_time": "2024-01-06T00:00:00Z",
+        },
+    ]
+
+    monkeypatch.setattr("frontend.app.get_gateway_json", lambda *_args, **_kwargs: payload)
+    monkeypatch.setattr("frontend.app.post_gateway_json", lambda *_args, **_kwargs: {"results": {}})
+
+    positions = get_open_positions()
+    assert [pos["symbol"] for pos in positions] == ["SOL/USD"]
+    assert positions[0]["side"] == "short"
+    assert positions[0]["trend_direction"] == "DOWNWARD"
 
 
 def test_api_open_positions_returns_payload(api_client, monkeypatch):
@@ -113,6 +160,37 @@ def test_api_open_positions_handles_failure(api_client, monkeypatch):
     assert response.status_code == 502
     payload = response.get_json()
     assert payload["error"]
+
+
+def test_api_wallet_balance_returns_summary(api_client, monkeypatch):
+    summary = {
+        "balance": 12500.0,
+        "total_pnl": 2500.0,
+        "realized_pnl": 1000.0,
+        "unrealized_pnl": 1500.0,
+        "initial_balance": 10000.0,
+        "pnl_percentage": 25.0,
+    }
+    monkeypatch.setattr("frontend.app.calculate_wallet_pnl", lambda: summary)
+
+    response = api_client.get("/api/wallet-balance")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["balance"] == summary["balance"]
+    assert payload["total_pnl"] == summary["total_pnl"]
+
+
+def test_api_wallet_balance_handles_gateway_error(api_client, monkeypatch):
+    def _raise():
+        raise ApiGatewayError("down")
+
+    monkeypatch.setattr("frontend.app.calculate_wallet_pnl", lambda: _raise())
+
+    response = api_client.get("/api/wallet-balance")
+    assert response.status_code == 502
+    payload = response.get_json()
+    assert payload["success"] is False
 
 
 def test_api_bot_status_detects_running_process(api_client, monkeypatch):

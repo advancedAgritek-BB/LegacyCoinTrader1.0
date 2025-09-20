@@ -5,14 +5,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt /tmp/requirements.txt
+# Install curl for health checks
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r /tmp/requirements.txt
+    && pip install --no-cache-dir -r requirements.txt
 
 COPY services /app/services
 COPY crypto_bot /app/crypto_bot
 
-WORKDIR /app/services/portfolio
 ENV PYTHONPATH=/app
 
 EXPOSE 8003 50053

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING, List, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -13,6 +14,8 @@ if TYPE_CHECKING:  # pragma: no cover - type checking only
 
 app = FastAPI()
 CONTROLLER: "Optional[TradingBotController]" = None
+
+LOGGER = logging.getLogger(__name__)
 
 
 def get_controller() -> "TradingBotController":
@@ -49,7 +52,10 @@ async def positions() -> List[dict]:
     try:
         payload = await async_get_gateway_json(PORTFOLIO_POSITIONS_PATH)
     except ApiGatewayError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        LOGGER.warning(
+            "Portfolio positions unavailable via gateway: %s", exc, exc_info=False
+        )
+        return []
 
     if payload is None:
         return []

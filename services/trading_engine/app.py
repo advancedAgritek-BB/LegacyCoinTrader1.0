@@ -3,24 +3,18 @@ from __future__ import annotations
 """FastAPI application exposing the trading engine endpoints."""
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Dict, Union
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 import redis.asyncio as redis
 
 from libs.bootstrap import load_config
 
-from services.common.tenant import (
-    TenantContext,
-    TenantContextMiddleware,
-    TenantLimitError,
-    get_tenant_context,
-)
-
 from services.monitoring.config import get_monitoring_settings
-from services.monitoring.logging import configure_logging
+from services.monitoring.logging_compat import configure_logging
 from services.monitoring.instrumentation import instrument_fastapi_app
 
 from .config import Settings, get_settings
@@ -35,6 +29,21 @@ from .clients import (
     build_risk_client,
     build_service_container,
 )
+
+# Import enhanced scanning integration
+try:
+    import sys
+    from pathlib import Path
+    # Add crypto_bot to path
+    crypto_bot_path = Path(__file__).parent.parent.parent / "crypto_bot"
+    if str(crypto_bot_path) not in sys.path:
+        sys.path.insert(0, str(crypto_bot_path))
+    
+    from crypto_bot.enhanced_scan_integration import start_enhanced_scan_integration, stop_enhanced_scan_integration
+    ENHANCED_SCANNING_AVAILABLE = True
+except ImportError as exc:
+    logger.warning(f"Enhanced scan integration not available: {exc}")
+    ENHANCED_SCANNING_AVAILABLE = False
 
 
 monitoring_settings = get_monitoring_settings().for_service(get_settings().app_name)
@@ -66,36 +75,34 @@ async def lifespan(app: FastAPI):
     state_store = RedisCycleStateStore(redis_client, key_prefix=settings.state_key_prefix)
     await state_store.ensure_defaults(settings.default_cycle_interval)
 
-    base_config = load_config()
+    config = load_config()
+    services = build_service_container()
 
-    def build_interface_for_tenant(tenant: TenantContext) -> TradingEngineInterface:
-        tenant_config = tenant.apply_config(base_config)
-        services = build_service_container()
-        risk_manager = build_risk_client(tenant_config.get("risk", {}))
-        paper_wallet = build_paper_wallet_client(tenant_config)
-        position_guard = build_position_guard_client(tenant_config)
-        trade_manager = None
-        portfolio_service = getattr(services, "portfolio", None)
-        if portfolio_service is not None:
-            try:
-                trade_manager = portfolio_service.get_trade_manager()
-            except Exception:  # pragma: no cover - defensive
-                logger.warning(
-                    "Trade manager initialisation failed for tenant %s",
-                    tenant.tenant_id,
-                    exc_info=True,
-                )
-        return TradingEngineInterface(
-            services=services,
-            config=tenant_config,
-            risk_client=risk_manager,
-            paper_wallet=paper_wallet,
-            position_guard=position_guard,
-            trade_manager=trade_manager,
-        )
+    risk_manager = build_risk_client(config.get("risk", {}))
+    logger.info(f"Building paper wallet with config execution_mode: {config.get('execution_mode')}")
+    paper_wallet = build_paper_wallet_client(config)
+    logger.info(f"Paper wallet created: {paper_wallet}")
+    position_guard = build_position_guard_client(config)
+
+    trade_manager = None
+    portfolio_service = getattr(services, "portfolio", None)
+    if portfolio_service is not None:
+        try:
+            trade_manager = portfolio_service.get_trade_manager()
+        except Exception:  # pragma: no cover - defensive
+            logger.warning("Trade manager initialisation failed", exc_info=True)
+
+    interface = TradingEngineInterface(
+        services=services,
+        config=config,
+        risk_client=risk_manager,
+        paper_wallet=paper_wallet,
+        position_guard=position_guard,
+        trade_manager=trade_manager,
+    )
 
     scheduler = CycleScheduler(
-        interface_factory=build_interface_for_tenant,
+        interface=interface,
         state_store=state_store,
         default_interval=settings.default_cycle_interval,
     )
@@ -103,12 +110,59 @@ async def lifespan(app: FastAPI):
     app.state.redis = redis_client
     app.state.scheduler = scheduler
     app.state.settings = settings
-    app.state.base_config = base_config
+    app.state.trading_interface = interface
+    app.state.service_container = services
+
+    auto_start_env = os.getenv("AUTO_START_TRADING") or os.getenv("AUTO_START_TRADING_ENGINE")
+    config_flag = config.get("auto_start_trading")
+    if config_flag is None:
+        should_auto_start = True
+    else:
+        should_auto_start = str(config_flag).strip().lower() not in {"0", "false", "no"}
+    if auto_start_env is not None:
+        should_auto_start = auto_start_env.strip().lower() not in {"0", "false", "no"}
+
+    # Start enhanced scan integration if available
+    enhanced_integration_started = False
+    if ENHANCED_SCANNING_AVAILABLE:
+        try:
+            logger.info("Starting enhanced scan integration...")
+            await start_enhanced_scan_integration(config)
+            enhanced_integration_started = True
+            logger.info("Enhanced scan integration started successfully")
+        except Exception as exc:
+            logger.warning(f"Failed to start enhanced scan integration: {exc}")
+
+    if should_auto_start:
+        try:
+            persisted_state = await state_store.load_state()
+            interval = persisted_state.interval_seconds or settings.default_cycle_interval
+            immediate = persisted_state.last_run_completed_at is None
+            await scheduler.start(
+                interval_seconds=interval,
+                immediate=immediate,
+                metadata={
+                    "source": "auto_start",
+                    "resume": bool(persisted_state.running),
+                },
+            )
+        except Exception:  # pragma: no cover - defensive startup
+            logger.exception("Failed to auto-start trading cycle scheduler")
 
     try:
         yield
     finally:
+        # Stop enhanced scan integration if it was started
+        if enhanced_integration_started and ENHANCED_SCANNING_AVAILABLE:
+            try:
+                logger.info("Stopping enhanced scan integration...")
+                await stop_enhanced_scan_integration()
+                logger.info("Enhanced scan integration stopped")
+            except Exception as exc:
+                logger.warning(f"Error stopping enhanced scan integration: {exc}")
+        
         await scheduler.shutdown()
+        await interface.shutdown()
         await redis_client.close()
 
 
@@ -128,7 +182,6 @@ def get_settings_dependency(request: Request) -> Settings:
 
 app = FastAPI(title="Trading Engine", lifespan=lifespan)
 instrument_fastapi_app(app, settings=monitoring_settings)
-app.add_middleware(TenantContextMiddleware)
 
 
 @app.get("/health")
@@ -136,15 +189,6 @@ async def health() -> Dict[str, str]:
     """Basic health endpoint."""
 
     return {"status": "ok"}
-
-
-@app.get("/health/tenant", response_model=CycleStateResponse)
-async def tenant_health(
-    scheduler: CycleScheduler = Depends(get_scheduler),
-    tenant: TenantContext = Depends(get_tenant_context),
-) -> CycleStateResponse:
-    state = await scheduler.get_state(tenant)
-    return CycleStateResponse.from_state(state)
 
 
 @app.get("/readiness")
@@ -165,61 +209,34 @@ async def readiness(request: Request, settings: Settings = Depends(get_settings_
 async def start_cycle(
     payload: StartCycleRequest,
     scheduler: CycleScheduler = Depends(get_scheduler),
-    tenant: TenantContext = Depends(get_tenant_context),
 ) -> CycleStateResponse:
-    try:
-        state = await scheduler.start(
-            tenant,
-            interval_seconds=payload.interval_seconds,
-            immediate=payload.immediate,
-            metadata=payload.metadata,
-            risk_allocation=payload.risk_allocation,
-        )
-    except TenantLimitError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=str(exc),
-        ) from exc
+    state = await scheduler.start(
+        interval_seconds=payload.interval_seconds,
+        immediate=payload.immediate,
+        metadata=payload.metadata,
+    )
     return CycleStateResponse.from_state(state)
 
 
 @app.post("/cycles/stop", response_model=CycleStateResponse)
-async def stop_cycle(
-    scheduler: CycleScheduler = Depends(get_scheduler),
-    tenant: TenantContext = Depends(get_tenant_context),
-) -> CycleStateResponse:
-    state = await scheduler.stop(tenant)
+async def stop_cycle(scheduler: CycleScheduler = Depends(get_scheduler)) -> CycleStateResponse:
+    state = await scheduler.stop()
     return CycleStateResponse.from_state(state)
 
 
 @app.get("/cycles/status", response_model=CycleStateResponse)
-async def cycle_status(
-    scheduler: CycleScheduler = Depends(get_scheduler),
-    tenant: TenantContext = Depends(get_tenant_context),
-) -> CycleStateResponse:
-    state = await scheduler.get_state(tenant)
+async def cycle_status(scheduler: CycleScheduler = Depends(get_scheduler)) -> CycleStateResponse:
+    state = await scheduler.get_state()
     return CycleStateResponse.from_state(state)
 
 
 @app.post("/cycles/run", response_model=RunCycleResponse)
 async def run_cycle(
     scheduler: CycleScheduler = Depends(get_scheduler),
-    payload: StartCycleRequest | None = None,
-    tenant: TenantContext = Depends(get_tenant_context),
+    payload: Union[StartCycleRequest, None] = None,
 ) -> RunCycleResponse:
     metadata = dict(payload.metadata if payload else {})
-    risk_allocation = payload.risk_allocation if payload else None
-    try:
-        result = await scheduler.run_once(
-            tenant,
-            metadata=metadata,
-            risk_allocation=risk_allocation,
-        )
-    except TenantLimitError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=str(exc),
-        ) from exc
+    result = await scheduler.run_once(metadata=metadata)
     started_at = result.started_at or datetime.now(timezone.utc)
     completed_at = result.completed_at or datetime.now(timezone.utc)
     merged_metadata = {**metadata, **result.metadata}
@@ -234,7 +251,7 @@ async def run_cycle(
 
 
 @app.get("/settings")
-async def service_settings(settings: Settings = Depends(get_settings_dependency)) -> Dict[str, str | int]:
+async def service_settings(settings: Settings = Depends(get_settings_dependency)) -> Dict[str, Union[str, int]]:
     return {
         "app_name": settings.app_name,
         "default_cycle_interval": settings.default_cycle_interval,

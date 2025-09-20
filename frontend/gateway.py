@@ -40,7 +40,30 @@ def _gateway_base_url() -> str:
 
 def _build_url(path: str) -> str:
     base_url = _gateway_base_url()
-    return f"{base_url}/{path.lstrip('/')}"
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    normalised = path if path.startswith("/") else f"/{path}"
+    return f"{base_url}{normalised}"
+
+
+def _build_api_url(path: str) -> str:
+    """Return a fully qualified gateway URL for service calls."""
+
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+
+    normalised = path
+    if not normalised.startswith("/"):
+        normalised = f"/{normalised}"
+
+    if normalised.startswith("/api/"):
+        return _build_url(normalised)
+
+    # Auth endpoints and root health checks live at the gateway root.
+    if normalised.startswith("/auth/") or normalised in {"/auth", "/health"}:
+        return _build_url(normalised)
+
+    return _build_url(f"/api/v1{normalised}")
 
 
 def _session_headers() -> Dict[str, str]:
@@ -78,7 +101,7 @@ def get_gateway_json(
 ) -> Any:
     """Perform a synchronous GET request against the API gateway."""
 
-    url = _build_url(path)
+    url = _build_api_url(path)
     request_headers = {**_session_headers(), **(headers or {})}
     try:
         with httpx.Client(timeout=timeout) as client:
@@ -101,7 +124,7 @@ def post_gateway_json(
 ) -> Any:
     """Perform a synchronous POST request against the API gateway."""
 
-    url = _build_url(path)
+    url = _build_api_url(path)
     request_headers = {**_session_headers(), **(headers or {})}
     try:
         with httpx.Client(timeout=timeout) as client:
@@ -124,7 +147,7 @@ async def async_get_gateway_json(
 ) -> Any:
     """Perform an asynchronous GET request against the API gateway."""
 
-    url = _build_url(path)
+    url = _build_api_url(path)
     request_headers = {**_session_headers(), **(headers or {})}
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -147,7 +170,7 @@ async def async_post_gateway_json(
 ) -> Any:
     """Perform an asynchronous POST request against the API gateway."""
 
-    url = _build_url(path)
+    url = _build_api_url(path)
     request_headers = {**_session_headers(), **(headers or {})}
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:

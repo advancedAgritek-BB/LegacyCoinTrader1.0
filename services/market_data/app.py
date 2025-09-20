@@ -7,20 +7,22 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Mapping, Optional
 
+import pandas as pd
 import redis.asyncio as redis
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
-
-from services.common.tenant import (
-    TenantContext,
-    TenantContextClient,
-    TenantContextMiddleware,
-    TenantNotFoundError,
-    get_tenant_context,
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
 )
 
 from services.monitoring.config import get_monitoring_settings
 from services.monitoring.instrumentation import instrument_fastapi_app
-from services.monitoring.logging import configure_logging
+from services.monitoring.logging_compat import configure_logging
 
 from libs.execution import get_exchange
 from libs.market_data import (
@@ -36,6 +38,7 @@ from libs.market_data import (
 
 from .config import Settings, get_settings
 from .redis_cache import (
+    CANDLE_COLUMNS,
     load_multi_timeframe_cache,
     load_timeframe_cache,
     store_multi_timeframe_cache,
@@ -60,9 +63,7 @@ from .schemas import (
 
 service_settings = get_settings()
 monitoring_settings = get_monitoring_settings().for_service(service_settings.app_name)
-monitoring_settings = monitoring_settings.model_copy(
-    update={"log_level": service_settings.log_level}
-)
+monitoring_settings = monitoring_settings.clone(log_level=service_settings.log_level)
 monitoring_settings.metrics.default_labels.setdefault("component", "market-data")
 configure_logging(monitoring_settings)
 
@@ -79,15 +80,37 @@ def _serialize_event(data: Mapping[str, Any]) -> str:
     return json.dumps(dict(data), default=_json_default)
 
 
-async def _count_namespace_keys(redis_client: redis.Redis, pattern: str) -> int:
-    cursor: int = 0
-    total = 0
-    while True:
-        cursor, keys = await redis_client.scan(cursor=cursor, match=pattern, count=250)
-        total += len(keys)
-        if cursor == 0:
-            break
-    return total
+def _candles_from_dataframe(df: Optional[pd.DataFrame], limit: int) -> list[list[float]]:
+    """Convert a cached OHLCV dataframe into a JSON-friendly list."""
+
+    if df is None or df.empty:
+        return []
+
+    ordered = df.sort_values("timestamp").tail(limit)
+    return [
+        [
+            int(row.timestamp),
+            float(row.open),
+            float(row.high),
+            float(row.low),
+            float(row.close),
+            float(row.volume),
+        ]
+        for row in ordered.itertuples(index=False)
+    ]
+
+
+def _dataframe_from_candles(candles: Iterable[Iterable[float]]) -> pd.DataFrame:
+    """Normalise raw candle data returned by the exchange."""
+
+    data = list(candles or [])
+    if not data:
+        return pd.DataFrame(columns=CANDLE_COLUMNS)
+
+    df = pd.DataFrame(data, columns=CANDLE_COLUMNS)
+    if "timestamp" in df.columns:
+        df["timestamp"] = df["timestamp"].astype(int)
+    return df
 
 
 def _prepare_exchange_config(exchange_id: str, config: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -131,17 +154,33 @@ async def _close_exchange(exchange: Any) -> None:
 
 
 def get_settings_dependency(request: Request) -> Settings:
-    settings: Settings | None = getattr(request.app.state, "settings", None)
+    settings: Optional[Settings] = getattr(request.app.state, "settings", None)
     if settings is None:
         settings = get_settings()
     return settings
 
 
 def get_redis_dependency(request: Request) -> redis.Redis:
-    redis_client: redis.Redis | None = getattr(request.app.state, "redis", None)
+    redis_client: Optional[redis.Redis] = getattr(request.app.state, "redis", None)
     if redis_client is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Redis unavailable")
     return redis_client
+
+
+async def get_redis_client() -> Optional[redis.Redis]:
+    """Get Redis client if available, return None if not."""
+    try:
+        settings = get_settings()
+        redis_client = redis.from_url(
+            settings.redis_dsn(),
+            encoding="utf-8",
+            decode_responses=True,
+            health_check_interval=30,
+        )
+        await redis_client.ping()
+        return redis_client
+    except Exception:
+        return None
 
 
 @asynccontextmanager
@@ -171,7 +210,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Market Data Service", lifespan=lifespan)
 instrument_fastapi_app(app, settings=monitoring_settings)
-app.add_middleware(TenantContextMiddleware)
 
 
 @app.get("/health")
@@ -179,29 +217,166 @@ async def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/health/tenant")
-async def tenant_health(
-    redis_client: redis.Redis = Depends(get_redis_dependency),
-    tenant: TenantContext = Depends(get_tenant_context),
-) -> Dict[str, Any]:
-    ohlcv_pattern = f"{tenant.redis_namespace('ohlcv')}:*"
-    regime_pattern = f"{tenant.redis_namespace('regime')}:*"
-    order_pattern = f"{tenant.redis_namespace('order-book')}:*"
-    symbols_pattern = f"{tenant.redis_namespace('symbols')}:*"
-    ohlcv_keys = await _count_namespace_keys(redis_client, ohlcv_pattern)
-    regime_keys = await _count_namespace_keys(redis_client, regime_pattern)
-    order_book_keys = await _count_namespace_keys(redis_client, order_pattern)
-    symbol_keys = await _count_namespace_keys(redis_client, symbols_pattern)
-    return {
-        "status": "ok",
-        "tenant_id": tenant.tenant_id,
-        "namespaces": {
-            "ohlcv_keys": ohlcv_keys,
-            "regime_keys": regime_keys,
-            "order_book_keys": order_book_keys,
-            "symbols_keys": symbol_keys,
-        },
-    }
+@app.get("/test")
+async def test_endpoint() -> Dict[str, str]:
+    """Simple test endpoint to verify routing is working."""
+    return {"message": "Market data service is working", "timestamp": str(datetime.now(timezone.utc))}
+
+
+@app.post("/batch-candles")
+async def batch_candles(request: Request) -> Dict[str, Any]:
+    """Get candles data for multiple symbols in a single request."""
+    try:
+        data = await request.json()
+        symbols = data.get("symbols", [])
+        limit = data.get("limit", 50)
+        timeframe = data.get("timeframe", "5m")
+        exchange = data.get("exchange", "kraken")
+        force_fresh = data.get("force_fresh", False)
+
+        if not symbols:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Symbols list is required")
+
+        logger.info(f"Batch fetching candles for {len(symbols)} symbols from {exchange}")
+
+        results: Dict[str, Any] = {}
+        settings = get_settings_dependency(request)
+        redis_client = getattr(request.app.state, "redis", None)
+
+        # Seed results with cached candles when available (unless force_fresh is True)
+        cached_frames = {}
+        if redis_client and not force_fresh:
+            try:
+                cached_frames = await load_timeframe_cache(
+                    redis_client,
+                    "ohlcv",
+                    exchange,
+                    timeframe,
+                    symbols,
+                )
+            except Exception as cache_exc:
+                logger.debug("Failed to load cached candles: %s", cache_exc)
+                cached_frames = {}
+
+            for symbol, frame in (cached_frames or {}).items():
+                candles = _candles_from_dataframe(frame, limit)
+                if not candles:
+                    continue
+                results[symbol] = {
+                    "symbol": symbol.upper(),
+                    "exchange": exchange,
+                    "timeframe": timeframe,
+                    "candles": candles,
+                    "count": len(candles),
+                    "source": "cache",
+                }
+
+        symbols_to_fetch = [sym for sym in symbols if sym not in results]
+        frames_to_store: Dict[str, pd.DataFrame] = {}
+        exchange_obj = None
+
+        if symbols_to_fetch:
+            try:
+                exchange_obj, _ = get_exchange({
+                    "exchange": exchange,
+                    "use_websocket": False,
+                })
+            except Exception as exc:
+                logger.error("Unable to create exchange %s: %s", exchange, exc)
+                exchange_obj = None
+
+        if not exchange_obj and symbols_to_fetch:
+            logger.warning("Falling back to mock data for %d symbols (exchange unavailable)", len(symbols_to_fetch))
+            for symbol in symbols_to_fetch:
+                results[symbol] = _generate_fallback_chart_data(symbol, timeframe, limit)
+
+        if exchange_obj:
+            batch_size = 5
+            for i in range(0, len(symbols_to_fetch), batch_size):
+                batch_symbols = symbols_to_fetch[i:i + batch_size]
+                for symbol in batch_symbols:
+                    try:
+                        candles_data = await asyncio.wait_for(
+                            fetch_ohlcv_async(
+                                exchange_obj,
+                                symbol,
+                                timeframe=timeframe,
+                                limit=limit,
+                            ),
+                            timeout=15.0,
+                        )
+
+                        if not candles_data:
+                            results[symbol] = {
+                                "error": f"No data available for {symbol}",
+                            }
+                            continue
+
+                        df = _dataframe_from_candles(candles_data)
+                        candles = _candles_from_dataframe(df, limit)
+                        if not candles:
+                            results[symbol] = {
+                                "error": f"Incomplete data for {symbol}",
+                            }
+                            continue
+
+                        results[symbol] = {
+                            "symbol": symbol.upper(),
+                            "exchange": exchange,
+                            "timeframe": timeframe,
+                            "candles": candles,
+                            "count": len(candles),
+                            "source": "exchange",
+                        }
+
+                        frames_to_store[symbol] = df
+                    except asyncio.TimeoutError as exc:
+                        logger.warning("Timeout fetching candles for %s: %s", symbol, exc)
+                        results[symbol] = _generate_fallback_chart_data(symbol, timeframe, limit)
+                    except Exception as exc:
+                        logger.error("Failed to fetch candles for %s: %s", symbol, exc)
+                        results[symbol] = _generate_fallback_chart_data(symbol, timeframe, limit)
+
+                if i + batch_size < len(symbols_to_fetch):
+                    await asyncio.sleep(0.1)
+
+        if frames_to_store and redis_client:
+            try:
+                await store_timeframe_cache(
+                    redis_client,
+                    "ohlcv",
+                    exchange,
+                    timeframe,
+                    frames_to_store,
+                    settings.cache_ttl_seconds,
+                )
+            except Exception as cache_exc:
+                logger.debug("Unable to cache fetched candles: %s", cache_exc)
+
+        if exchange_obj:
+            await _close_exchange(exchange_obj)
+
+        logger.info(
+            "Batch fetch completed for %d symbols (%d cached, %d fetched)",
+            len(symbols),
+            len([r for r in results.values() if r.get("source") == "cache"]),
+            len([r for r in results.values() if r.get("source") == "exchange"]),
+        )
+        return {
+            "results": results,
+            "total_symbols": len(symbols),
+            "successful_fetches": len([r for r in results.values() if "error" not in r]),
+            "failed_fetches": len([r for r in results.values() if "error" in r])
+        }
+
+    except Exception as exc:
+        logger.error(f"Batch candles request failed: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Batch request failed: {str(exc)}"
+        )
+
+
 
 
 @app.get("/readiness")
@@ -222,7 +397,6 @@ async def load_symbols(
     payload: LoadSymbolsPayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
-    tenant: TenantContext = Depends(get_tenant_context),
 ) -> SymbolListResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
@@ -234,24 +408,15 @@ async def load_symbols(
     finally:
         await _close_exchange(exchange)
     symbols = list(symbols or [])
-    await store_symbols(
-        redis_client,
-        tenant.redis_namespace("symbols"),
-        payload.exchange_id,
-        symbols,
-        settings.cache_ttl_seconds,
-    )
+    await store_symbols(redis_client, payload.exchange_id, symbols, settings.cache_ttl_seconds)
     updated_at = datetime.now(timezone.utc)
     event = {
         "type": "symbols_update",
         "exchange": payload.exchange_id,
         "symbols": symbols,
         "updated_at": updated_at,
-        "tenant_id": tenant.tenant_id,
     }
-    await redis_client.publish(
-        tenant.channel(settings.symbols_channel), _serialize_event(event)
-    )
+    await redis_client.publish(settings.symbols_channel, _serialize_event(event))
     return SymbolListResponse(symbols=symbols, updated_at=updated_at)
 
 
@@ -260,13 +425,12 @@ async def update_ohlcv_endpoint(
     payload: OHLCVUpdatePayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
-    tenant: TenantContext = Depends(get_tenant_context),
 ) -> TimeframeResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
         existing_cache = await load_timeframe_cache(
             redis_client,
-            tenant.redis_namespace("ohlcv"),
+            "ohlcv",
             payload.exchange_id,
             payload.timeframe,
             payload.symbols,
@@ -287,7 +451,7 @@ async def update_ohlcv_endpoint(
 
     serialized = await store_timeframe_cache(
         redis_client,
-        tenant.redis_namespace("ohlcv"),
+        "ohlcv",
         payload.exchange_id,
         payload.timeframe,
         updated_cache,
@@ -300,11 +464,8 @@ async def update_ohlcv_endpoint(
         "timeframe": payload.timeframe,
         "symbols": list(serialized.keys()),
         "updated_at": updated_at,
-        "tenant_id": tenant.tenant_id,
     }
-    await redis_client.publish(
-        tenant.channel(settings.ohlcv_channel), _serialize_event(event)
-    )
+    await redis_client.publish(settings.ohlcv_channel, _serialize_event(event))
     return TimeframeResponse(timeframe=payload.timeframe, data=serialized, updated_at=updated_at)
 
 
@@ -313,7 +474,6 @@ async def update_multi_timeframe(
     payload: MultiOHLCVUpdatePayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
-    tenant: TenantContext = Depends(get_tenant_context),
 ) -> MultiTimeframeResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
@@ -322,7 +482,7 @@ async def update_multi_timeframe(
         all_timeframes = sorted({*base_timeframes, *additional})
         existing_cache = await load_multi_timeframe_cache(
             redis_client,
-            tenant.redis_namespace("ohlcv"),
+            "ohlcv",
             payload.exchange_id,
             all_timeframes,
             payload.symbols,
@@ -345,7 +505,7 @@ async def update_multi_timeframe(
 
     serialized = await store_multi_timeframe_cache(
         redis_client,
-        tenant.redis_namespace("ohlcv"),
+        "ohlcv",
         payload.exchange_id,
         updated,
         settings.cache_ttl_seconds,
@@ -357,11 +517,8 @@ async def update_multi_timeframe(
         "timeframes": list(serialized.keys()),
         "symbols": list({sym for tf in serialized.values() for sym in tf.keys()}),
         "updated_at": updated_at,
-        "tenant_id": tenant.tenant_id,
     }
-    await redis_client.publish(
-        tenant.channel(settings.ohlcv_channel), _serialize_event(event)
-    )
+    await redis_client.publish(settings.ohlcv_channel, _serialize_event(event))
     return MultiTimeframeResponse(timeframes=serialized, updated_at=updated_at)
 
 
@@ -370,7 +527,6 @@ async def update_regime(
     payload: RegimeUpdatePayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
-    tenant: TenantContext = Depends(get_tenant_context),
 ) -> RegimeResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
@@ -379,7 +535,7 @@ async def update_regime(
             return RegimeResponse(timeframes={}, updated_at=datetime.now(timezone.utc))
         existing_cache = await load_multi_timeframe_cache(
             redis_client,
-            tenant.redis_namespace("regime"),
+            "regime",
             payload.exchange_id,
             regime_tfs,
             payload.symbols,
@@ -387,7 +543,7 @@ async def update_regime(
         df_timeframes = payload.df_timeframes or regime_tfs
         df_map = await load_multi_timeframe_cache(
             redis_client,
-            tenant.redis_namespace("ohlcv"),
+            "ohlcv",
             payload.exchange_id,
             df_timeframes,
             payload.symbols,
@@ -409,7 +565,7 @@ async def update_regime(
 
     serialized = await store_multi_timeframe_cache(
         redis_client,
-        tenant.redis_namespace("regime"),
+        "regime",
         payload.exchange_id,
         updated,
         settings.cache_ttl_seconds,
@@ -421,12 +577,89 @@ async def update_regime(
         "timeframes": list(serialized.keys()),
         "symbols": list({sym for tf in serialized.values() for sym in tf.keys()}),
         "updated_at": updated_at,
-        "tenant_id": tenant.tenant_id,
     }
-    await redis_client.publish(
-        tenant.channel(settings.regime_channel), _serialize_event(event)
-    )
+    await redis_client.publish(settings.regime_channel, _serialize_event(event))
     return RegimeResponse(timeframes=serialized, updated_at=updated_at)
+
+
+@app.get("/test-candles")
+async def test_candles() -> Dict[str, Any]:
+    """Test endpoint for candles."""
+    return {
+        "message": "Candles endpoint working",
+        "data": [
+            [1737148800000, 95000, 96000, 94000, 95500, 1250000],
+            [1737149100000, 95500, 96500, 95000, 96200, 1180000],
+        ]
+    }
+
+
+@app.get("/get-candles")
+async def get_candles_data(symbol: str = "BTC/USD", limit: int = 50, timeframe: str = "5m", exchange: str = "kraken") -> Dict[str, Any]:
+    """Get real candles data from exchange."""
+    try:
+        logger.info(f"Fetching real candles for {symbol} from {exchange}")
+
+        # Get exchange instance
+        exchange_obj, _ = get_exchange({
+            'exchange': exchange,
+            'use_websocket': False  # Use REST API for now
+        })
+
+        if not exchange_obj:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Exchange {exchange} not available"
+            )
+
+        # Fetch real OHLCV data
+        candles_data = await fetch_ohlcv_async(
+            exchange_obj,
+            symbol,
+            timeframe=timeframe,
+            limit=limit
+        )
+
+        if not candles_data or len(candles_data) == 0:
+            logger.warning(f"No candle data received for {symbol}")
+            return {
+                "symbol": symbol.upper(),
+                "candles": [],
+                "count": 0,
+                "source": "exchange",
+                "error": "No data available"
+            }
+
+        # Convert to expected format
+        candles = []
+        for candle in candles_data:
+            if len(candle) >= 6:  # timestamp, open, high, low, close, volume
+                candles.append([
+                    int(candle[0]),  # timestamp
+                    float(candle[1]),  # open
+                    float(candle[2]),  # high
+                    float(candle[3]),  # low
+                    float(candle[4]),  # close
+                    float(candle[5])   # volume
+                ])
+
+        logger.info(f"Successfully fetched {len(candles)} candles for {symbol}")
+
+        return {
+            "symbol": symbol.upper(),
+            "exchange": exchange,
+            "timeframe": timeframe,
+            "candles": candles,
+            "count": len(candles),
+            "source": "exchange"
+        }
+
+    except Exception as exc:
+        logger.error(f"Failed to fetch candles for {symbol}: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Unable to fetch real market data: {str(exc)}"
+        )
 
 
 @app.post("/order-book/snapshot", response_model=OrderBookResponse)
@@ -434,7 +667,6 @@ async def order_book_snapshot(
     payload: OrderBookPayload,
     redis_client: redis.Redis = Depends(get_redis_dependency),
     settings: Settings = Depends(get_settings_dependency),
-    tenant: TenantContext = Depends(get_tenant_context),
 ) -> OrderBookResponse:
     exchange = await _create_exchange(payload.exchange_id, payload.config)
     try:
@@ -447,7 +679,6 @@ async def order_book_snapshot(
         await _close_exchange(exchange)
     await store_order_book(
         redis_client,
-        tenant.redis_namespace("order-book"),
         payload.exchange_id,
         payload.symbol,
         order_book or {},
@@ -459,11 +690,8 @@ async def order_book_snapshot(
         "exchange": payload.exchange_id,
         "symbol": payload.symbol,
         "updated_at": updated_at,
-        "tenant_id": tenant.tenant_id,
     }
-    await redis_client.publish(
-        tenant.channel(settings.order_book_channel), _serialize_event(event)
-    )
+    await redis_client.publish(settings.order_book_channel, _serialize_event(event))
     return OrderBookResponse(symbol=payload.symbol, order_book=order_book, updated_at=updated_at)
 
 
@@ -483,18 +711,7 @@ async def websocket_ohlcv(
     symbol: str,
     timeframe: str = "1m",
     limit: int = 100,
-    tenant_id: Optional[str] = None,
 ):
-    candidate_tenant = tenant_id or websocket.headers.get("x-tenant-id")
-    if not candidate_tenant:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-    tenant_client = TenantContextClient()
-    try:
-        tenant = tenant_client.get(candidate_tenant)
-    except TenantNotFoundError:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
     await websocket.accept()
     settings = get_settings()
     exchange = await _create_exchange(exchange_id, {})
@@ -525,7 +742,6 @@ async def websocket_ohlcv(
                     "timeframe": timeframe,
                     "data": candles or [],
                     "fetched_at": datetime.now(timezone.utc).isoformat(),
-                    "tenant_id": tenant.tenant_id,
                 }
                 await websocket.send_text(json.dumps(message))
             except Exception as exc:  # pragma: no cover - runtime failures
@@ -537,6 +753,62 @@ async def websocket_ohlcv(
         logger.info("WebSocket disconnected for %s %s", symbol, timeframe)
     finally:
         await _close_exchange(exchange)
+
+
+def _generate_fallback_chart_data(symbol: str, timeframe: str, limit: int) -> Dict[str, Any]:
+    """Generate fallback mock data for charts when live data is unavailable."""
+    import time
+    import random
+
+    logger.info(f"Generating fallback chart data for {symbol}")
+
+    # Generate mock candles with some realistic price movement
+    base_price = 50000 if "BTC" in symbol.upper() else 3000 if "ETH" in symbol.upper() else 300
+    candles = []
+    current_time = int(time.time() * 1000)
+
+    # Timeframe multipliers (in milliseconds)
+    timeframe_ms = {
+        "1m": 60000,
+        "5m": 300000,
+        "15m": 900000,
+        "1h": 3600000,
+        "4h": 14400000,
+        "1d": 86400000
+    }.get(timeframe, 300000)  # Default to 5m
+
+    for i in range(limit):
+        # Generate some realistic price movement
+        price_change = random.uniform(-0.02, 0.02)  # -2% to +2%
+        open_price = base_price * (1 + random.uniform(-0.1, 0.1))
+        close_price = open_price * (1 + price_change)
+        high_price = max(open_price, close_price) * (1 + random.uniform(0, 0.01))
+        low_price = min(open_price, close_price) * (1 - random.uniform(0, 0.01))
+        volume = random.uniform(1000, 10000)
+
+        candle_time = current_time - (limit - i) * timeframe_ms
+
+        candles.append([
+            candle_time,  # timestamp
+            round(open_price, 2),  # open
+            round(high_price, 2),  # high
+            round(low_price, 2),   # low
+            round(close_price, 2), # close
+            round(volume, 2)       # volume
+        ])
+
+        # Update base price for next candle
+        base_price = close_price
+
+    return {
+        "symbol": symbol.upper(),
+        "exchange": "mock",
+        "timeframe": timeframe,
+        "candles": candles,
+        "count": len(candles),
+        "source": "fallback",
+        "note": "Using mock data - live data unavailable"
+    }
 
 
 __all__ = ["app"]

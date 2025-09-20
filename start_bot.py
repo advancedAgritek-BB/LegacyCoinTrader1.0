@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import asyncio.subprocess
+from asyncio.subprocess import PIPE, STDOUT
 import json
 import logging
 import os
@@ -14,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Awaitable, Callable, Dict, Iterable, Optional, Tuple
 
@@ -27,6 +30,127 @@ if str(PROJECT_ROOT) not in sys.path:
 CRYPTO_ROOT = PROJECT_ROOT / "crypto_bot"
 if str(CRYPTO_ROOT) not in sys.path:
     sys.path.insert(0, str(CRYPTO_ROOT))
+
+
+PUMP_SNIPER_SCRIPT = PROJECT_ROOT / "start_pump_sniper.py"
+PUMP_SNIPER_CONFIG = PROJECT_ROOT / "config" / "pump_sniper_config.yaml"
+
+
+def pump_sniper_enabled() -> bool:
+    """Return True when the pump sniper orchestrator is configured to run."""
+
+    if not PUMP_SNIPER_SCRIPT.exists():
+        return False
+
+    try:
+        with PUMP_SNIPER_CONFIG.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+    except FileNotFoundError:
+        return False
+    except Exception as exc:
+        print(f"⚠️ Unable to read pump sniper configuration: {exc}")
+        return False
+
+    orchestrator_cfg = data.get("pump_sniper_orchestrator", {})
+    return bool(orchestrator_cfg.get("enabled", False))
+
+
+def pump_sniper_live_requested() -> bool:
+    """Return True when live mode was explicitly requested via environment."""
+
+    value = os.environ.get("PUMP_SNIPER_LIVE", "0").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+async def _pump_sniper_output_reader(process: asyncio.subprocess.Process) -> None:
+    """Stream pump sniper logs to stdout for visibility."""
+
+    stdout = process.stdout
+    if stdout is None:
+        await process.wait()
+        return
+
+    try:
+        while True:
+            line = await stdout.readline()
+            if not line:
+                break
+            print(f"🎯 [PUMP] {line.rstrip()}")
+    except Exception as exc:  # pragma: no cover - defensive logging
+        print(f"⚠️ Pump Sniper log stream error: {exc}")
+    finally:
+        await process.wait()
+        code = process.returncode
+        if code not in (0, None):
+            print(f"⚠️ Pump Sniper runtime exited with code {code}")
+        else:
+            print("🎯 Pump Sniper runtime exited cleanly")
+
+
+async def _launch_pump_sniper_process(live_requested: bool) -> Tuple[asyncio.subprocess.Process, asyncio.Task]:
+    """Launch the pump sniper subprocess and return the process and monitor task."""
+
+    command = [
+        sys.executable,
+        str(PUMP_SNIPER_SCRIPT),
+        "--config",
+        str(PROJECT_ROOT / "config.yaml"),
+    ]
+
+    if live_requested:
+        command.append("--live")
+
+    env = os.environ.copy()
+    env.setdefault("PYTHONPATH", f"{PROJECT_ROOT}:{CRYPTO_ROOT}")
+
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=PROJECT_ROOT,
+        env=env,
+        stdout=PIPE,
+        stderr=STDOUT,
+    )
+
+    mode_label = " [LIVE]" if live_requested else ""
+    print(f"✅ Pump Sniper runtime started (PID: {process.pid}){mode_label}")
+
+    monitor_task = asyncio.create_task(_pump_sniper_output_reader(process))
+    return process, monitor_task
+
+
+@asynccontextmanager
+async def pump_sniper_runtime():
+    """Ensure the pump sniper runtime is started alongside the main bot."""
+
+    if not pump_sniper_enabled():
+        print("ℹ️ Pump Sniper runtime disabled or not configured; skipping startup")
+        yield None
+        return
+
+    if not PUMP_SNIPER_SCRIPT.exists():  # Defensive, should be covered by enabled check
+        print(f"⚠️ Pump Sniper script missing: {PUMP_SNIPER_SCRIPT}")
+        yield None
+        return
+
+    live_requested = pump_sniper_live_requested()
+    process, monitor_task = await _launch_pump_sniper_process(live_requested)
+
+    try:
+        yield process
+    finally:
+        if process.returncode is None:
+            print("🛑 Stopping Pump Sniper runtime...")
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                print("⚠️ Pump Sniper runtime did not stop in time, killing...")
+                process.kill()
+                await process.wait()
+
+        if monitor_task:
+            with suppress(asyncio.CancelledError):
+                await monitor_task
 
 
 def set_environment(auto_start: bool = True, non_interactive: bool = True, extra: Optional[Dict[str, str]] = None) -> None:
@@ -373,21 +497,22 @@ async def run_integrated_mode(header_lines: Iterable[str], wait_time: float, **w
     print("Step 2: Waiting for web server to initialize...")
     await asyncio.sleep(wait_time)
 
-    try:
-        print("Step 3: Starting trading bot...")
-        from crypto_bot.main import _main_impl
+    async with pump_sniper_runtime():
+        try:
+            print("Step 3: Starting trading bot...")
+            from crypto_bot.main import _main_impl
 
-        print("🎯 Starting trading bot with integrated monitoring...")
-        print("-" * 60)
-        await _main_impl()
-        print("✅ Bot completed successfully")
-    except KeyboardInterrupt:
-        print("\n🛑 Received shutdown signal")
-    except Exception as exc:
-        print(f"❌ Bot error: {exc}")
-        import traceback
+            print("🎯 Starting trading bot with integrated monitoring...")
+            print("-" * 60)
+            await _main_impl()
+            print("✅ Bot completed successfully")
+        except KeyboardInterrupt:
+            print("\n🛑 Received shutdown signal")
+        except Exception as exc:
+            print(f"❌ Bot error: {exc}")
+            import traceback
 
-        traceback.print_exc()
+            traceback.print_exc()
 
     print("🛑 Shutting down integrated system...")
     print("✅ Shutdown complete")
@@ -457,22 +582,23 @@ async def run_auto_mode() -> None:
     print("Step 3: Waiting for web server to fully initialize...")
     await asyncio.sleep(5)
 
-    try:
-        print("Step 4: Starting trading bot with integrated OHLCV fetching...")
-        from crypto_bot.main import _main_impl
+    async with pump_sniper_runtime():
+        try:
+            print("Step 4: Starting trading bot with integrated OHLCV fetching...")
+            from crypto_bot.main import _main_impl
 
-        print("🎯 Starting trading bot with integrated monitoring...")
-        print("📊 OHLCV fetching will run continuously as part of trading cycles")
-        print("-" * 60)
-        await _main_impl()
-        print("✅ Bot completed successfully")
-    except KeyboardInterrupt:
-        print("\n🛑 Received shutdown signal")
-    except Exception as exc:
-        print(f"❌ Bot error: {exc}")
-        import traceback
+            print("🎯 Starting trading bot with integrated monitoring...")
+            print("📊 OHLCV fetching will run continuously as part of trading cycles")
+            print("-" * 60)
+            await _main_impl()
+            print("✅ Bot completed successfully")
+        except KeyboardInterrupt:
+            print("\n🛑 Received shutdown signal")
+        except Exception as exc:
+            print(f"❌ Bot error: {exc}")
+            import traceback
 
-        traceback.print_exc()
+            traceback.print_exc()
 
     print("🛑 Shutting down integrated system...")
     print("✅ Shutdown complete")
@@ -484,20 +610,21 @@ async def run_trading_bot_only(
     for line in header_lines:
         print(line)
 
-    try:
-        from crypto_bot.main import _main_impl
+    async with pump_sniper_runtime():
+        try:
+            from crypto_bot.main import _main_impl
 
-        print(start_message)
-        print("-" * 60)
-        await _main_impl()
-        print("✅ Bot completed successfully")
-    except KeyboardInterrupt:
-        print("\n🛑 Received shutdown signal")
-    except Exception as exc:
-        print(f"❌ Bot error: {exc}")
-        import traceback
+            print(start_message)
+            print("-" * 60)
+            await _main_impl()
+            print("✅ Bot completed successfully")
+        except KeyboardInterrupt:
+            print("\n🛑 Received shutdown signal")
+        except Exception as exc:
+            print(f"❌ Bot error: {exc}")
+            import traceback
 
-        traceback.print_exc()
+            traceback.print_exc()
 
 
 class InteractiveBotLauncher:

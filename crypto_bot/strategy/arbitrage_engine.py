@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from collections import deque
 import heapq
 
-from crypto_bot.utils.logging import setup_strategy_logger
+from crypto_bot.utils.logging_utils import setup_strategy_logger
 
 logger = setup_strategy_logger("arbitrage_engine")
 

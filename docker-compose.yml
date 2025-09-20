@@ -1,6 +1,9 @@
 ---
 version: '3.8'
 
+x-env-file: &default-env
+  - ./.env
+
 x-hybrid-env: &hybrid-env
   HYBRID_MODE_ENABLED: ${HYBRID_MODE_ENABLED:-false}
   LEGACY_READ_ENABLED: ${LEGACY_READ_ENABLED:-true}
@@ -14,7 +17,6 @@ x-hybrid-env: &hybrid-env
   LEGACY_API_PORT: ${LEGACY_API_PORT:-8080}
   MODERN_API_HOST: ${MODERN_API_HOST:-api-gateway}
   MODERN_API_PORT: ${MODERN_API_PORT:-8000}
-
 services:
   # Shared Redis instance for caching and service discovery
   redis:
@@ -79,21 +81,29 @@ services:
 
   # API Gateway - Entry point for all requests
   api-gateway:
-    build: ./services/api_gateway
+    build:
+      context: .
+      dockerfile: services/api_gateway/Dockerfile
     ports:
       - "8000:8000"
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file: *default-env
     environment:
       <<: *hybrid-env
-      GATEWAY_REDIS_HOST: redis
-      GATEWAY_REDIS_PORT: 6379
-      LEGACY_SERVICE_BASE_URL: ${LEGACY_SERVICE_BASE_URL:-http://legacy-monolith:8080}
-      MODERN_SERVICE_BASE_URL: ${MODERN_SERVICE_BASE_URL:-http://api-gateway:8000}
-      HYBRID_FEATURE_FLAG_SOURCE: ${HYBRID_FEATURE_FLAG_SOURCE:-config}
+      - GATEWAY_REDIS_HOST=redis
+      - GATEWAY_REDIS_PORT=6379
+      - LEGACY_SERVICE_BASE_URL=${LEGACY_SERVICE_BASE_URL:-http://legacy-monolith:8080}
+      - MODERN_SERVICE_BASE_URL=${MODERN_SERVICE_BASE_URL:-http://api-gateway:8000}
+      - HYBRID_FEATURE_FLAG_SOURCE=${HYBRID_FEATURE_FLAG_SOURCE:-config}
+      - PORTFOLIO_DATABASE_URL=postgresql+psycopg2://legacy_user:legacy_password@postgres:5432/legacy_coin_trader
+      - GATEWAY_REQUIRE_AUTH=0
+      - GATEWAY_SERVICE_TOKEN_FRONTEND=insecure-local-token-frontend
     volumes:
-      - ./services/api_gateway:/app
+      - ./microservice_architecture.yaml:/app/microservice_architecture.yaml
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -113,16 +123,31 @@ services:
         condition: service_healthy
       api-gateway:
         condition: service_healthy
+    env_file: *default-env
     environment:
       <<: *hybrid-env
-      TRADING_ENGINE_REDIS_HOST: redis
-      TRADING_ENGINE_REDIS_PORT: 6379
-      TRADING_ENGINE_API_GATEWAY_HOST: api-gateway
-      TRADING_ENGINE_API_GATEWAY_PORT: 8000
-      TRADING_ENGINE_LEGACY_BASE_URL: ${TRADING_ENGINE_LEGACY_BASE_URL:-http://legacy-monolith:8080}
+      - TRADING_ENGINE_REDIS_HOST=redis
+      - TRADING_ENGINE_REDIS_PORT=6379
+      - TRADING_ENGINE_API_GATEWAY_HOST=api-gateway
+      - TRADING_ENGINE_API_GATEWAY_PORT=8000
+      - TRADING_ENGINE_LEGACY_BASE_URL=${TRADING_ENGINE_LEGACY_BASE_URL:-http://legacy-monolith:8080}
+      - PORTFOLIO_SERVICE_HOST=portfolio
+      - MARKET_DATA_SERVICE_HOST=market-data
+      - MARKET_DATA_SERVICE_PORT=8002
+      - STRATEGY_ENGINE_SERVICE_HOST=strategy-engine
+      - EXECUTION_SERVICE_HOST=execution
+      - EXECUTION_SERVICE_URL=http://execution:8006/api/v1/execution
+      - TOKEN_DISCOVERY_SERVICE_HOST=token-discovery
+      - TOKEN_DISCOVERY_SERVICE_URL=http://token-discovery:8005
+      - MONITORING_SERVICE_HOST=monitoring
+      - API_KEY=${API_KEY}
+      - API_SECRET=${API_SECRET}
     volumes:
       - ./services/trading_engine:/app/services/trading_engine
       - ./services/interface_layer:/app/services/interface_layer
+      - ./libs:/app/libs
+      - ./schema:/app/schema
+      - ./crypto_bot:/app/crypto_bot
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
@@ -132,7 +157,9 @@ services:
 
   # Market Data Service - Data acquisition and caching
   market-data:
-    build: ./services/market_data
+    build:
+      context: .
+      dockerfile: services/market_data/Dockerfile
     ports:
       - "8002:8002"
     depends_on:
@@ -140,6 +167,7 @@ services:
         condition: service_healthy
       api-gateway:
         condition: service_healthy
+    env_file: *default-env
     environment:
       <<: *hybrid-env
       MARKET_DATA_REDIS_HOST: redis
@@ -148,8 +176,9 @@ services:
       MARKET_DATA_API_GATEWAY_PORT: 8000
       MARKET_DATA_LEGACY_BASE_URL: ${MARKET_DATA_LEGACY_BASE_URL:-http://legacy-monolith:8080}
     volumes:
-      - ./services/market_data:/app
+      - ./services/market_data:/app/services/market_data
       - ./crypto_bot:/app/crypto_bot  # Mount existing crypto_bot for shared utilities
+      - ./libs:/app/libs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
       interval: 30s
@@ -159,7 +188,9 @@ services:
 
   # Portfolio Service - Position and risk management
   portfolio:
-    build: ./services/portfolio
+    build:
+      context: .
+      dockerfile: services/portfolio/Dockerfile
     ports:
       - "8003:8003"
     depends_on:
@@ -167,16 +198,23 @@ services:
         condition: service_healthy
       api-gateway:
         condition: service_healthy
+    env_file: *default-env
     environment:
       <<: *hybrid-env
-      PORTFOLIO_REDIS_HOST: redis
-      PORTFOLIO_REDIS_PORT: 6379
-      PORTFOLIO_API_GATEWAY_HOST: api-gateway
-      PORTFOLIO_API_GATEWAY_PORT: 8000
-      PORTFOLIO_LEGACY_BASE_URL: ${PORTFOLIO_LEGACY_BASE_URL:-http://legacy-monolith:8080}
+      - PORTFOLIO_REDIS_HOST=redis
+      - PORTFOLIO_REDIS_PORT=6379
+      - PORTFOLIO_API_GATEWAY_HOST=api-gateway
+      - PORTFOLIO_API_GATEWAY_PORT=8000
+      - PORTFOLIO_LEGACY_BASE_URL=${PORTFOLIO_LEGACY_BASE_URL:-http://legacy-monolith:8080}
+      - PORTFOLIO_DATABASE_URL=postgresql+psycopg2://legacy_user:legacy_password@postgres:5432/legacy_coin_trader
+      - OTEL_TRACES_EXPORTER=none
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=none
     volumes:
-      - ./services/portfolio:/app
+      - ./services/portfolio:/app/services/portfolio
       - ./crypto_bot:/app/crypto_bot
+      - ./libs:/app/libs
+      - ./schema:/app/schema
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
       interval: 30s
@@ -186,7 +224,9 @@ services:
 
   # Strategy Engine - Strategy evaluation and routing
   strategy-engine:
-    build: ./services/strategy_engine
+    build:
+      context: .
+      dockerfile: services/strategy_engine/Dockerfile
     ports:
       - "8004:8004"
     depends_on:
@@ -196,6 +236,7 @@ services:
         condition: service_healthy
       market-data:
         condition: service_healthy
+    env_file: *default-env
     environment:
       <<: *hybrid-env
       STRATEGY_ENGINE_REDIS_HOST: redis
@@ -206,8 +247,10 @@ services:
       STRATEGY_ENGINE_MARKET_DATA_PORT: 8002
       STRATEGY_ENGINE_LEGACY_BASE_URL: ${STRATEGY_ENGINE_LEGACY_BASE_URL:-http://legacy-monolith:8080}
     volumes:
-      - ./services/strategy_engine:/app
+      - ./services/strategy_engine:/app/services/strategy_engine
       - ./crypto_bot:/app/crypto_bot
+      - ./libs:/app/libs
+      - ./schema:/app/schema
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
       interval: 30s
@@ -217,7 +260,9 @@ services:
 
   # Token Discovery Service - DEX and token scanning
   token-discovery:
-    build: ./services/token_discovery
+    build:
+      context: .
+      dockerfile: services/token_discovery/Dockerfile
     ports:
       - "8005:8005"
     depends_on:
@@ -227,6 +272,7 @@ services:
         condition: service_healthy
       market-data:
         condition: service_healthy
+    env_file: *default-env
     environment:
       <<: *hybrid-env
       TOKEN_DISCOVERY_REDIS_HOST: redis
@@ -237,8 +283,10 @@ services:
       - TOKEN_DISCOVERY_MARKET_DATA_HOST=market-data
       - TOKEN_DISCOVERY_MARKET_DATA_PORT=8002
     volumes:
-      - ./services/token_discovery:/app
+      - ./services/token_discovery:/app/services/token_discovery
       - ./crypto_bot:/app/crypto_bot
+      - ./libs:/app/libs
+      - ./schema:/app/schema
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
       interval: 30s
@@ -248,7 +296,9 @@ services:
 
   # Execution Service - Order execution and exchange integration
   execution:
-    build: ./services/execution
+    build:
+      context: .
+      dockerfile: services/execution/Dockerfile
     ports:
       - "8006:8006"
     depends_on:
@@ -256,6 +306,7 @@ services:
         condition: service_healthy
       api-gateway:
         condition: service_healthy
+    env_file: *default-env
     environment:
       <<: *hybrid-env
       EXECUTION_REDIS_HOST: redis
@@ -264,9 +315,11 @@ services:
       EXECUTION_API_GATEWAY_PORT: 8000
       EXECUTION_LEGACY_BASE_URL: ${EXECUTION_LEGACY_BASE_URL:-http://legacy-monolith:8080}
     volumes:
-      - ./services/execution:/app
+      - ./services/execution:/app/services/execution
       - ./crypto_bot:/app/crypto_bot
       - ./config:/app/config  # Mount config for exchange credentials
+      - ./libs:/app/libs
+      - ./schema:/app/schema
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
       interval: 30s
@@ -284,6 +337,7 @@ services:
         condition: service_healthy
       api-gateway:
         condition: service_healthy
+    env_file: *default-env
     environment:
       <<: *hybrid-env
       MONITORING_REDIS_HOST: redis
@@ -292,9 +346,11 @@ services:
       MONITORING_API_GATEWAY_PORT: 8000
       MONITORING_LEGACY_BASE_URL: ${MONITORING_LEGACY_BASE_URL:-http://legacy-monolith:8080}
     volumes:
-      - ./services/monitoring:/app
+      - ./services/monitoring:/app/services/monitoring
       - ./crypto_bot:/app/crypto_bot
       - ./logs:/app/logs  # Mount logs for monitoring
+      - ./libs:/app/libs
+      - ./schema:/app/schema
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
       interval: 30s
@@ -304,21 +360,30 @@ services:
 
   # Frontend - Web dashboard (updated to use microservices)
   frontend:
-    build: ./frontend
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     ports:
-      - "5000:5000"
+      - "5050:5000"
     depends_on:
       api-gateway:
         condition: service_healthy
+    env_file: *default-env
     environment:
       <<: *hybrid-env
-      FLASK_ENV: development
-      API_GATEWAY_URL: http://api-gateway:8000
-      LEGACY_BACKEND_URL: ${LEGACY_BACKEND_URL:-http://legacy-monolith:8080}
+      - FLASK_ENV=development
+      - API_GATEWAY_URL=http://api-gateway:8000
+      - LEGACY_BACKEND_URL=${LEGACY_BACKEND_URL:-http://legacy-monolith:8080}
+      - SESSION_SECRET_KEY=local-dev-secret
+      - REDIS_URL=redis://redis:6379
+      - OTEL_TRACES_EXPORTER=none
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=none
     volumes:
-      - ./frontend:/app
-      - ./static:/app/static
-      - ./templates:/app/templates
+      - ./frontend:/app/frontend
+      - ./crypto_bot:/app/crypto_bot
+      - ./libs:/app/libs
+      - ./services:/app/services
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
@@ -326,10 +391,29 @@ services:
       retries: 3
       start_period: 10s
 
+  # Database for identity and user management
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    env_file: *default-env
+    environment:
+      - POSTGRES_DB=legacy_coin_trader
+      - POSTGRES_USER=legacy_user
+      - POSTGRES_PASSWORD=legacy_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U legacy_user -d legacy_coin_trader"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   redis_data:
     driver: local
-  legacy_pg_data:
+  postgres_data:
     driver: local
 
 networks:

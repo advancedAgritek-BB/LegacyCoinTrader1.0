@@ -22,7 +22,7 @@ from crypto_bot.utils.indicator_cache import cache_series
 from crypto_bot.utils.indicators import calculate_atr
 from crypto_bot.utils.volatility import normalize_score_by_volatility
 from crypto_bot.utils.ml_utils import init_ml_or_warn, load_model
-from crypto_bot.utils.logging import setup_strategy_logger
+from crypto_bot.utils.logging_utils import setup_strategy_logger
 
 ML_AVAILABLE = init_ml_or_warn()
 NAME = "range_arb_bot"

@@ -1,6 +1,6 @@
 """Solana DEX execution helpers."""
 
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 import os
 import json
 import base64
@@ -11,6 +11,7 @@ from crypto_bot.utils.notifier import Notifier
 from crypto_bot.execution.solana_mempool import SolanaMempoolMonitor
 from crypto_bot import tax_logger
 from crypto_bot.utils.logger import LOG_DIR, setup_logger
+from crypto_bot.solana.wallet_context import decode_private_key_bytes
 from pathlib import Path
 
 
@@ -35,6 +36,7 @@ async def execute_swap(
     mempool_cfg: Optional[Dict] = None,
     config: Optional[Dict] = None,
     jito_key: Optional[str] = None,
+    wallet_override: Optional[Dict[str, Any]] = None,
 ) -> Dict:
     """Execute a swap on Solana using the Jupiter aggregator."""
 
@@ -115,12 +117,27 @@ async def execute_swap(
     from solana.keypair import Keypair
     from solana.transaction import Transaction
 
-    private_key = os.getenv("SOLANA_PRIVATE_KEY")
-    if not private_key:
-        raise ValueError("SOLANA_PRIVATE_KEY environment variable not set")
+    wallet_override = wallet_override or {}
+    if wallet_override.get("jito_key"):
+        jito_key = wallet_override.get("jito_key")
 
-    keypair = Keypair.from_secret_key(bytes(json.loads(private_key)))
-    rpc_url = os.getenv(
+    private_key_source = wallet_override.get("private_key")
+    if private_key_source is None:
+        private_key_source = os.getenv("SOLANA_PRIVATE_KEY")
+    if not private_key_source:
+        raise ValueError("No Solana private key configured for execution")
+
+    secret_bytes = decode_private_key_bytes(private_key_source)
+    if len(secret_bytes) == 64:
+        keypair = Keypair.from_secret_key(secret_bytes)
+    elif len(secret_bytes) == 32:
+        keypair = Keypair.from_seed(secret_bytes)
+    else:
+        raise ValueError("Unsupported Solana private key length; expected 32 or 64 bytes")
+
+    public_key_str = wallet_override.get("public_key") or str(keypair.public_key)
+
+    rpc_url = wallet_override.get("rpc_url") or os.getenv(
         "SOLANA_RPC_URL",
         f"https://mainnet.helius-rpc.com/?api-key={os.getenv('HELIUS_KEY', '')}",
     )
@@ -185,7 +202,7 @@ async def execute_swap(
         try:
             async with session.post(
                 JUPITER_SWAP_URL,
-                json={"route": route, "userPublicKey": str(keypair.public_key)},
+                json={"route": route, "userPublicKey": public_key_str},
                 timeout=10,
             ) as swap_resp:
                 swap_resp.raise_for_status()

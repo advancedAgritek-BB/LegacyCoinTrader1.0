@@ -1,0 +1,818 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Page Header -->
+    <div class="welcome-section animate-fade-in">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+                <h1 class="welcome-title">
+                    <i class="fas fa-terminal" style="background: linear-gradient(135deg, var(--primary), var(--secondary)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-right: 16px;"></i>
+                    System Logs
+                </h1>
+                <p class="welcome-subtitle">Real-time system log monitoring and analysis</p>
+            </div>
+            <div class="bot-controls">
+                <div class="status-display">
+                    <div class="badge bg-info" id="systemStatus">
+                        <i class="fas fa-heartbeat"></i>
+                        <span>System Online</span>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <button class="btn btn-primary" onclick="refreshAllLogs()">
+                        <i class="fas fa-sync-alt"></i>
+                        Refresh All
+                    </button>
+                    <label style="display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: var(--font-sm);">
+                        <input type="checkbox" id="autoRefresh" checked style="margin: 0;">
+                        Auto-refresh (30s)
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Metrics -->
+    <div class="metrics-grid animate-slide-up">
+        <div class="metric-card">
+            <div class="metric-icon">
+                <i class="fas fa-file-alt"></i>
+            </div>
+            <div class="metric-value" id="totalLogEntries">0</div>
+            <div class="metric-label">Total Log Entries</div>
+            <div class="metric-change info">
+                <i class="fas fa-info-circle"></i>
+                Last 24h
+            </div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-icon">
+                <i class="fas fa-exclamation-triangle"></i>
+            </div>
+            <div class="metric-value" id="errorCount">0</div>
+            <div class="metric-label">Errors</div>
+            <div class="metric-change negative">
+                <i class="fas fa-arrow-down"></i>
+                -12%
+            </div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-icon">
+                <i class="fas fa-bell"></i>
+            </div>
+            <div class="metric-value" id="warningCount">0</div>
+            <div class="metric-label">Warnings</div>
+            <div class="metric-change positive">
+                <i class="fas fa-arrow-up"></i>
+                +5%
+            </div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-icon">
+                <i class="fas fa-clock"></i>
+            </div>
+            <div class="metric-value" id="lastUpdate">Never</div>
+            <div class="metric-label">Last Updated</div>
+            <div class="metric-change info">
+                <i class="fas fa-sync-alt"></i>
+                Live
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Filters -->
+    <div class="card animate-slide-up animate-delay-100">
+        <div class="card-header">
+            <h3 class="card-title">
+                <i class="fas fa-filter"></i>
+                Log Filters & Search
+            </h3>
+        </div>
+        <div class="card-body">
+            <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 16px; align-items: center;">
+                <div class="search-container">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" id="logSearch" class="search-input" placeholder="Search logs..." onkeyup="filterLogs()">
+                </div>
+                <select id="logLevelFilter" onchange="filterLogs()" style="padding: 8px 16px; background: var(--glass-light); border: 1px solid var(--border-secondary); border-radius: var(--radius-md); color: var(--text-primary);">
+                    <option value="">All Levels</option>
+                    <option value="error">Errors</option>
+                    <option value="warning">Warnings</option>
+                    <option value="info">Info</option>
+                    <option value="debug">Debug</option>
+                </select>
+                <button class="btn btn-outline-primary" onclick="clearFilters()">
+                    <i class="fas fa-times"></i>
+                    Clear Filters
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs Grid -->
+    <div class="logs-grid animate-slide-up animate-delay-200" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 24px; margin-top: 24px;">
+        
+        <!-- Trading Engine Logs -->
+        <div class="card log-section">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="status-indicator online" id="tradingEngineStatus"></div>
+                    <h4 class="card-title" style="margin: 0;">
+                        <i class="fas fa-robot"></i>
+                        Trading Engine
+                    </h4>
+                </div>
+                <button class="btn btn-sm btn-outline-primary" onclick="refreshLog('trading_engine')">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="log-content" id="trading-engine-logs">
+                    <div class="log-entry loading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        Loading trading engine logs...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Portfolio Service Logs -->
+        <div class="card log-section">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="status-indicator online" id="portfolioStatus"></div>
+                    <h4 class="card-title" style="margin: 0;">
+                        <i class="fas fa-wallet"></i>
+                        Portfolio Service
+                    </h4>
+                </div>
+                <button class="btn btn-sm btn-outline-primary" onclick="refreshLog('portfolio')">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="log-content" id="portfolio-logs">
+                    <div class="log-entry loading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        Loading portfolio logs...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Market Data Service Logs -->
+        <div class="card log-section">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="status-indicator online" id="marketDataStatus"></div>
+                    <h4 class="card-title" style="margin: 0;">
+                        <i class="fas fa-chart-line"></i>
+                        Market Data
+                    </h4>
+                </div>
+                <button class="btn btn-sm btn-outline-primary" onclick="refreshLog('market_data')">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="log-content" id="market-data-logs">
+                    <div class="log-entry loading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        Loading market data logs...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Strategy Engine Logs -->
+        <div class="card log-section">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="status-indicator online" id="strategyEngineStatus"></div>
+                    <h4 class="card-title" style="margin: 0;">
+                        <i class="fas fa-brain"></i>
+                        Strategy Engine
+                    </h4>
+                </div>
+                <button class="btn btn-sm btn-outline-primary" onclick="refreshLog('strategy_engine')">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="log-content" id="strategy-engine-logs">
+                    <div class="log-entry loading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        Loading strategy engine logs...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Token Discovery Logs -->
+        <div class="card log-section">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="status-indicator online" id="tokenDiscoveryStatus"></div>
+                    <h4 class="card-title" style="margin: 0;">
+                        <i class="fas fa-search"></i>
+                        Token Discovery
+                    </h4>
+                </div>
+                <button class="btn btn-sm btn-outline-primary" onclick="refreshLog('token_discovery')">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="log-content" id="token-discovery-logs">
+                    <div class="log-entry loading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        Loading token discovery logs...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CEX Discovery Logs -->
+        <div class="card log-section">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="status-indicator online" id="cexScannerStatus"></div>
+                    <h4 class="card-title" style="margin: 0;">
+                        <i class="fas fa-exchange-alt"></i>
+                        CEX Listings
+                    </h4>
+                </div>
+                <button class="btn btn-sm btn-outline-primary" onclick="refreshLog('cex_scanner')">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="log-content" id="cex-scanner-logs">
+                    <div class="log-entry loading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        Loading CEX discovery logs...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- API Gateway Logs -->
+        <div class="card log-section">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="status-indicator online" id="apiGatewayStatus"></div>
+                    <h4 class="card-title" style="margin: 0;">
+                        <i class="fas fa-gateway"></i>
+                        API Gateway
+                    </h4>
+                </div>
+                <button class="btn btn-sm btn-outline-primary" onclick="refreshLog('api_gateway')">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="log-content" id="api-gateway-logs">
+                    <div class="log-entry loading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        Loading API gateway logs...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- Enhanced Log Styles -->
+<style>
+.log-content {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    font-family: var(--font-mono);
+    font-size: var(--font-sm);
+    max-height: 400px;
+    overflow-y: auto;
+    line-height: 1.6;
+    position: relative;
+    color: var(--text-secondary);
+}
+
+.log-content::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.log-entry {
+    margin-bottom: var(--space-sm);
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+    word-wrap: break-word;
+    font-size: var(--font-xs);
+    line-height: 1.5;
+    position: relative;
+}
+
+.log-entry:hover {
+    background: rgba(255, 255, 255, 0.05);
+    transform: translateX(2px);
+}
+
+.log-entry.error {
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.1);
+    border-left: 3px solid var(--danger);
+    font-weight: 500;
+}
+
+.log-entry.warning {
+    color: var(--warning);
+    background: rgba(245, 158, 11, 0.1);
+    border-left: 3px solid var(--warning);
+    font-weight: 500;
+}
+
+.log-entry.info {
+    color: var(--info);
+    background: rgba(6, 182, 212, 0.1);
+    border-left: 3px solid var(--info);
+}
+
+.log-entry.success {
+    color: var(--success);
+    background: rgba(16, 185, 129, 0.1);
+    border-left: 3px solid var(--success);
+}
+
+.log-entry.debug {
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+    opacity: 0.8;
+}
+
+.log-entry.loading {
+    text-align: center;
+    color: var(--text-muted);
+    font-style: italic;
+    padding: var(--space-lg);
+}
+
+.log-entry.loading i {
+    margin-right: var(--space-sm);
+    color: var(--primary);
+}
+
+.log-timestamp {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-right: var(--space-sm);
+    opacity: 0.7;
+}
+
+.log-level {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-right: var(--space-sm);
+}
+
+.log-level.error { background: var(--danger); color: white; }
+.log-level.warning { background: var(--warning); color: white; }
+.log-level.info { background: var(--info); color: white; }
+.log-level.debug { background: var(--text-muted); color: white; }
+
+.search-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.search-input {
+    background: var(--glass-light);
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md) var(--space-sm) 40px;
+    color: var(--text-primary);
+    font-size: var(--font-sm);
+    transition: all var(--transition-fast);
+    width: 100%;
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: var(--border-accent);
+    background: var(--glass-secondary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.search-icon {
+    position: absolute;
+    left: var(--space-md);
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+    z-index: 1;
+}
+
+.logs-grid .card {
+    transition: all var(--transition-normal);
+}
+
+.logs-grid .card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.no-logs {
+    text-align: center;
+    padding: var(--space-2xl);
+    color: var(--text-muted);
+}
+
+.no-logs i {
+    font-size: var(--font-3xl);
+    margin-bottom: var(--space-lg);
+    opacity: 0.5;
+}
+
+/* Custom scrollbar for log content */
+.log-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.log-content::-webkit-scrollbar-track {
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+}
+
+.log-content::-webkit-scrollbar-thumb {
+    background: var(--border-secondary);
+    border-radius: 3px;
+    transition: background var(--transition-fast);
+}
+
+.log-content::-webkit-scrollbar-thumb:hover {
+    background: var(--primary);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .logs-grid {
+        grid-template-columns: 1fr !important;
+    }
+    
+    .log-content {
+        max-height: 300px;
+        font-size: var(--font-xs);
+    }
+    
+    .search-container {
+        margin-bottom: var(--space-md);
+    }
+}
+</style>
+
+<!-- Enhanced JavaScript -->
+<script>
+let autoRefreshInterval;
+let autoRefreshEnabled = true;
+let logFilters = {
+    search: '',
+    level: ''
+};
+
+// Log data storage
+let logData = {};
+
+// Initialize page
+document.addEventListener('DOMContentLoaded', function() {
+    initializeLogsPage();
+    setupEventListeners();
+    refreshAllLogs();
+});
+
+function initializeLogsPage() {
+    // Set active nav item
+    const navLinks = document.querySelectorAll('.nav-link');
+    navLinks.forEach(link => {
+        if (link.getAttribute('href') === '/logs') {
+            link.classList.add('active');
+        } else {
+            link.classList.remove('active');
+        }
+    });
+}
+
+function setupEventListeners() {
+    // Auto-refresh toggle
+    const autoRefreshCheckbox = document.getElementById('autoRefresh');
+    if (autoRefreshCheckbox) {
+        autoRefreshCheckbox.addEventListener('change', toggleAutoRefresh);
+        if (autoRefreshCheckbox.checked) {
+            startAutoRefresh();
+        }
+    }
+
+    // Search input
+    const searchInput = document.getElementById('logSearch');
+    if (searchInput) {
+        searchInput.addEventListener('input', debounce(filterLogs, 300));
+    }
+}
+
+// Format log entry with enhanced styling
+function formatLogEntry(line, timestamp = null) {
+    if (!line || line.trim() === '') return '';
+    
+    const classes = [];
+    let level = '';
+    
+    // Detect log level
+    if (line.includes('ERROR') || line.includes('❌') || line.toLowerCase().includes('error')) {
+        classes.push('error');
+        level = 'error';
+    } else if (line.includes('WARNING') || line.includes('⚠️') || line.toLowerCase().includes('warning')) {
+        classes.push('warning');
+        level = 'warning';
+    } else if (line.includes('INFO') || line.includes('✅') || line.toLowerCase().includes('info')) {
+        classes.push('info');
+        level = 'info';
+    } else if (line.includes('DEBUG') || line.includes('🔍') || line.toLowerCase().includes('debug')) {
+        classes.push('debug');
+        level = 'debug';
+    } else if (line.includes('SUCCESS') || line.includes('✅')) {
+        classes.push('success');
+        level = 'info';
+    }
+
+    // Extract timestamp if present
+    const timestampMatch = line.match(/(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})/);
+    const extractedTimestamp = timestampMatch ? timestampMatch[1] : timestamp;
+    
+    // Clean the line (remove timestamp if it was extracted)
+    let cleanLine = line;
+    if (timestampMatch) {
+        cleanLine = line.replace(timestampMatch[0], '').trim();
+    }
+    
+    return `
+        <div class="log-entry ${classes.join(' ')}" data-level="${level}" data-content="${cleanLine.toLowerCase()}">
+            ${extractedTimestamp ? `<span class="log-timestamp">${extractedTimestamp}</span>` : ''}
+            ${level ? `<span class="log-level ${level}">${level.toUpperCase()}</span>` : ''}
+            <span class="log-message">${cleanLine}</span>
+        </div>
+    `;
+}
+
+// Update log content with enhanced display
+function updateLogContent(logType, lines) {
+    const containerId = `${logType.replace(/_/g, '-')}-logs`;
+    const container = document.getElementById(containerId);
+    
+    if (!container) {
+        console.warn(`Log container not found: ${containerId}`);
+        return;
+    }
+
+    // Store log data for filtering
+    logData[logType] = lines || [];
+    
+    if (lines && lines.length > 0) {
+        const formattedEntries = lines
+            .filter(line => line && line.trim() !== '')
+            .map(line => formatLogEntry(line))
+            .filter(entry => entry !== '');
+            
+        if (formattedEntries.length > 0) {
+            container.innerHTML = formattedEntries.join('');
+        } else {
+            container.innerHTML = '<div class="no-logs"><i class="fas fa-file-alt"></i><p>No log entries found</p></div>';
+        }
+    } else {
+        container.innerHTML = '<div class="no-logs"><i class="fas fa-file-alt"></i><p>No log entries found</p></div>';
+    }
+
+    // Apply current filters
+    applyFiltersToContainer(container);
+    
+    // Auto-scroll to bottom
+    container.scrollTop = container.scrollHeight;
+    
+    // Update metrics
+    updateLogMetrics();
+}
+
+// Refresh specific log
+async function refreshLog(logType) {
+    const button = document.querySelector(`button[onclick="refreshLog('${logType}')"]`);
+    if (button) {
+        const icon = button.querySelector('i');
+        if (icon) {
+            icon.classList.add('fa-spin');
+        }
+    }
+
+    try {
+        const response = await fetch('/api/monitoring/logs');
+        const result = await response.json();
+        
+        if (result.success && result.data[logType]) {
+            updateLogContent(logType, result.data[logType]);
+        } else {
+            console.warn(`No data found for log type: ${logType}`);
+        }
+    } catch (error) {
+        console.error(`Error refreshing ${logType} log:`, error);
+        const containerId = `${logType.replace(/_/g, '-')}-logs`;
+        const container = document.getElementById(containerId);
+        if (container) {
+            container.innerHTML = `<div class="log-entry error">Error loading logs: ${error.message}</div>`;
+        }
+    } finally {
+        if (button) {
+            const icon = button.querySelector('i');
+            if (icon) {
+                icon.classList.remove('fa-spin');
+            }
+        }
+    }
+}
+
+// Refresh all logs
+async function refreshAllLogs() {
+    try {
+        const response = await fetch('/api/monitoring/logs');
+        const result = await response.json();
+        
+        if (result.success) {
+            // Update each log type
+            Object.keys(result.data).forEach(logType => {
+                updateLogContent(logType, result.data[logType]);
+            });
+            
+            // Update last update time
+            const lastUpdateElement = document.getElementById('lastUpdate');
+            if (lastUpdateElement) {
+                lastUpdateElement.textContent = new Date().toLocaleTimeString();
+            }
+            
+            // Update system status
+            updateSystemStatus();
+        } else {
+            console.error('Failed to fetch logs:', result.error);
+        }
+    } catch (error) {
+        console.error('Error refreshing all logs:', error);
+    }
+}
+
+// Update system status indicators
+function updateSystemStatus() {
+    // This would typically fetch real status data
+    // For now, we'll assume services are online if we can fetch logs
+    const statusElements = [
+        'tradingEngineStatus', 'portfolioStatus', 'marketDataStatus',
+        'strategyEngineStatus', 'tokenDiscoveryStatus', 'cexScannerStatus',
+        'apiGatewayStatus'
+    ];
+    
+    statusElements.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.className = 'status-indicator online';
+        }
+    });
+}
+
+// Update log metrics
+function updateLogMetrics() {
+    let totalEntries = 0;
+    let errorCount = 0;
+    let warningCount = 0;
+    
+    Object.values(logData).forEach(logs => {
+        if (Array.isArray(logs)) {
+            totalEntries += logs.length;
+            logs.forEach(log => {
+                const logLower = log.toLowerCase();
+                if (logLower.includes('error') || logLower.includes('❌')) {
+                    errorCount++;
+                } else if (logLower.includes('warning') || logLower.includes('⚠️')) {
+                    warningCount++;
+                }
+            });
+        }
+    });
+    
+    // Update metric displays
+    const totalElement = document.getElementById('totalLogEntries');
+    if (totalElement) totalElement.textContent = totalEntries.toLocaleString();
+    
+    const errorElement = document.getElementById('errorCount');
+    if (errorElement) errorElement.textContent = errorCount.toLocaleString();
+    
+    const warningElement = document.getElementById('warningCount');
+    if (warningElement) warningElement.textContent = warningCount.toLocaleString();
+}
+
+// Filter logs based on search and level
+function filterLogs() {
+    const searchInput = document.getElementById('logSearch');
+    const levelFilter = document.getElementById('logLevelFilter');
+    
+    logFilters.search = searchInput ? searchInput.value.toLowerCase() : '';
+    logFilters.level = levelFilter ? levelFilter.value : '';
+    
+    // Apply filters to all log containers
+    document.querySelectorAll('.log-content').forEach(container => {
+        applyFiltersToContainer(container);
+    });
+}
+
+function applyFiltersToContainer(container) {
+    const entries = container.querySelectorAll('.log-entry');
+    
+    entries.forEach(entry => {
+        const content = entry.getAttribute('data-content') || '';
+        const level = entry.getAttribute('data-level') || '';
+        
+        let show = true;
+        
+        // Apply search filter
+        if (logFilters.search && !content.includes(logFilters.search)) {
+            show = false;
+        }
+        
+        // Apply level filter
+        if (logFilters.level && level !== logFilters.level) {
+            show = false;
+        }
+        
+        entry.style.display = show ? 'block' : 'none';
+    });
+}
+
+// Clear all filters
+function clearFilters() {
+    const searchInput = document.getElementById('logSearch');
+    const levelFilter = document.getElementById('logLevelFilter');
+    
+    if (searchInput) searchInput.value = '';
+    if (levelFilter) levelFilter.value = '';
+    
+    logFilters = { search: '', level: '' };
+    filterLogs();
+}
+
+// Auto-refresh functionality
+function toggleAutoRefresh() {
+    const checkbox = document.getElementById('autoRefresh');
+    autoRefreshEnabled = checkbox ? checkbox.checked : false;
+
+    if (autoRefreshEnabled) {
+        startAutoRefresh();
+    } else {
+        stopAutoRefresh();
+    }
+}
+
+function startAutoRefresh() {
+    stopAutoRefresh(); // Clear any existing interval
+    autoRefreshInterval = setInterval(refreshAllLogs, 30000); // 30 seconds
+}
+
+function stopAutoRefresh() {
+    if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+    }
+}
+
+// Utility function for debouncing
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+</script>
+{% endblock %}

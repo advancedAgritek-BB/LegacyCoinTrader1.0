@@ -265,6 +265,7 @@ ESLint and CSS linter directives for Jinja2 template syntax
             border-radius: 4px;
             transition: var(--transition);
             word-wrap: break-word;
+            color: var(--text-primary);
         }
 
         .log-entry:hover {
@@ -289,6 +290,11 @@ ESLint and CSS linter directives for Jinja2 template syntax
             color: var(--info-color);
             background: rgba(78, 205, 196, 0.1);
             border-left: 3px solid var(--info-color);
+        }
+
+        .log-entry:not(.error):not(.warning):not(.info):not(.success):not(.debug) {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.02);
         }
 
         .log-entry.success {

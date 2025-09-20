@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from functools import lru_cache
 from typing import Optional
 
 import logging
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Body, Depends, FastAPI, HTTPException, status
+from pydantic import BaseModel, Field
 
 from services.monitoring.config import get_monitoring_settings
 from services.monitoring.instrumentation import instrument_fastapi_app
-from services.monitoring.logging import configure_logging
+from services.monitoring.logging_compat import configure_logging
 
 from .config import PortfolioConfig
 from .service import PortfolioService
@@ -27,6 +29,15 @@ app = FastAPI(title="Portfolio Service", version="1.0.0")
 instrument_fastapi_app(app, settings=monitoring_settings)
 
 
+class ClosePositionsPayload(BaseModel):
+    max_age_hours: int = Field(default=24, ge=0, description="Close positions older than this many hours")
+    symbols: Optional[list[str]] = Field(
+        default=None,
+        description="Optional explicit list of symbols to close regardless of age",
+    )
+
+
+@lru_cache(maxsize=1)
 def get_service() -> PortfolioService:
     config = PortfolioConfig.from_env()
     logger.debug(
@@ -57,6 +68,49 @@ def post_trade(
     trade: TradeCreate, service: PortfolioService = Depends(get_service)
 ) -> PositionRead:
     return service.record_trade(trade)
+
+
+@app.post("/trades/batch")
+def post_trades_batch(
+    trades: list[TradeCreate], service: PortfolioService = Depends(get_service)
+) -> dict:
+    """Batch create multiple trades."""
+    created_count = 0
+    errors = []
+
+    for i, trade in enumerate(trades):
+        try:
+            service.record_trade(trade)
+            created_count += 1
+        except Exception as e:
+            logger.error(f"Failed to create trade {trade.id}: {e}")
+            errors.append({
+                "index": i,
+                "trade_id": getattr(trade, 'id', f"trade_{i}"),
+                "error": str(e)
+            })
+
+    response = {
+        "created": created_count,
+        "total": len(trades),
+        "errors": errors
+    }
+
+    # Return appropriate status code based on results
+    if errors and created_count == 0:
+        # All trades failed
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=response
+        )
+    elif errors:
+        # Some trades failed, some succeeded - use 207 Multi-Status
+        response["status"] = "partial_success"
+        # FastAPI doesn't directly support 207, so we'll use 200 with status info
+        return response
+    else:
+        # All trades succeeded
+        return response
 
 
 @app.get("/positions", response_model=list[PositionRead])
@@ -91,6 +145,27 @@ def get_pnl(
     return service.compute_pnl(symbol)
 
 
+@app.get("/statistics")
+def get_statistics(service: PortfolioService = Depends(get_service)) -> dict:
+    """Get portfolio statistics."""
+    return service.get_statistics_summary()
+
+
 @app.get("/risk", response_model=list)
 def get_risk(service: PortfolioService = Depends(get_service)) -> list:
     return [result.model_dump() for result in service.check_risk_limits()]
+
+
+@app.post("/positions/close-stale")
+def close_stale_positions(
+    payload: ClosePositionsPayload = Body(default=None),
+    service: PortfolioService = Depends(get_service),
+) -> dict:
+    if payload is None:
+        payload = ClosePositionsPayload()
+
+    result = service.close_stale_positions(
+        max_age_hours=payload.max_age_hours,
+        symbols=payload.symbols,
+    )
+    return {"success": True, **result}

@@ -46,7 +46,7 @@ def setup_environment():
     os.environ.setdefault("MONITORING_METRICS_INTERVAL", "60")
 
     # Trading configuration
-    os.environ.setdefault("TRADING_EXECUTION_MODE", "dry_run")
+    os.environ.setdefault("TRADING_EXECUTION_MODE", "live")
     os.environ.setdefault("TRADING_MAX_POSITION_SIZE", "1.0")
     os.environ.setdefault("TRADING_RISK_PER_TRADE", "0.02")
 

@@ -41,7 +41,43 @@ class ServiceRouteConfig:
         return f"{base}/{cleaned}" if cleaned else base
 
 
-@dataclass(slots=True)
+@dataclass
+class TLSConfig:
+    """TLS/SSL configuration for HTTPS support."""
+
+    enabled: bool = False
+    cert_file: Optional[str] = None
+    key_file: Optional[str] = None
+    ca_file: Optional[str] = None
+    ssl_version: str = "TLSv1.2"
+    ciphers: Optional[str] = None
+
+    def is_valid(self) -> bool:
+        """Check if TLS configuration is valid."""
+        if not self.enabled:
+            return True
+        return bool(self.cert_file and self.key_file and Path(self.cert_file).exists() and Path(self.key_file).exists())
+
+
+@dataclass
+class ServiceTokenConfig:
+    """Configuration for service-to-service authentication."""
+
+    enabled: bool = True
+    token_rotation_days: int = 30
+    token_length: int = 64
+    allowed_services: List[str] = field(default_factory=lambda: [
+        "trading-engine",
+        "portfolio",
+        "market-data",
+        "strategy-engine",
+        "execution",
+        "token-discovery",
+        "monitoring"
+    ])
+
+
+@dataclass
 class GatewaySettings:
     """Runtime configuration for the API gateway service."""
 
@@ -89,6 +125,8 @@ class GatewaySettings:
     audit_service_token_header: str
     audit_event_source: str
     audit_service_timeout: float
+    tls: TLSConfig = field(default_factory=TLSConfig)
+    service_auth: ServiceTokenConfig = field(default_factory=ServiceTokenConfig)
 
     @property
     def cors_origins(self) -> List[str]:
@@ -302,6 +340,7 @@ def load_gateway_settings() -> GatewaySettings:
     service_routes = _load_service_routes(default_rate_limit)
     resolved_tokens = {name: config.service_token or "" for name, config in service_routes.items()}
 
+<<<<<<< Updated upstream
     identity_service_url = os.getenv("IDENTITY_SERVICE_URL", "http://identity:8006").rstrip("/")
     identity_jwks_url = os.getenv("IDENTITY_JWKS_URL") or f"{identity_service_url}/.well-known/jwks.json"
     identity_service_token = os.getenv("IDENTITY_SERVICE_TOKEN") or resolved_tokens.get("identity")
@@ -391,3 +430,25 @@ def load_gateway_settings() -> GatewaySettings:
         audit_service_timeout=audit_service_timeout,
     )
 
+    environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+    allow_insecure_defaults = os.getenv("GATEWAY_ALLOW_INSECURE_DEFAULTS", "0").strip().lower() in {"1", "true", "yes"}
+
+    if not allow_insecure_defaults and environment not in {"development", "dev", "test"}:
+        if settings.jwt_secret == "change-me" or not settings.jwt_secret:
+            raise RuntimeError(
+                "GATEWAY_JWT_SECRET must be explicitly configured for non-development environments"
+            )
+
+        insecure_services = [
+            name
+            for name, route in service_routes.items()
+            if (route.service_token or "").startswith("insecure-local-token-")
+        ]
+        if insecure_services:
+            joined = ", ".join(sorted(insecure_services))
+            raise RuntimeError(
+                "Service tokens for the following services must be configured before deployment: "
+                + joined
+            )
+
+    return settings

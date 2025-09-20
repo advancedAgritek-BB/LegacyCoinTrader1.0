@@ -59,9 +59,9 @@ KRAKEN_RATE_LIMIT_CONFIG = {
 
 # GeckoTerminal rate limiting configuration
 GECKO_RATE_LIMIT_CONFIG = {
-    'max_concurrent': 3,  # Reduced from 25 to prevent rate limiting
-    'requests_per_minute': 20,  # Conservative limit for GeckoTerminal
-    'rate_limit_backoff': 60,  # 60 seconds backoff on 429 errors
+    'max_concurrent': 5,  # Increased from 3 to handle more concurrent requests
+    'requests_per_minute': 30,  # Increased from 20 to match GeckoTerminal limits
+    'rate_limit_backoff': 30,  # Reduced from 60 to 30 seconds for faster recovery
 }
 
 OHLCV_FETCH_CONFIG = CircuitBreakerConfig(
@@ -1624,74 +1624,145 @@ async def fetch_geckoterminal_ohlcv(
 
     from urllib.parse import quote_plus
 
-    # Validate symbol before making any requests
     try:
         token_mint, quote = symbol.split("/", 1)
     except ValueError:
         token_mint, quote = symbol, ""
-    if quote != "USDC":
+
+    if quote and quote.upper() != "USDC":
         return None
     if not _is_valid_base_token(token_mint):
         return None
 
+    def _safe_float(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    async def _resolve_pool_metadata(session: aiohttp.ClientSession) -> Optional[Tuple[str, float, float, float]]:
+        """Return ``(pool_addr, volume, reserve, price)`` for ``token_mint``."""
+
+        query = quote_plus(token_mint)
+        search_url = (
+            "https://api.geckoterminal.com/api/v2/search/tokens"
+            f"?query={query}&network=solana&include=top_pools"
+        )
+
+        async with session.get(search_url, timeout=10) as resp:
+            if resp.status == 404:
+                logger.info("pair not available on GeckoTerminal: %s", symbol)
+                return None
+            resp.raise_for_status()
+            search_data = await resp.json()
+
+        items = search_data.get("data") or []
+        if not items:
+            logger.info("pair not available on GeckoTerminal: %s", symbol)
+            return None
+
+        included_lookup: Dict[str, Mapping[str, Any]] = {}
+        for entry in search_data.get("included") or []:
+            if isinstance(entry, Mapping):
+                entry_id = entry.get("id")
+                if entry_id:
+                    included_lookup[entry_id] = entry
+
+        pool_id: Optional[str] = None
+        pool_attrs: Mapping[str, Any] | None = None
+
+        for item in items:
+            if not isinstance(item, Mapping):
+                continue
+            relationships = item.get("relationships") or {}
+            if isinstance(relationships, Mapping):
+                top_pools = relationships.get("top_pools") or {}
+                pool_refs = top_pools.get("data") if isinstance(top_pools, Mapping) else None
+                if isinstance(pool_refs, list):
+                    for ref in pool_refs:
+                        if not isinstance(ref, Mapping):
+                            continue
+                        ref_id = ref.get("id")
+                        if not ref_id:
+                            continue
+                        pool_id = str(ref_id)
+                        included_entry = included_lookup.get(pool_id)
+                        if isinstance(included_entry, Mapping):
+                            pool_attrs = included_entry.get("attributes")
+                        break
+            if pool_id:
+                break
+
+            attributes = item.get("attributes") if isinstance(item, Mapping) else None
+            if isinstance(attributes, Mapping):
+                most_liquid = attributes.get("most_liquid_pair_base") or attributes.get("most_liquid_pair")
+                if isinstance(most_liquid, Mapping):
+                    candidate = most_liquid.get("pool_id") or most_liquid.get("id")
+                    if candidate:
+                        pool_id = str(candidate)
+                        pool_attrs = most_liquid
+                        break
+
+        if not pool_id:
+            logger.info("pair not available on GeckoTerminal: %s", symbol)
+            return None
+
+        pool_addr = pool_id.split("/")[-1]
+
+        if not pool_attrs:
+            pool_url = (
+                "https://api.geckoterminal.com/api/v2/networks/solana/pools/"
+                f"{pool_addr}"
+            )
+            async with session.get(pool_url, timeout=10) as resp:
+                resp.raise_for_status()
+                pool_data = await resp.json()
+            pool_attrs = (
+                (pool_data.get("data") or {}).get("attributes")
+                if isinstance(pool_data, Mapping)
+                else {}
+            )
+
+        volume_attr = pool_attrs.get("volume_usd") if isinstance(pool_attrs, Mapping) else None
+        if isinstance(volume_attr, Mapping):
+            volume = _safe_float(volume_attr.get("h24"))
+        else:
+            volume = _safe_float(volume_attr)
+            if volume == 0.0 and isinstance(pool_attrs, Mapping):
+                volume = _safe_float(pool_attrs.get("volume_usd_h24"))
+
+        if volume < float(min_24h_volume):
+            return None
+
+        reserve = _safe_float(pool_attrs.get("reserve_in_usd") if isinstance(pool_attrs, Mapping) else 0.0)
+        price = _safe_float(
+            pool_attrs.get("base_token_price_quote_token") if isinstance(pool_attrs, Mapping) else 0.0
+        )
+
+        return pool_addr, volume, reserve, price
+
     volume = 0.0
     reserve = 0.0
     price = 0.0
-    data = {}
-    is_cached = False
+    data: Mapping[str, Any] | dict = {}
 
-    # Use semaphore to limit concurrent API calls
     async with GECKO_SEMAPHORE:
         backoff = 1
         rate_limit_count = 0
-        for attempt in range(5):  # Increased max attempts
+        is_cached = False
+        for attempt in range(5):
             cached = GECKO_POOL_CACHE.get(symbol)
-            is_cached = cached is not None and cached[4] == limit
+            cache_valid = cached is not None and cached[4] == limit
+            is_cached = cache_valid
             try:
                 async with aiohttp.ClientSession() as session:
-                    if cached is None:
-                        query = quote_plus(symbol)
-                        search_url = (
-                            "https://api.geckoterminal.com/api/v2/search/pools"
-                            f"?query={query}&network=solana"
-                        )
-
-                        async with session.get(search_url, timeout=10) as resp:
-                            if resp.status == 404:
-                                logger.info(
-                                    "pair not available on GeckoTerminal: %s", symbol
-                                )
-                                return None
-                            resp.raise_for_status()
-                            search_data = await resp.json()
-
-                        items = search_data.get("data") or []
-                        if not items:
-                            logger.info("pair not available on GeckoTerminal: %s", symbol)
+                    if cache_valid:
+                        pool_addr, volume, reserve, price, _ = cached
+                    else:
+                        metadata = await _resolve_pool_metadata(session)
+                        if metadata is None:
                             return None
-
-                        first = items[0]
-                        attrs = (
-                            first.get("attributes", {}) if isinstance(first, dict) else {}
-                        )
-
-                        pool_id = str(first.get("id", ""))
-                        pool_addr = pool_id.split("_", 1)[-1]
-                        try:
-                            volume = float(attrs.get("volume_usd", {}).get("h24", 0.0))
-                        except Exception:
-                            volume = 0.0
-                        if volume < float(min_24h_volume):
-                            return None
-                        try:
-                            price = float(attrs.get("base_token_price_quote_token", 0.0))
-                        except Exception:
-                            price = 0.0
-                        try:
-                            reserve = float(attrs.get("reserve_in_usd", 0.0))
-                        except Exception:
-                            reserve = 0.0
-
+                        pool_addr, volume, reserve, price = metadata
                         GECKO_POOL_CACHE[symbol] = (
                             pool_addr,
                             volume,
@@ -1699,8 +1770,6 @@ async def fetch_geckoterminal_ohlcv(
                             price,
                             limit,
                         )
-                    else:
-                        pool_addr, volume, reserve, price, _ = cached
 
                     ohlcv_url = (
                         "https://api.geckoterminal.com/api/v2/networks/solana/pools/"
@@ -1712,25 +1781,32 @@ async def fetch_geckoterminal_ohlcv(
                         data = await resp.json()
                 break
             except aiohttp.ClientResponseError as exc:  # pragma: no cover - network
-                if exc.status == 429:  # Rate limited
+                if exc.status == 429:
                     rate_limit_count += 1
-                    if rate_limit_count >= 2:  # If rate limited twice, use longer backoff
-                        logger.warning("GeckoTerminal rate limit exceeded for %s, using extended backoff", symbol)
-                        await asyncio.sleep(GECKO_RATE_LIMIT_CONFIG['rate_limit_backoff'])
+                    if rate_limit_count >= 2:
+                        logger.warning(
+                            "GeckoTerminal rate limit exceeded for %s, using extended backoff",
+                            symbol,
+                        )
+                        await asyncio.sleep(GECKO_RATE_LIMIT_CONFIG["rate_limit_backoff"])
                     else:
-                        await asyncio.sleep(min(backoff * 2, 30))  # Cap at 30 seconds
+                        await asyncio.sleep(min(backoff * 2, 30))
                     continue
-                elif exc.status == 404:
+                if exc.status == 404:
                     logger.info("pair not available on GeckoTerminal: %s", symbol)
                     return None
-                else:
-                    logger.warning("GeckoTerminal HTTP error %d for %s: %s", exc.status, symbol, exc)
-                    if attempt == 4:  # Final attempt
-                        return None
-                    await asyncio.sleep(backoff)
-                    backoff *= 2
+                logger.warning(
+                    "GeckoTerminal HTTP error %d for %s: %s",
+                    exc.status,
+                    symbol,
+                    exc,
+                )
+                if attempt == 4:
+                    return None
+                await asyncio.sleep(backoff)
+                backoff *= 2
             except Exception as exc:  # pragma: no cover - network
-                if attempt == 4:  # Final attempt (increased from 2)
+                if attempt == 4:
                     logger.error("GeckoTerminal OHLCV error for %s: %s", symbol, exc)
                     return None
                 await asyncio.sleep(backoff)
@@ -1949,6 +2025,16 @@ async def fetch_dex_ohlcv(
                             pass
                 if data and not isinstance(data, Exception):
                     return data
+
+    if is_solana_contract_address(base):
+        mapped_symbol = map_solana_contract_to_symbol(base)
+        if mapped_symbol:
+            mapped_pair = f"{mapped_symbol}/{quote}" if quote else mapped_symbol
+            mapped_data = await fetch_ohlcv_async(exchange, mapped_pair, timeframe, limit=limit)
+            if mapped_data and not isinstance(mapped_data, Exception):
+                return mapped_data
+        # Avoid spamming the CEX fallback with raw contract addresses
+        return None
 
     data = await fetch_ohlcv_async(exchange, symbol, timeframe, limit=limit)
     if isinstance(data, Exception):
@@ -2562,8 +2648,7 @@ INVALID_KRAKEN_SYMBOLS = {
     'FXS/USD', 'GAIA/USD', 'GAIA/EUR', 'CRV/USD',
     'FWOG/USD', 'FWOG/EUR', 'FORTH/USD', 'IP/USD', 'AI16Z/USD',
     'SAPIEN/USD', 'CFG/USD', 'CRO/USDT',
-    'CRO/EUR', 'BCH/EUR', 'ARB/EUR',
-    'ADA/USD', 'AAVE/USD'
+    'CRO/EUR', 'BCH/EUR', 'ARB/EUR'
 }
 
 # Mapping of Solana contract addresses to standard symbols
@@ -2666,12 +2751,20 @@ def is_valid_kraken_symbol(symbol: str) -> bool:
     if symbol in INVALID_KRAKEN_SYMBOLS:
         return False
 
-    # For Kraken, symbols should not have slashes
-    if '/' in symbol:
+    # Basic format validation - Kraken supports BTC/USD format
+    if len(symbol) < 3:
         return False
 
-    # Basic format validation
-    if len(symbol) < 3:
+    # Must have proper BASE/QUOTE format
+    if '/' not in symbol:
+        return False
+
+    parts = symbol.split('/')
+    if len(parts) != 2:
+        return False
+
+    base, quote = parts
+    if not base or not quote:
         return False
 
     # Check for common invalid patterns

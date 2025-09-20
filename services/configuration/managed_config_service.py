@@ -129,7 +129,7 @@ class ManagedSecretsClient:
         self,
         manifest: ManagedSecretsManifest,
         *,
-        env: Mapping[str, str] | None = None,
+        env: Union[Mapping[str, str], None] = None,
     ) -> None:
         self._manifest = manifest
         self._env = env or os.environ
@@ -213,7 +213,7 @@ class ManagedConfigService:
         *,
         manifest: ManagedSecretsManifest | None = None,
         manifest_path: Path | None = None,
-        env: Mapping[str, str] | None = None,
+        env: Union[Mapping[str, str], None] = None,
     ) -> None:
         if manifest is None:
             manifest = load_manifest(manifest_path)
